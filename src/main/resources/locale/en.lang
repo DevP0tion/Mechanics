@@ -1,6 +1,7 @@
-// TODO(confirm): the English name is a plain translation of 공학 작업대 and needs user confirmation.
 [object]
 engineeringworkbench=Engineering Workbench
+// Mineral walls (8-2): <bar> is the vanilla bar item's name (MineralWallObject).
+mineralwall=<bar> Wall
 
 [tech]
 engineering=Engineering Workbench

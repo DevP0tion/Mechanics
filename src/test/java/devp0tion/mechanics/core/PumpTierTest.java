@@ -1,6 +1,6 @@
 package devp0tion.mechanics.core;
 
-/** PumpTier rules (11-3, 11-7, 11-8, 12-1, 12-5, 12-6, N1-2, N3-2, N3-3). */
+/** PumpTier rules (11-3, 11-7, 11-8, 12-1, 12-5, 12-6, N1-2, N3-2, N3-3, N6-1 to N6-4). */
 final class PumpTierTest {
 
     private PumpTierTest() {
@@ -60,9 +60,31 @@ final class PumpTierTest {
     }
 
     public static void testManualPumpValues() {
-        Check.equal(20, PumpTier.MANUAL_UNITS_PER_CLICK);
-        Check.equal(2 * FluidUnits.BUCKET, PumpTier.MANUAL_UNITS_PER_CLICK, "two buckets per click");
-        Check.equal(20, PumpTier.MANUAL_CLICK_COOLDOWN_TICKS);
+        Check.equal(20, PumpTier.MANUAL.getUnitsPerCycle(), "units per click (N3-2)");
+        Check.equal(2 * FluidUnits.BUCKET, PumpTier.MANUAL.getUnitsPerCycle(), "two buckets per click");
+        Check.equal(20, PumpTier.MANUAL.getCycleTicks(), "click cooldown (N3-3)");
+        Check.throwsException(IllegalStateException.class, PumpTier.MANUAL::getLogBurnTicks);
+    }
+
+    public static void testFirePumpValues() {
+        Check.equal(20, PumpTier.FIRE.getUnitsPerCycle(), "N6-1");
+        Check.equal(20, PumpTier.FIRE.getCycleTicks(), "N6-1");
+        Check.equal(100, PumpTier.FIRE.getLogBurnTicks(), "one log = 5 s (N6-2)");
+        Check.equal(100, PumpTier.FIRE.getUnitsPerLog(), "100 per log (N6-2)");
+    }
+
+    public static void testAdvancedFirePumpValues() {
+        Check.equal(40, PumpTier.ADVANCED_FIRE.getUnitsPerCycle(), "twice the fire pump (N6-3)");
+        Check.equal(20, PumpTier.ADVANCED_FIRE.getCycleTicks(), "N6-3");
+        Check.equal(100, PumpTier.ADVANCED_FIRE.getLogBurnTicks(), "same fuel as the fire pump (N6-4)");
+        Check.equal(200, PumpTier.ADVANCED_FIRE.getUnitsPerLog(), "200 per log (N6-4)");
+    }
+
+    public static void testElectricPumpValuesAreUndecided() {
+        Check.isFalse(PumpTier.ELECTRIC.hasDecidedValues(), "ELECTRIC undecided");
+        Check.isTrue(PumpTier.MANUAL.hasDecidedValues(), "MANUAL decided");
+        Check.throwsException(UnsupportedOperationException.class, PumpTier.ELECTRIC::getUnitsPerCycle);
+        Check.throwsException(UnsupportedOperationException.class, PumpTier.ELECTRIC::getCycleTicks);
     }
 
 }

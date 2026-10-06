@@ -16,6 +16,9 @@ import java.util.List;
  *     nothing on it.</li>
  *     <li>Capacity = interior cells x 40 x the lowest capacity multiplier among the border's
  *     mineral walls.</li>
+ *     <li>Two tanks may share wall cells, but a controller may not sit in a shared wall: placing
+ *     a controller that would belong to two tanks at once is rejected (N8-1,
+ *     {@link #canPlaceController}).</li>
  * </ul>
  */
 public final class TankStructure {
@@ -189,9 +192,39 @@ public final class TankStructure {
         } else if (found.size() == 1) {
             status = TankSearchResult.Status.FOUND;
         } else {
-            status = TankSearchResult.Status.AMBIGUOUS;
+            status = TankSearchResult.Status.CONTROLLER_IN_SHARED_WALL;
         }
         return new TankSearchResult(status, found);
+    }
+
+    /**
+     * The search {@link #findTank} would give if a controller were placed at ({@code tileX},
+     * {@code tileY}) without changing anything else (the floor under it is kept). Nothing is
+     * placed; {@code lookup} is only read.
+     */
+    public static TankSearchResult findTankIfControllerPlaced(final int tileX, final int tileY,
+                                                              final TankCellLookup lookup) {
+        TankCell current = lookup.getCell(tileX, tileY);
+        final TankCell controller = TankCell.of(CellKind.CONTROLLER)
+                .withTankFloor(current != null && current.isTankFloor());
+        return findTank(tileX, tileY, new TankCellLookup() {
+            @Override
+            public TankCell getCell(int x, int y) {
+                return x == tileX && y == tileY ? controller : lookup.getCell(x, y);
+            }
+        });
+    }
+
+    /**
+     * Placement check for a tank controller (N8-1), for the controller object's canPlace: tanks
+     * may share wall cells, but a controller may not sit in a shared wall. Returns {@code false}
+     * when the controller, once placed, would be recognized as part of two (or more) tanks at once
+     * ({@link TankSearchResult.Status#CONTROLLER_IN_SHARED_WALL}). Every other placement is allowed,
+     * including one that forms no tank yet.
+     */
+    public static boolean canPlaceController(int tileX, int tileY, TankCellLookup lookup) {
+        return findTankIfControllerPlaced(tileX, tileY, lookup).getStatus()
+                != TankSearchResult.Status.CONTROLLER_IN_SHARED_WALL;
     }
 
     /**

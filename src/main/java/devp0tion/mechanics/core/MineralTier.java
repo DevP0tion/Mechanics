@@ -7,7 +7,8 @@ import java.util.OptionalInt;
  * The order is the pickaxe mining-power order (8-4) with nightsteel and spiderite appended
  * after ancientfossil (N4-3), so {@link #ordinal()} is the tier order.
  *
- * <p>Mineral walls themselves are not implemented yet; this enum only holds their data.
+ * <p>The game objects are {@code objects.MineralWallObject} (walls); pipes use the same tiers
+ * ({@link PipeTierRules}).
  */
 public enum MineralTier {
 

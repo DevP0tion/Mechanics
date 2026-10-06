@@ -1,5 +1,7 @@
 [object]
 engineeringworkbench=공학 작업대
+// Mineral walls (8-2): <bar> is the vanilla bar item's name (MineralWallObject).
+mineralwall=<bar> 벽
 
 [tech]
 engineering=공학 작업대

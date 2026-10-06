@@ -16,11 +16,18 @@ public final class TankSearchResult {
         /** The given tile does not hold a controller. */
         NOT_A_CONTROLLER,
         /**
-         * More than one valid rectangle has the controller in its border (for example two tanks
-         * that share the wall holding the controller). The rules do not say which one wins.
-         * TODO(design): decide how a controller shared by several valid rectangles is resolved.
+         * More than one valid rectangle has the controller in its border: the controller sits in a
+         * wall shared by two tanks. Tanks may share walls, but a controller may not sit in a shared
+         * wall (N8-1), so no tank is recognized ({@link #getTank()} is {@code null}).
+         *
+         * <p>Placing a controller that would end up like this is rejected beforehand
+         * ({@link TankStructure#canPlaceController}). This status can still occur when another
+         * change (a wall, valve, glass block or floor tile) completes a second tank around an
+         * existing controller.
+         * TODO(design): N8-1 only rejects controller placement; decide whether such other
+         * placements are rejected too, or what the tanks do (currently: neither is recognized).
          */
-        AMBIGUOUS
+        CONTROLLER_IN_SHARED_WALL
     }
 
     private final Status status;
@@ -40,7 +47,7 @@ public final class TankSearchResult {
         return status == Status.FOUND ? candidates.get(0) : null;
     }
 
-    /** Every valid rectangle found (one when FOUND, several when AMBIGUOUS, none otherwise). */
+    /** Every valid rectangle found (one when FOUND, several when CONTROLLER_IN_SHARED_WALL, none otherwise). */
     public List<TankValidation> getCandidates() {
         return candidates;
     }
