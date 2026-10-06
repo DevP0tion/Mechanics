@@ -45,19 +45,19 @@
 | 칸당 기본 용량 | 40 (N4-1) |
 | nightsteel·spiderite 위력 비교 방법 (8-7) | — (순서로 대체, N4-3) |
 
-| 광물 벽 | 티어 = 채굴 위력 (8-4) | 배율 |
-| --- | --- | --- |
-| copper | 65 | 1 (N4-2) |
-| iron | 80 | 2 (N4-2) |
-| gold | 95 | 3 (N4-2) |
-| demonic | 125 | 5 (N4-2) |
-| ivy | 155 | 8 (N4-2) |
-| tungsten | 185 | 12 (N4-2) |
-| glacial | 200 | 17 (N4-2) |
-| mycelium | 230 | 23 (N4-2) |
-| ancientfossil | 245 | 30 (N4-2) |
-| nightsteel | — (순서로 대체, N4-3) | 38 (N4-2) |
-| spiderite | — (순서로 대체, N4-3) | 47 (N4-2) |
+| 광물 벽 | 티어 = 채굴 위력 (8-4) | 배율 | 벽 채굴 티어 |
+| --- | --- | --- | --- |
+| copper | 65 | 1 (N4-2) | 0 (N5-1) |
+| iron | 80 | 2 (N4-2) | 0 (N5-1) |
+| gold | 95 | 3 (N4-2) | 0 (N5-1) |
+| demonic | 125 | 5 (N4-2) | 2 (N5-1) |
+| ivy | 155 | 8 (N4-2) | 4 (N5-1) |
+| tungsten | 185 | 12 (N4-2) | 6 (N5-1) |
+| glacial | 200 | 17 (N4-2) | 7 (N5-1) |
+| mycelium | 230 | 23 (N4-2) | 9 (N5-1) |
+| ancientfossil | 245 | 30 (N4-2) | 10 (N5-1) |
+| nightsteel | — (순서로 대체, N4-3) | 38 (N4-2) | 10 (N5-2) |
+| spiderite | — (순서로 대체, N4-3) | 47 (N4-2) | 10 (N5-2) |
 
 ### 2. 파이프 티어 (9-2, 9-10, 9-11)
 
@@ -74,8 +74,8 @@
 | glacial | 200 | **`미정`** | **`미정`** | **`미정`** | **`미정`** |
 | mycelium | 230 | **`미정`** | **`미정`** | **`미정`** | **`미정`** |
 | ancientfossil | 245 | **`미정`** | **`미정`** | **`미정`** | **`미정`** |
-| nightsteel | **`미정`** (8-7) | **`미정`** | **`미정`** | **`미정`** | **`미정`** |
-| spiderite | **`미정`** (8-7) | **`미정`** | **`미정`** | **`미정`** | **`미정`** |
+| nightsteel | 순서상 ancientfossil 뒤 (N4-3) | **`미정`** | **`미정`** | **`미정`** | **`미정`** |
+| spiderite | 순서상 ancientfossil 뒤 (N4-3) | **`미정`** | **`미정`** | **`미정`** | **`미정`** |
 
 기체 자체는 범위 밖 (TODO, 12-3).
 
@@ -141,6 +141,11 @@
 - N4-2. 광물 벽 배율: copper 1을 기준으로, copper→iron→gold는 +1씩, demonic부터는 증가값이 +2, +3, …으로 1씩 커짐. 결과(정수): copper 1, iron 2, gold 3, demonic 5, ivy 8, tungsten 12, glacial 17, mycelium 23, ancientfossil 30, nightsteel 38, spiderite 47.
 - N4-3. nightsteel·spiderite는 ancientfossil 뒤에 nightsteel → spiderite 순으로 이어짐. 1차 결정 8-7(무기 피해 비교로 위력 값 정함)은 이 순서로 대체되어 위력 값이 필요 없음.
 - N4-4. (정리) 용량 = 내부 칸 수 × 40 × 테두리 광물 벽 중 가장 낮은 배율 (8-1, N4-1, N4-2). 예: copper 1칸 = 40, spiderite 25칸 = 47,000.
+- N5-1. 광물 벽 자체를 캘 때 필요한 곡괭이 티어 = 그 광물 곡괭이의 티어(toolTier): copper 0, iron 0, gold 0, demonic 2, ivy 4, tungsten 6, glacial 7, mycelium 9, ancientfossil 10 (S5).
+- N5-2. 곡괭이가 없는 nightsteel·spiderite 벽의 채굴 티어 = ancientfossil과 같음(10).
+- N5-3. 모드 버전(mod.info): 0.1.0.
+- N5-4. 모드 설명 문구(mod.info): "A mechanical engineering mod: pump, pipe and store fluids in multiblock tanks."
+- N5-5. 구현 1차 범위(사용자 결정): 프로젝트 뼈대 + 게임과 독립된 핵심 로직·테스트 + 공학 작업대. 광물 벽·탱크 부품·파이프·펌프 오브젝트는 이후.
 
 ## 미결 목록
 
