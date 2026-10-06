@@ -49,6 +49,7 @@
 - **S8.** 오브젝트는 `canPlaceOnLiquid` 값을 켜면 액체 타일 위에 놓을 수 있음(`GameObject.canPlace`의 "liquid" 검사).
 - **S9.** 바닐라에 통나무 아무거나(anylog)를 연료로 쓰는 오브젝트 엔티티가 있음(`AnyLogFueledInventoryObjectEntity`, `AnyLogFueledProcessingTechInventoryObjectEntity`).
 - **S10.** 해수/담수는 타일 종류가 아니라 위치로 정해짐: 같은 `watertile`이라도 `LiquidManager.isSaltWater(x, y)`(해안 거리 기반 계산)로 구분됨.
+- **S11.** 바닐라 작업대 계열(제작 기술 `RecipeTechRegistry`): 1 workstationduo(통나무 10, 손 제작 가능) → 2 demonicworkstationduo(demonicbar 5) → 3 tungstenworkstation(tungstenbar 8, quartz 4) → 4 fallenworkstation(upgradeshard 15, alchemyshard 15). 그 밖에 forge, carpentersbench, landscapingstation, ironanvil, alchemytable, 요리·가공(cookingpot 등), 데모닉·텅스텐·폴른 계열 모루·연금술대·목공대·조경대, transmutationstation이 있음. 모드는 자체 제작 기술(Tech)과 작업대를 등록할 수 있음(ExampleMod의 ExampleModTech·ExampleWorkstationObject).
 
 ## 멀티블럭 탱크 구조 규칙 (사용자 정의, 규칙 빈틈 해소)
 
@@ -69,10 +70,11 @@
 
 - 파이프 전용 새 오브젝트 레이어 (9-1)
 - 기본 파이프와 같은 칸에 겹치면 연결 (9-5)
+- 같은 칸 기본↔지하 연결은 렌치 가운데 우클릭으로 끊거나 이음(12-8)
 - 탱크 밸브와는 같은 칸일 때만 연결, 펌프와는 연결 안 됨 (9-9)
-- 파이프 철거 도구 또는 지하 파이프 아이템을 들었을 때만 보임(9-6, 10-6)
+- 렌치 또는 지하 파이프 아이템을 들었을 때만 보임(9-6, 10-6)
 - 별도 아이템으로 배치 (10-3)
-- 파이프 철거 도구로만 철거, 곡괭이 불가(10-1, 10-5)
+- 렌치로만 철거, 곡괭이 불가(10-1, 10-5)
 - 벽·오브젝트·액체 타일 아래 어디든 지나감 (10-4)
 
 ## 유체 규칙 (사용자 정의, 규칙 빈틈 해소)
