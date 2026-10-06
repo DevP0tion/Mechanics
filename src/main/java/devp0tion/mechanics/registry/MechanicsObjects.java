@@ -2,7 +2,11 @@ package devp0tion.mechanics.registry;
 
 import devp0tion.mechanics.core.MineralTier;
 import devp0tion.mechanics.objects.EngineeringWorkbenchObject;
+import devp0tion.mechanics.objects.GlassBlockObject;
 import devp0tion.mechanics.objects.MineralWallObject;
+import devp0tion.mechanics.objects.TankControllerObject;
+import devp0tion.mechanics.objects.TankValveObject;
+import necesse.engine.registries.ObjectRegistry;
 
 import java.awt.Color;
 import java.util.EnumMap;
@@ -16,6 +20,15 @@ public final class MechanicsObjects {
     /** Engineering workbench (공학 작업대) stringID; also its item's stringID. */
     public static final String ENGINEERING_WORKBENCH = "engineeringworkbench";
 
+    /** Tank controller (탱크 컨트롤러) stringID; also its item's and texture's name. */
+    public static final String TANK_CONTROLLER = "tankcontroller";
+
+    /** Tank valve (탱크 밸브) stringID; also its item's and texture's name. */
+    public static final String TANK_VALVE = "tankvalve";
+
+    /** Glass block (유리 블럭) stringID; also its item's and texture's name. */
+    public static final String GLASS_BLOCK = "glassblock";
+
     /** Object IDs of the mineral walls (5-12, 8-2), in tier order. */
     public static final Map<MineralTier, Integer> MINERAL_WALL_IDS = new EnumMap<>(MineralTier.class);
 
@@ -27,6 +40,11 @@ public final class MechanicsObjects {
         for (MineralTier tier : MineralTier.values()) {
             MINERAL_WALL_IDS.put(tier, MineralWallObject.register(tier, mapColor(tier)));
         }
+        // Multiblock tank parts (2-1, N11-5). A negative broker value makes the game derive it from
+        // the recipe, as for the mineral walls.
+        ObjectRegistry.registerObject(TANK_CONTROLLER, new TankControllerObject(TANK_CONTROLLER), -1f, true);
+        ObjectRegistry.registerObject(TANK_VALVE, new TankValveObject(TANK_VALVE), -1f, true);
+        ObjectRegistry.registerObject(GLASS_BLOCK, new GlassBlockObject(GLASS_BLOCK), -1f, true);
     }
 
     /**

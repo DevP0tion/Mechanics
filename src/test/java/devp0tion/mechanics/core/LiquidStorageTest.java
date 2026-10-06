@@ -1,6 +1,9 @@
 package devp0tion.mechanics.core;
 
-/** {@link LiquidStorage} capacity and type rules (12-7), tank storage (5-9, N4-4) and sources (11-1, 11-2). */
+/**
+ * {@link LiquidStorage} capacity and type rules (12-7), tank storage (5-9, N4-4, N11-2), valves (N7-3,
+ * N11-3) and sources (11-1, 11-2).
+ */
 final class LiquidStorageTest {
 
     private LiquidStorageTest() {
@@ -82,14 +85,52 @@ final class LiquidStorageTest {
         Check.equal(10, tank.extract(FluidType.FRESHWATER, 10), "active again");
     }
 
-    public static void testSmallerRebuiltTankKeepsTheExcess() {
+    public static void testSmallerRebuiltTankLosesTheExcess() {
         TankStorage tank = Fluids.tank(100);
         tank.insert(FluidType.LAVA, 80);
-        tank.applyStructure(Fluids.validTank(40));
-        Check.equal(80, tank.getAmount(), "nothing destroyed");
-        Check.equal(0, tank.getSpaceFor(FluidType.LAVA), "over capacity");
-        tank.extract(FluidType.LAVA, 50);
-        Check.equal(10, tank.getSpaceFor(FluidType.LAVA), "room again once under capacity");
+        Check.equal(40, tank.applyStructure(Fluids.validTank(40)), "amount lost (N11-2)");
+        Check.equal(40, tank.getAmount(), "clamped to the new capacity");
+        Check.equal(FluidType.LAVA, tank.getFluid(), "the rest stays");
+        Check.isTrue(tank.isFull(), "full");
+        tank.applyStructure(Fluids.validTank(100));
+        Check.equal(40, tank.getAmount(), "a bigger tank does not bring the excess back");
+        Check.equal(60, tank.getSpaceFor(FluidType.LAVA));
+    }
+
+    public static void testRebuiltTankThatStillFitsLosesNothing() {
+        TankStorage tank = Fluids.tank(100);
+        tank.insert(FluidType.SLIME, 80);
+        Check.equal(0, tank.applyStructure(Fluids.validTank(80)), "same as the stored amount");
+        Check.equal(80, tank.getAmount());
+        Check.equal(0, tank.applyStructure(Fluids.validTank(200)), "bigger");
+        Check.equal(80, tank.getAmount());
+    }
+
+    public static void testBrokenTankDiscardsNothing() {
+        // Only a valid rebuild discards (N11-2); a broken tank keeps everything (5-9).
+        TankStorage tank = Fluids.tank(100);
+        tank.insert(FluidType.OOZE, 90);
+        Check.equal(0, tank.applyStructure(null), "broken: nothing lost");
+        Check.equal(90, tank.getAmount());
+        Check.equal(100, tank.getCapacity(), "the last capacity is kept");
+    }
+
+    public static void testLoadedFluidIsClampedOnlyByTheRecognizedTank() {
+        // A controller loads its saved fluid before its tank is recognized (capacity 0, inactive).
+        TankStorage tank = new TankStorage();
+        tank.setContents(FluidType.SEAWATER, 120);
+        Check.equal(120, tank.getAmount(), "kept while inactive");
+        Check.equal(0, tank.applyStructure(Fluids.validTank(120)), "same tank: nothing lost");
+        Check.equal(120, tank.getAmount());
+    }
+
+    public static void testRebuiltTankLosingEverythingClearsTheFluid() {
+        TankStorage tank = Fluids.tank(100);
+        tank.insert(FluidType.LAVA, 50);
+        // Capacity 0 is not a real tank size; it checks that the fluid type is cleared.
+        tank.applyStructure(Fluids.validTank(0));
+        Check.isTrue(tank.isEmpty(), "nothing fits");
+        Check.isNull(tank.getFluid(), "type cleared");
     }
 
     public static void testLiquidTileIsInfinite() {
@@ -112,6 +153,16 @@ final class LiquidStorageTest {
         valve.setTank(null);
         Check.equal(0, valve.getSpaceFor(FluidType.FRESHWATER), "no tank");
         Check.isTrue(new TankValve().isEnabled(), "accepts by default (N7-3)");
+    }
+
+    public static void testWireSignalSwitchesTheValveOff() {
+        TankValve valve = Fluids.valve(30);
+        valve.applyWireSignal(true);
+        Check.isFalse(valve.isEnabled(), "signal: off (N11-3)");
+        Check.equal(0, valve.getSpaceFor(FluidType.FRESHWATER), "off: accepts nothing");
+        valve.applyWireSignal(false);
+        Check.isTrue(valve.isEnabled(), "no signal: on (N11-3)");
+        Check.equal(30, valve.getSpaceFor(FluidType.FRESHWATER));
     }
 
 }

@@ -48,6 +48,44 @@ public final class MechanicsRecipes {
                     }
             ));
         }
+
+        // Tank controller: any mineral wall 1, tank valve 2, iron bar 10, copper bar 10,
+        // vanilla glass 10 (N10-2).
+        Recipes.registerModRecipe(new Recipe(
+                MechanicsObjects.TANK_CONTROLLER,
+                1,
+                MechanicsTech.ENGINEERING,
+                new Ingredient[]{
+                        new Ingredient(MechanicsIngredients.ANY_MINERAL_WALL, 1),
+                        new Ingredient(MechanicsObjects.TANK_VALVE, 2),
+                        new Ingredient("ironbar", 10),
+                        new Ingredient("copperbar", 10),
+                        new Ingredient("glass", 10)
+                }
+        ));
+
+        // Tank valve: any mineral wall 1, any pipe 2 (N10-3).
+        // TODO(game): no pipe exists yet, so the "any pipe" group is empty and this recipe cannot be
+        // crafted until the pipes are added (4th implementation round).
+        Recipes.registerModRecipe(new Recipe(
+                MechanicsObjects.TANK_VALVE,
+                1,
+                MechanicsTech.ENGINEERING,
+                new Ingredient[]{
+                        new Ingredient(MechanicsIngredients.ANY_MINERAL_WALL, 1),
+                        new Ingredient(MechanicsIngredients.ANY_PIPE, 2)
+                }
+        ));
+
+        // Glass block: vanilla glass 5 -> 1 (N10-4).
+        Recipes.registerModRecipe(new Recipe(
+                MechanicsObjects.GLASS_BLOCK,
+                1,
+                MechanicsTech.ENGINEERING,
+                new Ingredient[]{
+                        new Ingredient("glass", 5)
+                }
+        ));
     }
 
 }

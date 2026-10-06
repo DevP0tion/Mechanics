@@ -19,6 +19,8 @@ import java.util.List;
  *     <li>Two tanks may share wall cells, but a controller may not sit in a shared wall: placing
  *     a controller that would belong to two tanks at once is rejected (N8-1,
  *     {@link #canPlaceController}).</li>
+ *     <li>The same goes for valves: placing a valve that would belong to two tanks at once is
+ *     rejected (N11-1, {@link #canPlaceValve}).</li>
  * </ul>
  */
 public final class TankStructure {
@@ -37,6 +39,12 @@ public final class TankStructure {
 
     /** Largest outer size per axis (interior + 2 border cells). */
     public static final int MAX_OUTER_SIZE = MAX_INTERIOR_SIZE + 2;
+
+    /**
+     * How far (per axis, in tiles) a tile can be from a border tile and still be part of a tank
+     * through that border tile: a change farther away from a controller can never change its tank.
+     */
+    public static final int REACH = MAX_OUTER_SIZE - 1;
 
     private TankStructure() {
     }
@@ -83,6 +91,9 @@ public final class TankStructure {
                 }
                 TankCell cell = lookup.getCell(tileX, tileY);
                 CellKind kind = cell == null ? CellKind.OTHER : cell.getKind();
+                // TODO(design): whether the controller and valves count toward the lowest tier
+                // (capacity multiplier, N4-4) is undecided; they are made from any mineral wall
+                // (N10-2, N10-3) and carry no tier, so only mineral walls count here.
                 switch (kind) {
                     case MINERAL_WALL:
                         lowest = lowest == null ? cell.getMineral() : MineralTier.lowest(lowest, cell.getMineral());
@@ -169,23 +180,7 @@ public final class TankStructure {
         if (start == null || start.getKind() != CellKind.CONTROLLER) {
             return new TankSearchResult(TankSearchResult.Status.NOT_A_CONTROLLER, new ArrayList<TankValidation>());
         }
-        List<TankValidation> found = new ArrayList<>();
-        for (int outerHeight = MIN_OUTER_SIZE; outerHeight <= MAX_OUTER_SIZE; outerHeight++) {
-            for (int outerWidth = MIN_OUTER_SIZE; outerWidth <= MAX_OUTER_SIZE; outerWidth++) {
-                for (int y = controllerY - outerHeight + 1; y <= controllerY; y++) {
-                    for (int x = controllerX - outerWidth + 1; x <= controllerX; x++) {
-                        TankBounds bounds = new TankBounds(x, y, outerWidth, outerHeight);
-                        if (!bounds.isOnBorder(controllerX, controllerY)) {
-                            continue;
-                        }
-                        TankValidation validation = validate(bounds, cached);
-                        if (validation.isValid()) {
-                            found.add(validation);
-                        }
-                    }
-                }
-            }
-        }
+        List<TankValidation> found = search(controllerX, controllerY, cached);
         TankSearchResult.Status status;
         if (found.isEmpty()) {
             status = TankSearchResult.Status.NOT_FOUND;
@@ -198,21 +193,43 @@ public final class TankStructure {
     }
 
     /**
+     * Every valid tank whose border contains the tile ({@code tileX}, {@code tileY}), whatever is
+     * on it. Tanks may share wall cells (N8-1), so a wall or a valve can be part of several tanks.
+     * Each tile is read at most once.
+     */
+    public static List<TankValidation> findTanksWithBorderCell(int tileX, int tileY, TankCellLookup lookup) {
+        return search(tileX, tileY, new CachedLookup(tileX, tileY, lookup));
+    }
+
+    /** Every valid rectangle with the tile on its border; {@code lookup} should be cached. */
+    private static List<TankValidation> search(int tileX, int tileY, TankCellLookup lookup) {
+        List<TankValidation> found = new ArrayList<>();
+        for (int outerHeight = MIN_OUTER_SIZE; outerHeight <= MAX_OUTER_SIZE; outerHeight++) {
+            for (int outerWidth = MIN_OUTER_SIZE; outerWidth <= MAX_OUTER_SIZE; outerWidth++) {
+                for (int y = tileY - outerHeight + 1; y <= tileY; y++) {
+                    for (int x = tileX - outerWidth + 1; x <= tileX; x++) {
+                        TankBounds bounds = new TankBounds(x, y, outerWidth, outerHeight);
+                        if (!bounds.isOnBorder(tileX, tileY)) {
+                            continue;
+                        }
+                        TankValidation validation = validate(bounds, lookup);
+                        if (validation.isValid()) {
+                            found.add(validation);
+                        }
+                    }
+                }
+            }
+        }
+        return found;
+    }
+
+    /**
      * The search {@link #findTank} would give if a controller were placed at ({@code tileX},
      * {@code tileY}) without changing anything else (the floor under it is kept). Nothing is
      * placed; {@code lookup} is only read.
      */
-    public static TankSearchResult findTankIfControllerPlaced(final int tileX, final int tileY,
-                                                              final TankCellLookup lookup) {
-        TankCell current = lookup.getCell(tileX, tileY);
-        final TankCell controller = TankCell.of(CellKind.CONTROLLER)
-                .withTankFloor(current != null && current.isTankFloor());
-        return findTank(tileX, tileY, new TankCellLookup() {
-            @Override
-            public TankCell getCell(int x, int y) {
-                return x == tileX && y == tileY ? controller : lookup.getCell(x, y);
-            }
-        });
+    public static TankSearchResult findTankIfControllerPlaced(int tileX, int tileY, TankCellLookup lookup) {
+        return findTank(tileX, tileY, withObject(tileX, tileY, CellKind.CONTROLLER, lookup));
     }
 
     /**
@@ -228,11 +245,46 @@ public final class TankStructure {
     }
 
     /**
-     * Caches lookups in the square a search around one controller can reach, so each tile is read
-     * once per search.
+     * The valid tanks whose border would contain a valve placed at ({@code tileX}, {@code tileY})
+     * without changing anything else (the floor under it is kept). Nothing is placed;
+     * {@code lookup} is only read.
+     */
+    public static List<TankValidation> findTanksIfValvePlaced(int tileX, int tileY, TankCellLookup lookup) {
+        return findTanksWithBorderCell(tileX, tileY, withObject(tileX, tileY, CellKind.VALVE, lookup));
+    }
+
+    /**
+     * Placement check for a tank valve (N11-1, the same rule as the controller's N8-1), for the
+     * valve object's canPlace: a valve may not sit in a wall shared by two tanks. Returns
+     * {@code false} when the valve, once placed, would be part of the border of two (or more)
+     * recognized tanks at once. Every other placement is allowed, including one that forms no tank
+     * yet.
+     */
+    public static boolean canPlaceValve(int tileX, int tileY, TankCellLookup lookup) {
+        return findTanksIfValvePlaced(tileX, tileY, lookup).size() < 2;
+    }
+
+    /**
+     * {@code lookup} with an object of {@code kind} (not a mineral wall) on one tile, keeping that
+     * tile's floor.
+     */
+    private static TankCellLookup withObject(final int tileX, final int tileY, CellKind kind,
+                                             final TankCellLookup lookup) {
+        TankCell current = lookup.getCell(tileX, tileY);
+        final TankCell placed = TankCell.of(kind).withTankFloor(current != null && current.isTankFloor());
+        return new TankCellLookup() {
+            @Override
+            public TankCell getCell(int x, int y) {
+                return x == tileX && y == tileY ? placed : lookup.getCell(x, y);
+            }
+        };
+    }
+
+    /**
+     * Caches lookups in the square a search around one tile can reach, so each tile is read once
+     * per search.
      */
     private static final class CachedLookup implements TankCellLookup {
-        private static final int REACH = MAX_OUTER_SIZE - 1;
         private static final int SIZE = REACH * 2 + 1;
 
         private final int originX;

@@ -1,6 +1,7 @@
 package devp0tion.mechanics.objects;
 
 import devp0tion.mechanics.core.MineralTier;
+import devp0tion.mechanics.registry.MechanicsIngredients;
 import necesse.engine.localization.message.GameMessage;
 import necesse.engine.localization.message.LocalMessage;
 import necesse.engine.registries.ObjectRegistry;
@@ -23,6 +24,8 @@ import java.util.Locale;
  *     files), so it follows the game's own bar names in every language.</li>
  *     <li>Texture: {@code objects/<stringID>.png} in the vanilla wall sheet layout, item icon
  *     {@code items/<stringID>.png} (drawn by {@code tools/textures/draw_mineral_walls.py}).</li>
+ *     <li>Belongs to the "any mineral wall" ingredient group
+ *     ({@link MechanicsIngredients#ANY_MINERAL_WALL}).</li>
  * </ul>
  */
 public class MineralWallObject extends WallObject {
@@ -33,6 +36,8 @@ public class MineralWallObject extends WallObject {
         // "walloutlines" is the vanilla outline overlay that the plain registerWallObjects overloads use.
         super(stringID, "walloutlines", mapColor, tier.getWallToolTier(), ToolType.PICKAXE);
         this.tier = tier;
+        // Every mineral wall counts as "any mineral wall" in recipes (N10-2, N10-3).
+        addGlobalIngredient(MechanicsIngredients.ANY_MINERAL_WALL);
     }
 
     /** The wall's stringID (also its item's and texture's name): {@code <mineral>wall}, e.g. {@code copperwall}. */

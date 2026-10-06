@@ -8,7 +8,8 @@ package devp0tion.mechanics.core;
  *     it; once the last unit leaves, the type is cleared again.</li>
  *     <li>Never holds more than its capacity through {@link #insert}. A capacity lowered below the
  *     stored amount keeps the fluid (nothing is destroyed); the storage then takes nothing until it
- *     is back under capacity.</li>
+ *     is back under capacity. A subclass whose rules destroy the excess calls
+ *     {@link #discardExcess} (tanks do, N11-2).</li>
  * </ul>
  * Amounts are in fluid units ({@link FluidUnits}).
  */
@@ -117,6 +118,25 @@ public class LiquidStorage implements FluidSource {
     /** Changes the capacity. The stored fluid is kept even if it no longer fits. */
     protected final void setCapacity(int capacity) {
         this.capacity = requireNonNegative(capacity, "capacity");
+    }
+
+    /**
+     * Removes whatever exceeds the capacity; the excess is lost. Clears the fluid type if nothing
+     * is left.
+     *
+     * @return the amount removed
+     */
+    protected final int discardExcess() {
+        if (amount <= capacity) {
+            return 0;
+        }
+        int lost = amount - capacity;
+        amount = capacity;
+        if (amount == 0) {
+            fluid = null;
+        }
+        onContentsChanged();
+        return lost;
     }
 
     /** Whether this storage takes fluid at all right now (for example, an inactive tank does not). */

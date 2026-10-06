@@ -1,5 +1,7 @@
 package devp0tion.mechanics;
 
+import devp0tion.mechanics.registry.MechanicsContainers;
+import devp0tion.mechanics.registry.MechanicsIngredients;
 import devp0tion.mechanics.registry.MechanicsObjects;
 import devp0tion.mechanics.registry.MechanicsRecipes;
 import devp0tion.mechanics.registry.MechanicsTech;
@@ -13,8 +15,11 @@ import necesse.engine.modLoader.annotations.ModEntry;
 public class MechanicsMod {
 
     public void init() {
+        // Ingredient groups first: object items tag themselves with them when they are created.
+        MechanicsIngredients.load();
         MechanicsTech.load();
         MechanicsObjects.load();
+        MechanicsContainers.load();
     }
 
     public void initResources() {

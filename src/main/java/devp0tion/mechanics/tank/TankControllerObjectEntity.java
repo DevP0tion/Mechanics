@@ -1,0 +1,227 @@
+package devp0tion.mechanics.tank;
+
+import devp0tion.mechanics.client.TankFluidRendering;
+import devp0tion.mechanics.core.FluidType;
+import devp0tion.mechanics.core.TankBounds;
+import devp0tion.mechanics.core.TankStatusText;
+import devp0tion.mechanics.core.TankStorage;
+import devp0tion.mechanics.core.TankStructure;
+import devp0tion.mechanics.core.TankValidation;
+import necesse.engine.network.PacketReader;
+import necesse.engine.network.PacketWriter;
+import necesse.engine.save.LoadData;
+import necesse.engine.save.SaveData;
+import necesse.entity.objectEntity.ObjectEntity;
+import necesse.level.maps.Level;
+
+import java.util.Objects;
+
+/**
+ * The tank controller's state (2-1, 4-3): it recognizes the multiblock tank around it and holds the
+ * tank's fluid (5-9).
+ *
+ * <h2>Server</h2>
+ * <ul>
+ *     <li>Searches its tank ({@link TankStructure#findTank}) when it is created and again after
+ *     any object or floor tile within reach changed ({@link TankRegistry#onTileChanged}, 5-1). While
+ *     part of the area a tank could cover is not loaded, the search waits (D5).</li>
+ *     <li>One fluid type and amount, saved with the world ({@link TankStorage}, 12-7). A broken
+ *     wall deactivates the tank and keeps the fluid (5-9); a rebuilt tank smaller than the stored
+ *     amount loses the excess (N11-2); breaking the controller loses the fluid with this entity
+ *     (5-10). The capacity is not saved: it comes from the tank recognized after loading.</li>
+ * </ul>
+ *
+ * <h2>Clients</h2>
+ * Clients get a view (recognized bounds, fluid, amount, capacity) through the object entity
+ * content packet whenever it changes. The controller window, the hover tooltip and the fluid
+ * rendering read that view.
+ */
+public class TankControllerObjectEntity extends ObjectEntity {
+
+    /** Object entity type; must stay the same for saved worlds. */
+    public static final String TYPE = "tankcontroller";
+
+    // Server state.
+    private final TankStorage storage = new TankStorage();
+    private boolean structureChanged = true;
+    private TankBounds recognized;
+
+    // The view synced to clients (on the server: the last state sent).
+    private boolean viewActive;
+    private TankBounds viewBounds;
+    private FluidType viewFluid;
+    private int viewAmount;
+    private int viewCapacity;
+
+    public TankControllerObjectEntity(Level level, int tileX, int tileY) {
+        super(level, TYPE, tileX, tileY);
+    }
+
+    @Override
+    public void init() {
+        super.init();
+        TankRegistry.add(this);
+    }
+
+    @Override
+    public void remove() {
+        super.remove();
+        unregister();
+    }
+
+    @Override
+    public void dispose() {
+        super.dispose();
+        unregister();
+    }
+
+    private void unregister() {
+        TankRegistry.remove(this);
+        if (isClient()) {
+            TankFluidRendering.onTankViewChanged(getLevel(), viewBounds, viewFluid, null, null);
+        }
+    }
+
+    // ------------------------------------------------------------------ server
+
+    /** Something near the controller changed: search the tank again on the next tick (5-1). */
+    void markStructureChanged() {
+        structureChanged = true;
+    }
+
+    @Override
+    public void serverTick() {
+        super.serverTick();
+        if (structureChanged) {
+            searchTank();
+        }
+        updateView();
+    }
+
+    private void searchTank() {
+        Level level = getLevel();
+        if (!LevelTankCellLookup.isAreaLoaded(level, tileX, tileY)) {
+            // TODO(design): re-recognizing a tank that straddles a region boundary (D5) is
+            // undecided. Today the controller keeps its previous state while any tile within reach
+            // is unloaded and searches again once everything is loaded (retried every tick); a
+            // region unloading later does not change the tank.
+            return;
+        }
+        structureChanged = false;
+        TankValidation tank = TankStructure.findTank(tileX, tileY, new LevelTankCellLookup(level)).getTank();
+        storage.applyStructure(tank);
+        recognized = tank == null ? null : tank.getBounds();
+    }
+
+    private void updateView() {
+        boolean active = storage.isActive();
+        TankBounds bounds = active ? recognized : null;
+        if (active != viewActive || !Objects.equals(bounds, viewBounds) || storage.getFluid() != viewFluid
+                || storage.getAmount() != viewAmount || storage.getCapacity() != viewCapacity) {
+            viewActive = active;
+            viewBounds = bounds;
+            viewFluid = storage.getFluid();
+            viewAmount = storage.getAmount();
+            viewCapacity = storage.getCapacity();
+            markDirty();
+        }
+    }
+
+    /** The tank's fluid. Only meaningful on the server; valves pass fluid into it. */
+    public TankStorage getStorage() {
+        return storage;
+    }
+
+    @Override
+    public void addSaveData(SaveData save) {
+        super.addSaveData(save);
+        if (storage.getFluid() != null) {
+            save.addEnum("fluid", storage.getFluid());
+            save.addInt("amount", storage.getAmount());
+        }
+    }
+
+    @Override
+    public void applyLoadData(LoadData save) {
+        super.applyLoadData(save);
+        FluidType fluid = save.getEnum(FluidType.class, "fluid", null, false);
+        int amount = save.getInt("amount", 0, false);
+        if (fluid != null && amount > 0) {
+            storage.setContents(fluid, amount);
+        }
+        structureChanged = true;
+    }
+
+    // ------------------------------------------------------------------ sync
+
+    @Override
+    public void setupContentPacket(PacketWriter writer) {
+        super.setupContentPacket(writer);
+        writer.putNextBoolean(viewActive);
+        writer.putNextBoolean(viewBounds != null);
+        if (viewBounds != null) {
+            writer.putNextInt(viewBounds.x);
+            writer.putNextInt(viewBounds.y);
+            writer.putNextInt(viewBounds.outerWidth);
+            writer.putNextInt(viewBounds.outerHeight);
+        }
+        writer.putNextByte((byte) (viewFluid == null ? -1 : viewFluid.ordinal()));
+        writer.putNextInt(viewAmount);
+        writer.putNextInt(viewCapacity);
+    }
+
+    @Override
+    public void applyContentPacket(PacketReader reader) {
+        super.applyContentPacket(reader);
+        TankBounds oldBounds = viewBounds;
+        FluidType oldFluid = viewFluid;
+        viewActive = reader.getNextBoolean();
+        if (reader.getNextBoolean()) {
+            int x = reader.getNextInt();
+            int y = reader.getNextInt();
+            int width = reader.getNextInt();
+            int height = reader.getNextInt();
+            viewBounds = new TankBounds(x, y, width, height);
+        } else {
+            viewBounds = null;
+        }
+        int fluidIndex = reader.getNextByte();
+        viewFluid = fluidIndex >= 0 && fluidIndex < FluidType.values().length ? FluidType.values()[fluidIndex] : null;
+        viewAmount = reader.getNextInt();
+        viewCapacity = reader.getNextInt();
+        if (isClient()) {
+            TankFluidRendering.onTankViewChanged(getLevel(), oldBounds, oldFluid, viewBounds, viewFluid);
+        }
+    }
+
+    // ------------------------------------------------------------------ view (both sides)
+
+    /** Whether a tank is recognized around the controller. */
+    public boolean isActive() {
+        return viewActive;
+    }
+
+    /** The recognized tank (border included), or {@code null} while no tank is recognized. */
+    public TankBounds getTankBounds() {
+        return viewBounds;
+    }
+
+    /** The stored fluid, or {@code null} when empty. */
+    public FluidType getFluid() {
+        return viewFluid;
+    }
+
+    public int getAmount() {
+        return viewAmount;
+    }
+
+    public int getCapacity() {
+        return viewCapacity;
+    }
+
+    /** {@code <fluid name> <current>/<max>} (6-2, 6-9). */
+    public String getStatusText() {
+        return TankStatusText.format(FluidNames.displayName(viewFluid), viewAmount, viewCapacity);
+    }
+
+}

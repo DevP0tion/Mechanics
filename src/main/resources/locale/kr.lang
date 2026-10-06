@@ -2,6 +2,25 @@
 engineeringworkbench=공학 작업대
 // Mineral walls (8-2): <bar> is the vanilla bar item's name (MineralWallObject).
 mineralwall=<bar> 벽
+// Multiblock tank parts (2-1)
+tankcontroller=탱크 컨트롤러
+tankvalve=탱크 밸브
+glassblock=유리 블럭
+
+[item]
+// Ingredient groups (N10-2, N10-3)
+anymineralwall=아무 광물 벽
+anypipe=아무 파이프
+
+[itemtooltip]
+// Placement rejection rules (N8-1, N11-1) and the valve's wire rule (N11-3), in the item descriptions (N11-6)
+tankcontrollertip=두 탱크가 공유하는 벽에는 설치할 수 없습니다.
+tankvalvetip=두 탱크가 공유하는 벽에는 설치할 수 없습니다. 와이어 신호를 받으면 작동을 멈춥니다.
+
+[fluid]
+// Fluid display names (12-5). The other fluids' names are undecided (TODO(design), FluidNames).
+seawater=해수
+freshwater=담수
 
 [tech]
 engineering=공학 작업대

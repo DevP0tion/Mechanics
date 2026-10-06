@@ -24,8 +24,12 @@ public final class TankSearchResult {
          * ({@link TankStructure#canPlaceController}). This status can still occur when another
          * change (a wall, valve, glass block or floor tile) completes a second tank around an
          * existing controller.
-         * TODO(design): N8-1 only rejects controller placement; decide whether such other
-         * placements are rejected too, or what the tanks do (currently: neither is recognized).
+         * TODO(design): N8-1 and N11-1 only reject placing the controller or valve itself; whether
+         * another placement (a wall, a valve, glass, a floor tile or a second tank) that puts an
+         * existing controller or valve onto a shared wall is rejected too, or what the tanks do,
+         * is undecided (currently: no tank is recognized for that controller; a valve in two
+         * tanks serves neither). The same open question exists for a valve placement that gives an
+         * existing pump a second source (N11-4; pumps are not implemented yet).
          */
         CONTROLLER_IN_SHARED_WALL
     }

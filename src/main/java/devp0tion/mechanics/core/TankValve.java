@@ -6,17 +6,17 @@ package devp0tion.mechanics.core;
  * <ul>
  *     <li>Accepts incoming fluid automatically into its tank's storage, which lives in the
  *     controller (5-9). Without a recognized tank it accepts nothing.</li>
- *     <li>Can be switched on and off by wire ({@link #setEnabled}). A new valve is on: by default
- *     it accepts incoming fluid (N7-3).</li>
+ *     <li>Normally on: by default it accepts incoming fluid (N7-3). While it receives a wire
+ *     signal it is off and accepts nothing (N11-3, {@link #applyWireSignal}).</li>
  *     <li>A pump attached directly to a valve pulls from its tank instead (11-1 ②, 11-5); that is
  *     the pump's {@link Pump#setSource source}, not a destination.</li>
  * </ul>
  *
  * <p>TODO(design): automatic output from the valve is TODO (N7-3).
- * <p>TODO(design): which wire signal state switches the valve off is undecided (N7-3 only says
- * the wire switches it on and off); the game maps the signal to {@link #setEnabled}.
- * <p>TODO(design): tanks may share walls (N8-1), so a valve can sit in the border of two tanks;
- * which tank it serves is undecided. The game decides which storage to pass to {@link #setTank}.
+ * <p>TODO(design): placing a valve in a wall shared by two tanks is rejected (N11-1,
+ * {@link TankStructure#canPlaceValve}), but another change (a wall, controller, glass block or floor
+ * tile) can still complete a second tank around an existing valve; which tank it serves then is
+ * undecided. The game passes no storage to {@link #setTank} in that case.
  */
 public final class TankValve {
 
@@ -39,6 +39,14 @@ public final class TankValve {
     /** Wire control (N7-3). A disabled valve accepts nothing. */
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    /**
+     * Applies the wire signal on the valve's tile: a signal switches the valve off, no signal
+     * leaves it on (N11-3).
+     */
+    public void applyWireSignal(boolean signal) {
+        setEnabled(!signal);
     }
 
     /** How much of {@code type} the valve would pass into its tank now. */

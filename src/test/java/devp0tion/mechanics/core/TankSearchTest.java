@@ -2,7 +2,12 @@ package devp0tion.mechanics.core;
 
 import devp0tion.mechanics.core.TankSearchResult.Status;
 
-/** {@link TankStructure#findTank}: finding the tank around a controller. */
+import java.util.List;
+
+/**
+ * {@link TankStructure#findTank}: finding the tank around a controller; placement checks for
+ * controllers (N8-1) and valves (N11-1).
+ */
 final class TankSearchTest {
 
     private TankSearchTest() {
@@ -166,6 +171,73 @@ final class TankSearchTest {
                 "...");
         Check.isTrue(TankStructure.canPlaceController(1, 1, grid), "no tank at all");
         Check.equal(Status.NOT_FOUND, TankStructure.findTankIfControllerPlaced(1, 1, grid).getStatus());
+    }
+
+    // ---------- Valves in shared walls (N11-1) ----------
+
+    public static void testWallCellOfTwoTanksBelongsToBoth() {
+        Grid grid = Grid.of(
+                "#####",
+                "CG#GC",
+                "#####");
+        List<TankValidation> tanks = TankStructure.findTanksWithBorderCell(2, 1, grid);
+        Check.equal(2, tanks.size(), "shared column");
+        Check.equal(new TankBounds(0, 0, 3, 3), tanks.get(0).getBounds());
+        Check.equal(new TankBounds(2, 0, 3, 3), tanks.get(1).getBounds());
+        Check.equal(1, TankStructure.findTanksWithBorderCell(0, 0, grid).size(), "left corner");
+        Check.equal(0, TankStructure.findTanksWithBorderCell(1, 1, grid).size(), "interior cell");
+    }
+
+    public static void testValvePlacementInSharedWallIsRejected() {
+        Grid grid = Grid.of(
+                "#####",
+                "CG#GC",
+                "#####");
+        Check.isFalse(TankStructure.canPlaceValve(2, 1, grid), "shared wall (N11-1)");
+        Check.equal(2, TankStructure.findTanksIfValvePlaced(2, 1, grid).size());
+        Check.equal(CellKind.MINERAL_WALL, grid.getCell(2, 1).getKind(), "the check places nothing");
+    }
+
+    public static void testValvePlacementInUnsharedWallIsAllowed() {
+        Grid grid = Grid.of(
+                "#####",
+                "CG#GC",
+                "#####");
+        Check.isTrue(TankStructure.canPlaceValve(1, 0, grid), "left tank only");
+        List<TankValidation> tanks = TankStructure.findTanksIfValvePlaced(1, 0, grid);
+        Check.equal(1, tanks.size());
+        Check.equal(1, tanks.get(0).getValveCount(), "the placed valve counts");
+    }
+
+    public static void testValvePlacementNextToTankWithoutControllerIsAllowed() {
+        // The right rectangle has no controller, so it is no tank: the column belongs to one tank.
+        Grid grid = Grid.of(
+                "#####",
+                "CG#G#",
+                "#####");
+        Check.isTrue(TankStructure.canPlaceValve(2, 1, grid), "only one tank");
+    }
+
+    public static void testValvePlacementWithoutTankIsAllowed() {
+        Grid grid = Grid.of(
+                "...",
+                ".X.",
+                "...");
+        Check.isTrue(TankStructure.canPlaceValve(1, 1, grid), "no tank at all");
+        Check.equal(0, TankStructure.findTanksIfValvePlaced(1, 1, grid).size());
+    }
+
+    public static void testValveOnTheSharedCornerOfTwoTanksIsAllowed() {
+        // A valve may not be on a corner (4-5): on the corner both rectangles share, neither is a
+        // tank once the valve is there, so the valve is not part of two tanks.
+        Grid grid = Grid.of(
+                "C##..",
+                "#G#..",
+                "#####",
+                "..#G#",
+                "..##C");
+        Check.isTrue(TankStructure.canPlaceValve(2, 2, grid), "corner of both");
+        Check.equal(0, TankStructure.findTanksIfValvePlaced(2, 2, grid).size());
     }
 
     public static void testEachTileIsReadOnce() {

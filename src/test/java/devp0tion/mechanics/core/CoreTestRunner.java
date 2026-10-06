@@ -20,6 +20,7 @@ public final class CoreTestRunner {
             PumpTierTest.class,
             TankStructureTest.class,
             TankSearchTest.class,
+            TankStatusTextTest.class,
             LiquidStorageTest.class,
             PipeLinkTest.class,
             PipeNetworkTest.class,
