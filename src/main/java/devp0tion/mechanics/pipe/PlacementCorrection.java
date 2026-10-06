@@ -30,7 +30,7 @@ import java.util.Set;
  * (the attack handler just skips the place), so the client keeps a ghost object and a wrong item
  * count. Whenever one of this mod's rules makes the server refuse (the tank rules, the pump's
  * sources, the wrench), the client is sent the real state of the cells: the floor tile, the
- * objects of every layer, the object entity (link flags, tank views), the underground pipe flags,
+ * objects of every layer, the object entity (link flags, tank views), the underground pipe state,
  * and the item slot is marked dirty so the server resends it.
  */
 public final class PlacementCorrection {
@@ -96,7 +96,7 @@ public final class PlacementCorrection {
         }
         PipeSystem system = PipeSystem.getIfExists(level);
         if (system != null) {
-            client.sendPacket(PacketUndergroundPipes.tile(level, tileX, tileY, system.undergroundLinks(tileX, tileY)));
+            client.sendPacket(system.undergroundTilePacket(tileX, tileY));
         }
     }
 

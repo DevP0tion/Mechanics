@@ -1,5 +1,6 @@
 package devp0tion.mechanics.pipe;
 
+import devp0tion.mechanics.core.BlockedFaceSync;
 import devp0tion.mechanics.core.Direction;
 import devp0tion.mechanics.core.FluidType;
 import devp0tion.mechanics.core.LinkFlags;
@@ -45,8 +46,9 @@ import java.util.Map;
  *     <li>Mirror (N14-3, N15-1): every pipe's last state stays in the grid while its region is
  *     unloaded, and the whole mirror is saved with the level, so paths through unloaded regions are
  *     known also after a restart. A region's own data replaces its mirror when it loads.</li>
- *     <li>Clients get the underground pipes' link flags (the only underground state they draw) per
- *     region when the region is sent to them ({@link PipeSyncPatches}) and per tile when it changes
+ *     <li>Clients get the underground pipes' link flags and the faces blocked by another fluid
+ *     ({@link PipeGrid#getFluidBlockedSides}, N13-2; the only underground state they draw) per region
+ *     when the region is sent to them ({@link PipeSyncPatches}) and per tile when either changes
  *     ({@link PacketUndergroundPipes}); fluid amounts stay on the server. Basic pipes sync their link
  *     flags and the faces blocked by another fluid themselves ({@link BasicPipeObjectEntity}).</li>
  *     <li>The grid clock advances every level tick (the 20-tick cycle windows of the transport cap,
@@ -61,6 +63,8 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     private final PipeGrid grid = new PipeGrid(PipeTierRules.TABLE);
     /** Underground pipe records read from region files, until the region finishes loading. */
     private final Map<Long, List<PipeRecord>> pendingRegions = new HashMap<>();
+    /** The underground pipes' faces blocked by another fluid as last sent to clients (N13-2). */
+    private final BlockedFaceSync undergroundBlocked = new BlockedFaceSync(grid, PipeLayer.UNDERGROUND);
     private boolean scanned;
 
     public PipeSystem() {
@@ -158,6 +162,17 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
                 && entity.getLevel().getObjectID(entity.tileX, entity.tileY) == objectID;
     }
 
+    /**
+     * The wrench toward a side ({@link PipeGrid#toggleSide}). The part on the other side changes too,
+     * so its region is loaded first, as the level's object setter does: a pipe there would otherwise
+     * only be a read-only mirror (N14-3) whose region file undoes the change when it loads, and a pump
+     * or valve there would not be in the grid at all.
+     */
+    public PipeGrid.Check toggleSide(int tileX, int tileY, PipeGrid.Part part, Direction direction) {
+        level.regionManager.getRegionByTile(tileX + direction.dx, tileY + direction.dy, true);
+        return grid.toggleSide(tileX, tileY, part, direction);
+    }
+
     @Override
     public void tick() {
         super.tick();
@@ -208,17 +223,30 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     }
 
     /**
-     * A basic pipe started or stopped holding fluid: it and the basic pipes next to it sync the faces
-     * blocked by another fluid (N13-2), which clients draw as cut. Underground pipes are not covered:
-     * their clients only get link flags ({@link PacketUndergroundPipes}).
+     * A pipe started or stopped holding fluid: the faces blocked by another fluid (N13-2), which
+     * clients draw as cut, are synced where they may have changed: the pipes of its layer next to it,
+     * itself, and the pipe of the other layer on its tile (their vertical face). Basic pipes sync
+     * through their entities, underground pipes per tile, only when they changed.
      */
     private void onPipeFluidChanged(int tileX, int tileY, PipeLayer layer) {
-        if (layer != PipeLayer.BASE || level == null) {
+        if (level == null) {
             return;
         }
         syncBlockedSides(tileX, tileY);
-        for (Direction d : Direction.values()) {
-            syncBlockedSides(tileX + d.dx, tileY + d.dy);
+        if (layer == PipeLayer.BASE) {
+            for (Direction d : Direction.values()) {
+                syncBlockedSides(tileX + d.dx, tileY + d.dy);
+            }
+        }
+        for (long tile : undergroundBlocked.changedTiles(tileX, tileY, layer)) {
+            int x = PipeGrid.keyX(tile);
+            int y = PipeGrid.keyY(tile);
+            if (grid.getPipe(x, y, PipeLayer.UNDERGROUND) != null) {
+                sendUndergroundTile(x, y);
+            } else {
+                // The pipe itself is gone: its object change tells the clients.
+                undergroundBlocked.toSend(x, y);
+            }
         }
     }
 
@@ -231,11 +259,18 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
 
     /** Sends the underground pipe state of one tile to the clients that have it loaded. */
     public void sendUndergroundTile(int tileX, int tileY) {
+        int blocked = undergroundBlocked.toSend(tileX, tileY);
         if (level.getServer() == null) {
             return;
         }
-        level.getServer().network.sendToClientsWithTile(PacketUndergroundPipes.tile(level, tileX, tileY, undergroundLinks(tileX, tileY)),
-                level, tileX, tileY);
+        level.getServer().network.sendToClientsWithTile(PacketUndergroundPipes.tile(level, tileX, tileY,
+                undergroundLinks(tileX, tileY), blocked), level, tileX, tileY);
+    }
+
+    /** The underground pipe state of one tile as a tile update, for one client (its correction). */
+    public PacketUndergroundPipes undergroundTilePacket(int tileX, int tileY) {
+        return PacketUndergroundPipes.tile(level, tileX, tileY, undergroundLinks(tileX, tileY),
+                grid.getFluidBlockedSides(tileX, tileY, PipeLayer.UNDERGROUND));
     }
 
     /** The link flags of the underground pipe at the tile, or -1 when there is none. */
@@ -250,7 +285,7 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         forEachTile(region, (x, y) -> {
             PipeNode node = grid.getPipe(x, y, PipeLayer.UNDERGROUND);
             if (node != null) {
-                entries.add(new long[]{x, y, node.getLinks()});
+                entries.add(new long[]{x, y, node.getLinks(), undergroundBlocked.toSend(x, y)});
             }
         });
         client.sendPacket(PacketUndergroundPipes.region(level, region.regionX, region.regionY, entries));

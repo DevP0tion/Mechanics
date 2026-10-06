@@ -29,9 +29,10 @@ import necesse.level.maps.regionSystem.Region;
  *     pipe is removed its fluid is lost (N12-1).</li>
  *     <li>Saved: link flags, fluid and amount.</li>
  *     <li>Clients get the link flags, which they draw (connections and cut faces, N16-4), and the
- *     sides whose neighbouring basic pipe holds another fluid ({@link PipeGrid#getFluidBlockedSides}),
- *     drawn like cut faces since they are dead ends (N13-2). Those change only when a pipe here or
- *     next to it starts or stops holding fluid. The fluid stays on the server (no pipe fluid display
+ *     faces where a pipe holding another fluid meets it ({@link PipeGrid#getFluidBlockedSides}: the
+ *     neighbouring basic pipes, and the underground pipe on its tile through the vertical link),
+ *     drawn like cut faces since they are dead ends (N13-2). Those change only when a pipe here,
+ *     next to it or under it starts or stops holding fluid. The fluid stays on the server (no pipe fluid display
  *     is decided).</li>
  * </ul>
  */
@@ -46,7 +47,7 @@ public class BasicPipeObjectEntity extends ObjectEntity {
     /** The object this entity was created for ({@link PipeSystem#isReplacedEntity}). */
     private int objectID = -1;
     private int links = LinkFlags.ALL_OPEN;
-    /** Sides blocked by another fluid next to it (both sides: clients get them synced). */
+    /** Faces blocked by another fluid (sides and vertical; both sides: clients get them synced). */
     private int blockedSides;
     private FluidType savedFluid;
     private int savedAmount;
@@ -130,12 +131,12 @@ public class BasicPipeObjectEntity extends ObjectEntity {
         }
     }
 
-    /** The sides blocked by another fluid in the neighbouring basic pipe (N13-2; both sides). */
+    /** The faces blocked by another fluid (N13-2; sides and vertical, {@link LinkFlags} bits; both sides). */
     public int getBlockedSides() {
         return blockedSides;
     }
 
-    /** Called when this pipe or one next to it started or stopped holding fluid: sync the blocked sides. */
+    /** Called when this pipe or one next to it or under it started or stopped holding fluid: sync the blocked faces. */
     void syncBlockedSides() {
         PipeSystem system = PipeSystem.getIfExists(getLevel());
         if (system == null || node == null) {
@@ -181,7 +182,7 @@ public class BasicPipeObjectEntity extends ObjectEntity {
     public void applyContentPacket(PacketReader reader) {
         super.applyContentPacket(reader);
         links = LinkFlags.sanitize(reader.getNextByteUnsigned());
-        blockedSides = reader.getNextByteUnsigned() & LinkFlags.SIDES;
+        blockedSides = LinkFlags.sanitize(reader.getNextByteUnsigned());
     }
 
 }

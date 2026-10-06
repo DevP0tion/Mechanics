@@ -78,7 +78,9 @@ import java.util.Set;
  * may pass through them only when they are full of its fluid, so an unloaded region whose pipes on
  * the path are all full is skipped and the check goes on in the next region, also across several
  * unloaded regions in a row; any other unloaded pipe is a dead end. Unloaded pipes are never
- * written. Pumps and valves of unloaded regions are not in the grid (they do not run).
+ * written, by the wrench neither ({@link Check#NOT_LOADED}): the region's own state replaces the
+ * mirror when it loads, so the game loads a region before the wrench changes a part in it. Pumps and
+ * valves of unloaded regions are not in the grid (they do not run).
  */
 public final class PipeGrid {
 
@@ -94,7 +96,12 @@ public final class PipeGrid {
          * valve to a pump with the wrench (N16-3).
          * TODO(design): a multi-fluid tank would make this case possible (N16-3).
          */
-        DIFFERENT_SOURCE_FLUID
+        DIFFERENT_SOURCE_FLUID,
+        /**
+         * A pipe the wrench would change is a read-only mirror of an unloaded region (N14-3): nothing
+         * changed. The game loads that region first, so the change reaches the region's own state.
+         */
+        NOT_LOADED
     }
 
     /** The parts that carry link flags. */
@@ -194,9 +201,10 @@ public final class PipeGrid {
     }
 
     /**
-     * The sides of the pipe at the tile whose neighbouring pipe of the same layer holds another
-     * fluid than it does ({@link LinkFlags} side bits): those faces are dead ends whatever their link
-     * flags say (N13-2). 0 when there is no pipe or it is empty.
+     * The faces of the pipe at the tile where it meets a pipe holding another fluid than it does
+     * ({@link LinkFlags} bits): a side bit when the neighbouring pipe of the same layer does, the
+     * vertical bit when the pipe of the other layer on its tile does. Those faces are dead ends
+     * whatever their link flags say (N13-2). 0 when there is no pipe or it is empty.
      */
     public int getFluidBlockedSides(int x, int y, PipeLayer layer) {
         PipeNode node = getPipe(x, y, layer);
@@ -206,12 +214,18 @@ public final class PipeGrid {
         }
         int sides = 0;
         for (Direction d : Direction.values()) {
-            PipeNode next = getPipe(x + d.dx, y + d.dy, layer);
-            if (next != null && next.getFluid() != null && next.getFluid() != fluid) {
+            if (holdsOtherFluid(getPipe(x + d.dx, y + d.dy, layer), fluid)) {
                 sides |= LinkFlags.bit(d);
             }
         }
+        if (holdsOtherFluid(getPipe(x, y, layer.other()), fluid)) {
+            sides |= LinkFlags.VERTICAL;
+        }
         return sides;
+    }
+
+    private static boolean holdsOtherFluid(PipeNode node, FluidType fluid) {
+        return node != null && node.getFluid() != null && node.getFluid() != fluid;
     }
 
     /** Whether two pipes are linked (both facing flags open, 9-4, N16-4). Fluids are not considered. */
@@ -568,6 +582,10 @@ public final class PipeGrid {
      * otherwise. Without one, only the part's own flag flips (it stays for a later neighbour, N16-4).
      * Linking a valve to a pump is refused when the valve's tank holds another fluid than the pump's
      * other sources (N16-3); a linked valve becomes the pump's last source (N19-1).
+     * Unloaded pipes are never written: when either pipe is a mirror of an unloaded region, nothing
+     * changes ({@link Check#NOT_LOADED}; its region's own state would replace the change when it
+     * loads, N14-3). Pumps and valves of unloaded regions are not in the grid at all, so the game
+     * loads the neighbour's region before it uses the wrench toward it.
      */
     public Check toggleSide(int x, int y, Part part, Direction direction) {
         End own = end(x, y, part, direction);
@@ -577,6 +595,9 @@ public final class PipeGrid {
         int nx = x + direction.dx;
         int ny = y + direction.dy;
         End other = neighbourEnd(part, nx, ny, direction.opposite());
+        if (!own.loaded || other != null && !other.loaded) {
+            return Check.NOT_LOADED;
+        }
         Pump pump = part == Part.PUMP ? pumps.get(key(x, y)) : other != null && other.part == Part.PUMP ? pumps.get(key(nx, ny)) : null;
         boolean pumpValve = other != null && (part == Part.PUMP && other.part == Part.VALVE
                 || part == Part.VALVE && other.part == Part.PUMP);
@@ -615,19 +636,22 @@ public final class PipeGrid {
     /**
      * Wrench right-click on the middle of a tile (12-8, 13-5, N16-4): toggles the vertical link
      * between the basic pipe or valve there and the underground pipe there. With only one of them,
-     * only its own flag flips.
+     * only its own flag flips. Unloaded pipes are never written ({@link Check#NOT_LOADED}).
      */
     public Check toggleVertical(int x, int y) {
         long key = key(x, y);
         PipeNode base = basePipes.get(key);
         TankValve valve = valves.get(key);
         PipeNode under = undergroundPipes.get(key);
-        End top = base != null ? new End(Part.BASIC_PIPE, () -> base.isVerticalOpen(), base::setVerticalOpen)
-                : valve != null ? new End(Part.VALVE, () -> valve.isVerticalOpen(), valve::setVerticalOpen) : null;
+        End top = base != null ? new End(Part.BASIC_PIPE, base.loaded, () -> base.isVerticalOpen(), base::setVerticalOpen)
+                : valve != null ? new End(Part.VALVE, true, () -> valve.isVerticalOpen(), valve::setVerticalOpen) : null;
         End bottom = under == null ? null
-                : new End(Part.UNDERGROUND_PIPE, () -> under.isVerticalOpen(), under::setVerticalOpen);
+                : new End(Part.UNDERGROUND_PIPE, under.loaded, () -> under.isVerticalOpen(), under::setVerticalOpen);
         if (top == null && bottom == null) {
             return Check.NOTHING_THERE;
+        }
+        if (top != null && !top.loaded || bottom != null && !bottom.loaded) {
+            return Check.NOT_LOADED;
         }
         if (top == null || bottom == null) {
             End only = top != null ? top : bottom;
@@ -650,11 +674,15 @@ public final class PipeGrid {
     /** One part's flag toward one side (or the vertical one). */
     private static final class End {
         final Part part;
+        /** False for the mirror of an unloaded pipe, which is never written (N14-3). */
+        final boolean loaded;
         final java.util.function.BooleanSupplier getter;
         final java.util.function.Consumer<Boolean> setter;
 
-        End(Part part, java.util.function.BooleanSupplier getter, java.util.function.Consumer<Boolean> setter) {
+        End(Part part, boolean loaded, java.util.function.BooleanSupplier getter,
+            java.util.function.Consumer<Boolean> setter) {
             this.part = part;
+            this.loaded = loaded;
             this.getter = getter;
             this.setter = setter;
         }
@@ -674,15 +702,17 @@ public final class PipeGrid {
             case BASIC_PIPE:
             case UNDERGROUND_PIPE: {
                 PipeNode node = (part == Part.BASIC_PIPE ? basePipes : undergroundPipes).get(key);
-                return node == null ? null : new End(part, () -> node.isSideOpen(d), open -> node.setSideOpen(d, open));
+                return node == null ? null
+                        : new End(part, node.loaded, () -> node.isSideOpen(d), open -> node.setSideOpen(d, open));
             }
             case VALVE: {
+                // Valves and pumps are in the grid only while their region is loaded.
                 TankValve valve = valves.get(key);
-                return valve == null ? null : new End(part, () -> valve.isSideOpen(d), open -> valve.setSideOpen(d, open));
+                return valve == null ? null : new End(part, true, () -> valve.isSideOpen(d), open -> valve.setSideOpen(d, open));
             }
             case PUMP: {
                 Pump pump = pumps.get(key);
-                return pump == null ? null : new End(part, () -> pump.isSideOpen(d), open -> pump.setSideOpen(d, open));
+                return pump == null ? null : new End(part, true, () -> pump.isSideOpen(d), open -> pump.setSideOpen(d, open));
             }
             default:
                 return null;

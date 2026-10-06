@@ -209,6 +209,24 @@ final class LiquidStorageTest {
         Check.isTrue(new TankValve().isEnabled(), "accepts by default (N7-3)");
     }
 
+    public static void testReleasedTankTakesAndGivesNothingForGood() {
+        // The controller is gone (5-10, N19-2): its storage is released at once.
+        TankStorage tank = Fluids.tank(100);
+        tank.insert(FluidType.FRESHWATER, 40);
+        TankValve valve = Fluids.valveOf(tank);
+        tank.release();
+        Check.isTrue(tank.isReleased(), "released");
+        Check.isFalse(tank.isActive(), "inactive");
+        Check.equal(0, tank.insert(FluidType.FRESHWATER, 10), "takes nothing");
+        Check.equal(0, tank.extract(FluidType.FRESHWATER, 10), "gives nothing");
+        Check.equal(0, tank.applyStructure(Fluids.validTank(100)), "a structure applied later");
+        Check.isFalse(tank.isActive(), "does not activate it again");
+        Check.equal(40, tank.getAmount(), "the contents are left alone (an unloading controller was saved before)");
+        Check.isNull(valve.getTank(), "a valve still pointing at it has no tank");
+        Check.isNull(valve.getStoredFluid(), "and no stored fluid");
+        Check.equal(0, valve.getSpaceFor(FluidType.FRESHWATER), "and takes nothing");
+    }
+
     public static void testWireSignalSwitchesTheValveOff() {
         TankValve valve = Fluids.valve(30);
         valve.applyWireSignal(true);

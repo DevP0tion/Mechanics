@@ -90,6 +90,12 @@ public class TankControllerObjectEntity extends ObjectEntity {
     public void remove() {
         super.remove();
         unregister();
+        // Nothing passes fluid into or out of this storage any more, also in the rest of this tick,
+        // before its valves look their tank up again: a broken controller loses the fluid (5-10,
+        // N19-2). Also right for any other removal: an unloading region saved this entity before,
+        // and an entity the engine only replaces (region loading, placement) is a fresh one that no
+        // valve points at (it keeps no tank). Only this storage changes: the pipe grid is untouched.
+        storage.release();
         // Its tank's cells may now belong to other tanks (also when only unloading: harmless).
         TankRegistry.onTankReleased(getLevel(), kept);
     }

@@ -31,8 +31,10 @@ import necesse.level.maps.light.GameLight;
  *
  * <p>Cut faces are drawn (N16-4): a pipe marks every side whose own flag is cut and every side
  * facing a part whose flag toward it is cut; a pump marks its cut links to valves. A face between
- * two basic pipes holding different fluids is a dead end (N13-2) and is drawn the same way, from the
- * blocked sides the server syncs ({@link BasicPipeObjectEntity#getBlockedSides}). The vertical
+ * two pipes holding different fluids is a dead end (N13-2) and is drawn the same way, from the
+ * blocked faces the server syncs ({@link BasicPipeObjectEntity#getBlockedSides},
+ * {@link ClientUndergroundPipes#getBlockedSides}): between two pipes of one layer, and the vertical
+ * link marker between the basic and the underground pipe on a tile, which shows cut. The vertical
  * link marker is drawn while underground pipes are visible.
  *
  * <p>Underground pipes are visible only while the local player holds the wrench or an underground
@@ -87,7 +89,7 @@ public final class PipeRendering {
         return LinkFlags.ALL_OPEN;
     }
 
-    /** The sides of the basic pipe at a tile blocked by another fluid next to it (N13-2), or 0. */
+    /** The faces of the basic pipe at a tile blocked by another fluid (N13-2; sides and vertical), or 0. */
     public static int baseBlockedSides(Level level, int tileX, int tileY) {
         ObjectEntity entity = level.entityManager.getObjectEntity(tileX, tileY);
         return entity instanceof BasicPipeObjectEntity ? ((BasicPipeObjectEntity) entity).getBlockedSides() : 0;
@@ -101,12 +103,18 @@ public final class PipeRendering {
         return ClientUndergroundPipes.getLinks(level, tileX, tileY);
     }
 
+    /** The faces of the underground pipe at a tile blocked by another fluid (N13-2; sides and vertical), or 0. */
+    public static int undergroundBlockedSides(Level level, int tileX, int tileY) {
+        return ClientUndergroundPipes.getBlockedSides(level, tileX, tileY);
+    }
+
     /**
      * The draw options of a pipe at a tile: hub, arms toward linked neighbours, cut marks.
      *
      * @param sheet       the pipe's sheet
      * @param ownLinks    the pipe's own flags
-     * @param blockedSides the sides blocked by another fluid next to it (N13-2), drawn as cut
+     * @param blockedSides the faces blocked by another fluid (N13-2): sides, and the vertical link to
+     *                     the other layer, drawn as cut
      * @param underground whether it is an underground pipe (neighbours on the underground layer)
      * @param showVertical whether to draw the vertical link marker
      */
@@ -133,7 +141,8 @@ public final class PipeRendering {
         if (showVertical) {
             int otherLinks = underground ? baseLinksForVertical(level, tileX, tileY) : undergroundLinks(level, tileX, tileY);
             if (otherLinks >= 0) {
-                boolean linked = LinkFlags.isVerticalOpen(ownLinks) && LinkFlags.isVerticalOpen(otherLinks);
+                boolean linked = LinkFlags.isVerticalOpen(ownLinks) && LinkFlags.isVerticalOpen(otherLinks)
+                        && !LinkFlags.isVerticalOpen(blockedSides);
                 options.add(cell(links, linked ? 4 : 5, drawX, drawY, light, alpha));
             }
         }

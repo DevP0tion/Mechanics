@@ -15,11 +15,15 @@ package devp0tion.mechanics.core;
  *     rebuilt with fewer cells or lower-tier walls or valves), the excess is lost at once (N11-2,
  *     N13-4), even when that smaller tank only exists for a moment while the tank is being rebuilt or
  *     extended.</li>
+ *     <li>When the controller goes away the storage is released ({@link #release}): from that moment
+ *     it takes and gives nothing and the valves that still point at it have no tank, so no push or
+ *     pull reaches it before they look their tank up again (5-10, N19-2).</li>
  * </ul>
  */
 public final class TankStorage extends LiquidStorage {
 
     private boolean active;
+    private boolean released;
 
     /** A new controller's storage: empty and inactive until a structure is applied. */
     public TankStorage() {
@@ -34,6 +38,9 @@ public final class TankStorage extends LiquidStorage {
      * @return the amount lost because the new capacity is smaller than the stored amount
      */
     public int applyStructure(TankValidation validation) {
+        if (released) {
+            return 0;
+        }
         if (validation != null && validation.isValid()) {
             setCapacity(validation.getCapacity());
             active = true;
@@ -47,6 +54,22 @@ public final class TankStorage extends LiquidStorage {
 
     public boolean isActive() {
         return active;
+    }
+
+    /**
+     * The controller holding this storage is gone (5-10, N19-2): the storage is inactive for good, a
+     * structure applied later does not activate it again, and valves treat it as no tank
+     * ({@link TankValve#getTank}). The contents stay as they are (a controller whose region only
+     * unloads was saved before).
+     */
+    public void release() {
+        released = true;
+        active = false;
+    }
+
+    /** Whether the controller holding this storage is gone ({@link #release}). */
+    public boolean isReleased() {
+        return released;
     }
 
     @Override

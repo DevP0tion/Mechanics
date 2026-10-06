@@ -37,7 +37,8 @@ import java.awt.geom.Line2D;
  *     <li>Right click toward a side of a tile: toggles that side's link of the basic pipe, pump or
  *     valve there (else of the underground pipe): cut when linked, linked otherwise (12-8, 13-4,
  *     N16-3, N16-4). Linking a valve to a pump is refused when its tank holds another fluid than
- *     the pump's other sources (N16-3).</li>
+ *     the pump's other sources (N16-3). The neighbour's region is loaded first, so the change also
+ *     reaches a part in a region that was not loaded and lasts ({@link PipeSystem#toggleSide}).</li>
  *     <li>Right click on the middle of a tile: toggles the vertical link between the basic pipe or
  *     valve there and the underground pipe there (12-8, 13-5, N16-4).</li>
  *     <li>Holding it shows the underground pipes (9-6).</li>
@@ -207,7 +208,7 @@ public class MechanicsWrenchItem extends PlaceableItem implements ItemInteractAc
         if (system != null && part != null) {
             Direction side = sideOf(x, y);
             result = side == null ? system.getGrid().toggleVertical(tileX, tileY)
-                    : system.getGrid().toggleSide(tileX, tileY, part, side);
+                    : system.toggleSide(tileX, tileY, part, side);
         }
         if (result != PipeGrid.Check.OK) {
             // Refused (N16-3) or nothing there: the client gets the cell's real state.

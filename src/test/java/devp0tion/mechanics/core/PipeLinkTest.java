@@ -221,6 +221,43 @@ final class PipeLinkTest {
         Check.equal(PipeGrid.Check.NOTHING_THERE, grid.toggleVertical(0, 0));
     }
 
+    public static void testWrenchNeverChangesAnUnloadedPipe() {
+        // N14-3: a mirror of an unloaded region is read-only; the region's own state replaces it when
+        // it loads, so a change there would be undone. The game loads the region first.
+        PipeGrid grid = grid();
+        final List<String> heard = new ArrayList<>();
+        grid.setListener((x, y, part) -> heard.add(part + "@" + x + "," + y));
+        Fluids.baseLine(grid, 0, 1, 0, MineralTier.COPPER);
+        Fluids.line(grid, 0, 1, 1, PipeLayer.UNDERGROUND, MineralTier.COPPER);
+        grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
+        grid.toggleSide(0, 1, PipeGrid.Part.UNDERGROUND_PIPE, Direction.EAST);
+        grid.placePipe(1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
+        grid.unloadPipe(1, 0, PipeLayer.BASE);
+        grid.unloadPipe(1, 1, PipeLayer.UNDERGROUND);
+        grid.unloadPipe(1, 0, PipeLayer.UNDERGROUND);
+        heard.clear();
+
+        Check.equal(PipeGrid.Check.NOT_LOADED, grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST),
+                "toward an unloaded basic pipe");
+        Check.equal(PipeGrid.Check.NOT_LOADED, grid.toggleSide(0, 1, PipeGrid.Part.UNDERGROUND_PIPE, Direction.EAST),
+                "toward an unloaded underground pipe");
+        Check.equal(PipeGrid.Check.NOT_LOADED, grid.toggleSide(1, 0, PipeGrid.Part.BASIC_PIPE, Direction.WEST),
+                "from an unloaded pipe");
+        Check.equal(PipeGrid.Check.NOT_LOADED, grid.toggleVertical(1, 0), "an unloaded tile");
+        Check.isFalse(base(grid, 0, 0).isSideOpen(Direction.EAST), "own flag unchanged");
+        Check.isFalse(base(grid, 1, 0).isSideOpen(Direction.WEST), "mirror unchanged");
+        Check.isFalse(under(grid, 1, 1).isSideOpen(Direction.WEST), "underground mirror unchanged");
+        Check.isFalse(under(grid, 1, 0).isVerticalOpen(), "vertical flag of the mirror unchanged");
+        Check.equal("[]", heard.toString(), "nothing to save or sync");
+
+        // Its region loaded again with its own state: the wrench links both sides.
+        PipeNode mirror = base(grid, 1, 0);
+        grid.loadPipe(1, 0, PipeLayer.BASE, MineralTier.COPPER, mirror.getLinks(), null, 0, true);
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST));
+        Check.isTrue(grid.areLinked(base(grid, 0, 0), base(grid, 1, 0)), "linked once loaded");
+        Check.equal("[BASIC_PIPE@0,0, BASIC_PIPE@1,0]", heard.toString(), "both flags saved and synced");
+    }
+
     public static void testListenerHearsEveryFlagChange() {
         PipeGrid grid = grid();
         final List<String> heard = new ArrayList<>();
@@ -306,17 +343,82 @@ final class PipeLinkTest {
         Fluids.set(grid, 0, 0, PipeLayer.BASE, FluidType.FRESHWATER, 5);
         Fluids.set(grid, 1, 0, PipeLayer.BASE, FluidType.LAVA, 5);
         Fluids.set(grid, 1, 0, PipeLayer.UNDERGROUND, FluidType.FRESHWATER, 5);
-        Check.equal(LinkFlags.bit(Direction.WEST), grid.getFluidBlockedSides(1, 0, PipeLayer.BASE),
-                "lava with water on its west side; the empty pipes and the other layer do not count");
+        Check.equal(LinkFlags.bit(Direction.WEST) | LinkFlags.VERTICAL, grid.getFluidBlockedSides(1, 0, PipeLayer.BASE),
+                "lava with water on its west side and in the underground pipe on its tile; the empty pipes do not count");
         Check.equal(LinkFlags.bit(Direction.EAST), grid.getFluidBlockedSides(0, 0, PipeLayer.BASE), "both sides of the face");
         Check.equal(0, grid.getFluidBlockedSides(2, 0, PipeLayer.BASE), "an empty pipe is blocked by nothing");
         Check.equal(0, grid.getFluidBlockedSides(1, 1, PipeLayer.BASE));
-        Check.equal(0, grid.getFluidBlockedSides(1, 0, PipeLayer.UNDERGROUND), "no underground neighbours");
+        Check.equal(LinkFlags.VERTICAL, grid.getFluidBlockedSides(1, 0, PipeLayer.UNDERGROUND),
+                "the vertical face, from both pipes; no underground neighbours");
         Check.equal(0, grid.getFluidBlockedSides(5, 5, PipeLayer.BASE), "no pipe");
         Check.isTrue(grid.areLinked(base(grid, 0, 0), base(grid, 1, 0)), "the flags are open: only the fluids block");
         Fluids.set(grid, 2, 0, PipeLayer.BASE, FluidType.FRESHWATER, 5);
-        Check.equal(LinkFlags.bit(Direction.WEST) | LinkFlags.bit(Direction.EAST),
-                grid.getFluidBlockedSides(1, 0, PipeLayer.BASE), "water on both sides");
+        Check.equal(LinkFlags.bit(Direction.WEST) | LinkFlags.bit(Direction.EAST) | LinkFlags.VERTICAL,
+                grid.getFluidBlockedSides(1, 0, PipeLayer.BASE), "water on both sides and under it");
+    }
+
+    public static void testUndergroundFacesBetweenTwoFluidsAreBlocked() {
+        PipeGrid grid = grid();
+        Fluids.line(grid, 0, 2, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
+        grid.placePipe(1, -1, PipeLayer.UNDERGROUND, MineralTier.COPPER);
+        grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.COPPER);
+        Fluids.set(grid, 0, 0, PipeLayer.UNDERGROUND, FluidType.FRESHWATER, 5);
+        Fluids.set(grid, 1, 0, PipeLayer.UNDERGROUND, FluidType.FRESHWATER, 5);
+        Fluids.set(grid, 2, 0, PipeLayer.UNDERGROUND, FluidType.LAVA, 5);
+        Fluids.set(grid, 1, -1, PipeLayer.UNDERGROUND, FluidType.SLIME, 5);
+        Check.equal(LinkFlags.bit(Direction.EAST) | LinkFlags.bit(Direction.NORTH),
+                grid.getFluidBlockedSides(1, 0, PipeLayer.UNDERGROUND), "lava east, slime north, water west");
+        Check.equal(LinkFlags.bit(Direction.WEST), grid.getFluidBlockedSides(2, 0, PipeLayer.UNDERGROUND), "the other side");
+        Check.equal(0, grid.getFluidBlockedSides(0, 0, PipeLayer.UNDERGROUND), "same fluid next to it");
+        Check.equal(0, grid.getFluidBlockedSides(2, 0, PipeLayer.BASE), "an empty basic pipe over it is blocked by nothing");
+
+        Fluids.set(grid, 2, 0, PipeLayer.BASE, FluidType.FRESHWATER, 5);
+        Check.equal(LinkFlags.bit(Direction.WEST) | LinkFlags.VERTICAL, grid.getFluidBlockedSides(2, 0, PipeLayer.UNDERGROUND),
+                "water in the basic pipe on its tile");
+        Check.equal(LinkFlags.VERTICAL, grid.getFluidBlockedSides(2, 0, PipeLayer.BASE), "both sides of the vertical face");
+        Check.isFalse(grid.areLinked(grid.getPipe(2, 0, PipeLayer.BASE), under(grid, 2, 0)),
+                "only the fluids block it here; the flags are a separate matter");
+        grid.toggleVertical(2, 0);
+        Check.isTrue(grid.areLinked(grid.getPipe(2, 0, PipeLayer.BASE), under(grid, 2, 0)), "linked by the wrench");
+        Check.equal(LinkFlags.VERTICAL, grid.getFluidBlockedSides(2, 0, PipeLayer.BASE), "still a dead end (N13-2)");
+        Check.isTrue(grid.getNetwork(2, 0, PipeLayer.BASE) != grid.getNetwork(2, 0, PipeLayer.UNDERGROUND),
+                "the two fluids stay apart");
+    }
+
+    public static void testBlockedFacesAreSentOnlyWhenTheyChange() {
+        PipeGrid grid = grid();
+        BlockedFaceSync sync = new BlockedFaceSync(grid, PipeLayer.UNDERGROUND);
+        Fluids.line(grid, 0, 2, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
+        Fluids.set(grid, 0, 0, PipeLayer.UNDERGROUND, FluidType.FRESHWATER, 5);
+        Check.equal("[]", tiles(sync.changedTiles(0, 0, PipeLayer.UNDERGROUND)), "one fluid: nothing blocked");
+        Fluids.set(grid, 1, 0, PipeLayer.UNDERGROUND, FluidType.FRESHWATER, 5);
+        Check.equal("[]", tiles(sync.changedTiles(1, 0, PipeLayer.UNDERGROUND)), "the same fluid");
+
+        Fluids.set(grid, 2, 0, PipeLayer.UNDERGROUND, FluidType.LAVA, 5);
+        Check.equal("[2,0, 1,0]", tiles(sync.changedTiles(2, 0, PipeLayer.UNDERGROUND)), "both pipes of the face");
+        Check.equal(LinkFlags.bit(Direction.WEST), sync.toSend(2, 0));
+        Check.equal(LinkFlags.bit(Direction.EAST), sync.toSend(1, 0));
+        Check.equal("[]", tiles(sync.changedTiles(2, 0, PipeLayer.UNDERGROUND)), "sent: nothing changed since");
+
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
+        Fluids.set(grid, 1, 0, PipeLayer.BASE, FluidType.SLIME, 5);
+        Check.equal("[1,0]", tiles(sync.changedTiles(1, 0, PipeLayer.BASE)),
+                "a basic pipe on the tile changes only the vertical face there");
+        Check.equal(LinkFlags.bit(Direction.EAST) | LinkFlags.VERTICAL, sync.toSend(1, 0));
+
+        grid.removePipe(2, 0, PipeLayer.UNDERGROUND);
+        Check.equal("[2,0, 1,0]", tiles(sync.changedTiles(2, 0, PipeLayer.UNDERGROUND)), "removed with its lava");
+        Check.equal(0, sync.toSend(2, 0), "no pipe: nothing blocked");
+        Check.equal(LinkFlags.VERTICAL, sync.toSend(1, 0));
+        Check.equal(0, sync.sentAt(2, 0), "tiles without blocked faces are not kept");
+    }
+
+    private static String tiles(List<Long> keys) {
+        List<String> result = new ArrayList<>();
+        for (long key : keys) {
+            result.add(PipeGrid.keyX(key) + "," + PipeGrid.keyY(key));
+        }
+        return result.toString();
     }
 
     public static void testListenerHearsWhenAPipeStartsOrStopsHoldingFluid() {

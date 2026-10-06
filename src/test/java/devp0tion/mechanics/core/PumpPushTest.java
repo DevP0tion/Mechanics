@@ -524,6 +524,42 @@ final class PumpPushTest {
         Check.equal(Status.NO_SOURCE, Fluids.cycle(pump).getStatus(), "source empty");
     }
 
+    public static void testNothingReachesARemovedControllersTankInTheSameTick() {
+        // The controller breaks in a tick in which the pump runs before the valve looks its tank up
+        // again: the valve still points at the old storage, which is released (N19-2: the fluid in it
+        // is lost, nothing more goes in).
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
+        TankStorage tank = Fluids.tank(1000);
+        TankValve valve = Fluids.valveOf(tank);
+        grid.placeValve(2, 0, valve);
+        Fluids.cycle(pump);
+        Check.equal(20, Fluids.cycle(pump).getDelivered(valve), "pumping into the tank");
+        tank.release();
+        PumpResult result = Fluids.cycle(pump);
+        Check.equal(Status.NO_DESTINATION, result.getStatus(), "the removed tank is no destination");
+        Check.equal(20, tank.getAmount(), "nothing more went in");
+        Check.equal(0, pump.getAmount(), "nothing pulled");
+    }
+
+    public static void testNothingIsPulledFromARemovedControllersTank() {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        TankStorage source = Fluids.tank(100);
+        source.insert(FluidType.FRESHWATER, 100);
+        grid.placeValve(0, 1, Fluids.valveOf(source));
+        Pump pump = new Pump(PumpTier.FIRE);
+        pump.setFuelSupply(new Fluids.Logs(5));
+        grid.placePump(0, 0, pump);
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
+        grid.placeValve(2, 0, Fluids.valve(1000));
+        Check.equal(20, Fluids.cycle(pump).getMoved(), "pulling from the tank");
+        source.release();
+        Check.equal(Status.NO_SOURCE, Fluids.cycle(pump).getStatus(), "the removed tank gives nothing");
+        Check.equal(80, source.getAmount(), "untouched");
+        Check.equal(1, pump.getSourceSlots().size(), "the valve stays connected: only its tank is gone (N19-1)");
+    }
+
     public static void testPumpWithoutSource() {
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = new Pump(PumpTier.FIRE);

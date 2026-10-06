@@ -30,9 +30,13 @@ public final class TankValve {
     private boolean enabled = true;
     private int links = LinkFlags.ALL_OPEN;
 
-    /** The tank this valve belongs to, or {@code null} when it is not part of a recognized tank. */
+    /**
+     * The tank this valve belongs to, or {@code null} when it is not part of a recognized tank. A
+     * released tank (its controller is gone, {@link TankStorage#release}) is none, also before the game
+     * looks the valve's tank up again.
+     */
     public TankStorage getTank() {
-        return tank;
+        return tank == null || tank.isReleased() ? null : tank;
     }
 
     public void setTank(TankStorage tank) {
@@ -84,22 +88,25 @@ public final class TankValve {
 
     /** The fluid stored in its tank (also while the tank is inactive), or {@code null}. */
     public FluidType getStoredFluid() {
-        return tank == null ? null : tank.getFluid();
+        TankStorage current = getTank();
+        return current == null ? null : current.getFluid();
     }
 
     /** How much of {@code type} the valve would pass into its tank now. */
     public int getSpaceFor(FluidType type) {
-        return enabled && tank != null ? tank.getSpaceFor(type) : 0;
+        TankStorage current = getTank();
+        return enabled && current != null ? current.getSpaceFor(type) : 0;
     }
 
     /** Passes up to {@code amount} of {@code type} into the tank; returns the amount taken. */
     int insert(FluidType type, int amount) {
-        return enabled && tank != null ? tank.insert(type, amount) : 0;
+        TankStorage current = getTank();
+        return enabled && current != null ? current.insert(type, amount) : 0;
     }
 
     @Override
     public String toString() {
-        return "TankValve[" + (enabled ? "on" : "off") + ", " + tank + "]";
+        return "TankValve[" + (enabled ? "on" : "off") + ", " + getTank() + "]";
     }
 
 }
