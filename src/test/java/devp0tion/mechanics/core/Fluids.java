@@ -1,5 +1,7 @@
 package devp0tion.mechanics.core;
 
+import java.util.Collections;
+
 /** Test helpers for the fluid and pipe tests. */
 final class Fluids {
 
@@ -26,7 +28,7 @@ final class Fluids {
 
     static TankValidation validTank(int capacity) {
         return TankValidation.valid(new TankBounds(0, 0, 3, 3), TankValidation.InteriorCondition.ALL_EMPTY,
-                MineralTier.COPPER, capacity, 0, 0, 1);
+                MineralTier.COPPER, capacity, new GridPos(0, 0), Collections.singletonList(new GridPos(1, 0)));
     }
 
     /** A valve of a new tank with the given capacity. */

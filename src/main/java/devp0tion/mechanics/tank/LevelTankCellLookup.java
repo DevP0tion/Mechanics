@@ -1,6 +1,9 @@
 package devp0tion.mechanics.tank;
 
 import devp0tion.mechanics.core.CellKind;
+import devp0tion.mechanics.core.GridPos;
+import devp0tion.mechanics.core.MineralTier;
+import devp0tion.mechanics.core.TankBounds;
 import devp0tion.mechanics.core.TankCell;
 import devp0tion.mechanics.core.TankCellLookup;
 import devp0tion.mechanics.core.TankStructure;
@@ -8,6 +11,8 @@ import devp0tion.mechanics.objects.GlassBlockObject;
 import devp0tion.mechanics.objects.MineralWallObject;
 import devp0tion.mechanics.objects.TankControllerObject;
 import devp0tion.mechanics.objects.TankValveObject;
+import devp0tion.mechanics.objects.TankValveObjectItem;
+import necesse.engine.registries.ObjectLayerRegistry;
 import necesse.level.gameObject.GameObject;
 import necesse.level.gameTile.GameTile;
 import necesse.level.maps.Level;
@@ -17,15 +22,15 @@ import necesse.level.maps.Level;
  * in {@link TankStructure}.
  *
  * <ul>
- *     <li>Only the base object layer (layer 0, where walls and blocks go, D1) is read
- *     ({@link #objectFor}).
- *     TODO(design): which layers count in the interior "empty" / "glass only" checks (5-5, 5-11)
- *     and for the border is undecided: wall decorations (wallDecor), the tile layer (carpets), the
- *     future underground pipe layer (9-1), and a real liquid tile underfoot. Today they are all
- *     ignored (an interior cell on a liquid tile with no object is empty). The decision belongs in
- *     {@link #objectFor} and {@link #getCell}.</li>
- *     <li>No object: {@link CellKind#EMPTY}. Mineral wall, tank controller, tank valve, glass block:
- *     their kinds. Anything else: {@link CellKind#OTHER}.</li>
+ *     <li>The kind comes from the base object layer (layer 0, where walls and blocks go, D1): no
+ *     object is {@link CellKind#EMPTY}; mineral wall, tank controller, tank valve, glass block are
+ *     their kinds; anything else is {@link CellKind#OTHER}.</li>
+ *     <li>Mineral walls carry their tier; valves their tier and the controller they belong to
+ *     ({@link TankValveObjectEntity}, N13-3, N13-5); controllers the tank they keep
+ *     ({@link TankControllerObjectEntity}, N13-3).</li>
+ *     <li>For the interior checks (N15-4): whether any other object layer holds something (wall and
+ *     table decorations, carpets, every other registered layer) except the underground pipe layer
+ *     ({@link #countsForInterior}), and whether the floor is a liquid tile.</li>
  *     <li>Tiles outside the level or in a region that is not loaded read as {@code null} (something
  *     else). Callers that must not judge a tank by unloaded tiles check {@link #isAreaLoaded}
  *     first (D5).</li>
@@ -35,8 +40,7 @@ public final class LevelTankCellLookup implements TankCellLookup {
 
     private static final TankCell EMPTY = TankCell.of(CellKind.EMPTY);
     private static final TankCell OTHER = TankCell.of(CellKind.OTHER);
-    private static final TankCell CONTROLLER = TankCell.of(CellKind.CONTROLLER);
-    private static final TankCell VALVE = TankCell.of(CellKind.VALVE);
+    private static final TankCell CONTROLLER = TankCell.controller();
     private static final TankCell GLASS = TankCell.of(CellKind.GLASS);
 
     private final Level level;
@@ -50,18 +54,32 @@ public final class LevelTankCellLookup implements TankCellLookup {
         if (!isReadable(level, tileX, tileY)) {
             return null;
         }
-        return cellOf(objectFor(level, tileX, tileY)).withTankFloor(isTankFloor(level.getTile(tileX, tileY)));
+        GameTile tile = level.getTile(tileX, tileY);
+        return cellAt(level, tileX, tileY)
+                .withTankFloor(isTankFloor(tile))
+                .withLiquidFloor(tile.isLiquid)
+                .withOtherLayerObject(hasOtherLayerObject(level, tileX, tileY));
     }
 
-    /**
-     * The object that decides a tile's kind: the base layer object.
-     * TODO(design): other layers and liquid tiles are ignored (see the class comment).
-     */
-    private static GameObject objectFor(Level level, int tileX, int tileY) {
-        return level.getObject(0, tileX, tileY);
+    /** The cell of the base layer object on a tile, with its tier and ownership. */
+    private static TankCell cellAt(Level level, int tileX, int tileY) {
+        GameObject object = level.getObject(ObjectLayerRegistry.BASE_LAYER, tileX, tileY);
+        if (object instanceof TankControllerObject) {
+            TankControllerObjectEntity controller = level.entityManager.getObjectEntity(tileX, tileY,
+                    TankControllerObjectEntity.class);
+            TankBounds kept = controller == null ? null : controller.getKeptTank();
+            return kept == null ? CONTROLLER : TankCell.controller(kept);
+        }
+        if (object instanceof TankValveObject) {
+            TankValveObjectEntity valve = level.entityManager.getObjectEntity(tileX, tileY, TankValveObjectEntity.class);
+            MineralTier tier = valve == null ? TankValveObjectItem.DEFAULT_TIER : valve.getTier();
+            GridPos owner = valve == null ? null : valve.getOwner();
+            return TankCell.valve(tier, owner);
+        }
+        return cellOf(object);
     }
 
-    /** The tank kind of an object. */
+    /** The tank kind of an object without per-tile state (controllers keep no tank). */
     public static TankCell cellOf(GameObject object) {
         if (object.getID() == 0) {
             return EMPTY;
@@ -73,12 +91,39 @@ public final class LevelTankCellLookup implements TankCellLookup {
             return CONTROLLER;
         }
         if (object instanceof TankValveObject) {
-            return VALVE;
+            return TankCell.valve(TankValveObjectItem.DEFAULT_TIER);
         }
         if (object instanceof GlassBlockObject) {
             return GLASS;
         }
         return OTHER;
+    }
+
+    /**
+     * Whether any object layer other than the base layer holds an object on the tile, among the
+     * layers that count for the interior checks (N15-4).
+     */
+    private static boolean hasOtherLayerObject(Level level, int tileX, int tileY) {
+        for (int layerID : ObjectLayerRegistry.getLayerIDs()) {
+            if (layerID == ObjectLayerRegistry.BASE_LAYER || !countsForInterior(layerID)) {
+                continue;
+            }
+            if (level.getObjectID(layerID, tileX, tileY) != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether an object layer counts for the interior checks (N15-4): every layer except the
+     * underground pipe layer (9-1).
+     * TODO(game): the underground pipe layer does not exist yet (pipe implementation round). Once it
+     * is registered ({@code ObjectLayerRegistry.registerLayer}), return {@code false} for its layer ID
+     * here.
+     */
+    static boolean countsForInterior(int layerID) {
+        return true;
     }
 
     /**

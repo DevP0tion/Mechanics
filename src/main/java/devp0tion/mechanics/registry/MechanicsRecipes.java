@@ -2,6 +2,8 @@ package devp0tion.mechanics.registry;
 
 import devp0tion.mechanics.core.MineralTier;
 import devp0tion.mechanics.objects.MineralWallObject;
+import devp0tion.mechanics.objects.TankValveObjectItem;
+import necesse.engine.network.gameNetworkData.GNDItemMap;
 import necesse.engine.registries.RecipeTechRegistry;
 import necesse.inventory.recipe.Ingredient;
 import necesse.inventory.recipe.Recipe;
@@ -64,7 +66,10 @@ public final class MechanicsRecipes {
                 }
         ));
 
-        // Tank valve: any mineral wall 1, any pipe 2 (N10-3).
+        // Tank valve: any mineral wall 1, any pipe 2 (N10-3). The crafted valve gets the tier of the
+        // mineral wall used (N13-5 ②): the recipe's crafted event lists the items used, and the
+        // listener stores the wall's tier in the result item. The display item says where the tier
+        // comes from instead of showing one.
         // TODO(game): no pipe exists yet, so the "any pipe" group is empty and this recipe cannot be
         // crafted until the pipes are added (4th implementation round).
         Recipes.registerModRecipe(new Recipe(
@@ -74,8 +79,10 @@ public final class MechanicsRecipes {
                 new Ingredient[]{
                         new Ingredient(MechanicsIngredients.ANY_MINERAL_WALL, 1),
                         new Ingredient(MechanicsIngredients.ANY_PIPE, 2)
-                }
-        ));
+                },
+                false,
+                new GNDItemMap().setBoolean(TankValveObjectItem.TIER_FROM_WALL_KEY, true)
+        ).onCrafted(TankValveObjectItem::onCrafted));
 
         // Glass block: vanilla glass 5 -> 1 (N10-4).
         Recipes.registerModRecipe(new Recipe(

@@ -2,6 +2,7 @@ package devp0tion.mechanics.tank;
 
 import devp0tion.mechanics.client.TankFluidRendering;
 import devp0tion.mechanics.core.FluidType;
+import devp0tion.mechanics.core.GridPos;
 import devp0tion.mechanics.core.TankBounds;
 import devp0tion.mechanics.core.TankStatusText;
 import devp0tion.mechanics.core.TankStorage;
@@ -25,6 +26,12 @@ import java.util.Objects;
  *     <li>Searches its tank ({@link TankStructure#findTank}) when it is created and again after
  *     any object or floor tile within reach changed ({@link TankRegistry#onTileChanged}, 5-1). While
  *     part of the area a tank could cover is not loaded, the search waits (D5).</li>
+ *     <li>First come, first served (N13-3): it keeps the tank it recognized ({@link #getKeptTank()})
+ *     while that rectangle is valid, even when a later change also puts it in another tank's border,
+ *     and it remembers that tank while it is invalid. The valves of its tank become its own
+ *     ({@link TankValveObjectEntity#getOwner()}). The kept tank is saved and synced to clients.</li>
+ *     <li>The regions its recognized tank spans are kept loaded together (N15-6,
+ *     {@link TankRegionsLevelData}).</li>
  *     <li>One fluid type and amount, saved with the world ({@link TankStorage}, 12-7). A broken
  *     wall deactivates the tank and keeps the fluid (5-9); a rebuilt tank smaller than the stored
  *     amount loses the excess (N11-2); breaking the controller loses the fluid with this entity
@@ -44,7 +51,11 @@ public class TankControllerObjectEntity extends ObjectEntity {
     // Server state.
     private final TankStorage storage = new TankStorage();
     private boolean structureChanged = true;
-    private TankBounds recognized;
+    private TankBounds regionsRegisteredFor;
+    private boolean regionsRegistered;
+
+    // The tank this controller keeps (N13-3): saved, and synced to clients for their placement checks.
+    private TankBounds kept;
 
     // The view synced to clients (on the server: the last state sent).
     private boolean viewActive;
@@ -67,6 +78,8 @@ public class TankControllerObjectEntity extends ObjectEntity {
     public void remove() {
         super.remove();
         unregister();
+        // Its tank's cells may now belong to other tanks (also when only unloading: harmless).
+        TankRegistry.onTankReleased(getLevel(), kept);
     }
 
     @Override
@@ -96,26 +109,67 @@ public class TankControllerObjectEntity extends ObjectEntity {
             searchTank();
         }
         updateView();
+        updateRegionKeeping();
     }
 
     private void searchTank() {
         Level level = getLevel();
         if (!LevelTankCellLookup.isAreaLoaded(level, tileX, tileY)) {
-            // TODO(design): re-recognizing a tank that straddles a region boundary (D5) is
-            // undecided. Today the controller keeps its previous state while any tile within reach
-            // is unloaded and searches again once everything is loaded (retried every tick); a
-            // region unloading later does not change the tank.
+            // The regions a recognized tank spans are kept loaded together (N15-6), so a tank is not
+            // judged by half of it. The search area (the whole reach) can still cover regions beyond
+            // the tank: the controller keeps its previous state and searches again once everything
+            // within reach is loaded (retried every tick).
             return;
         }
         structureChanged = false;
         TankValidation tank = TankStructure.findTank(tileX, tileY, new LevelTankCellLookup(level)).getTank();
+        // A valid smaller tank loses the excess at once, an invalid one keeps everything (N13-4).
         storage.applyStructure(tank);
-        recognized = tank == null ? null : tank.getBounds();
+        if (tank != null) {
+            setKeptTank(tank.getBounds());
+            claimValves(tank);
+        }
+        // No tank: the kept tank is still remembered (N13-3) and the storage is inactive (5-9).
+    }
+
+    private void setKeptTank(TankBounds bounds) {
+        if (!Objects.equals(bounds, kept)) {
+            TankBounds old = kept;
+            kept = bounds;
+            TankRegistry.onTankReleased(getLevel(), old);
+            markDirty();
+        }
+    }
+
+    /** The valves of the recognized tank become this controller's (N13-3). */
+    private void claimValves(TankValidation tank) {
+        GridPos self = new GridPos(tileX, tileY);
+        for (GridPos position : tank.getValves()) {
+            TankValveObjectEntity valve = getLevel().entityManager.getObjectEntity(position.x, position.y,
+                    TankValveObjectEntity.class);
+            if (valve != null) {
+                valve.setOwner(self);
+            }
+        }
+    }
+
+    /** Keeps the regions of the recognized tank loaded together (N15-6). */
+    private void updateRegionKeeping() {
+        TankBounds active = storage.isActive() ? kept : null;
+        if (regionsRegistered && Objects.equals(active, regionsRegisteredFor)) {
+            return;
+        }
+        TankRegionsLevelData data = TankRegionsLevelData.get(getLevel(), active != null);
+        if (data != null) {
+            data.setTank(tileX, tileY, active);
+        }
+        regionsRegisteredFor = active;
+        regionsRegistered = true;
     }
 
     private void updateView() {
         boolean active = storage.isActive();
-        TankBounds bounds = active ? recognized : null;
+        TankBounds bounds = active ? kept : null;
         if (active != viewActive || !Objects.equals(bounds, viewBounds) || storage.getFluid() != viewFluid
                 || storage.getAmount() != viewAmount || storage.getCapacity() != viewCapacity) {
             viewActive = active;
@@ -132,12 +186,26 @@ public class TankControllerObjectEntity extends ObjectEntity {
         return storage;
     }
 
+    /**
+     * The tank this controller keeps (N13-3): the last tank it recognized, also while that tank is
+     * invalid, or {@code null}. Both sides (synced to clients).
+     */
+    public TankBounds getKeptTank() {
+        return kept;
+    }
+
     @Override
     public void addSaveData(SaveData save) {
         super.addSaveData(save);
         if (storage.getFluid() != null) {
             save.addEnum("fluid", storage.getFluid());
             save.addInt("amount", storage.getAmount());
+        }
+        if (kept != null) {
+            save.addInt("tankX", kept.x);
+            save.addInt("tankY", kept.y);
+            save.addInt("tankWidth", kept.outerWidth);
+            save.addInt("tankHeight", kept.outerHeight);
         }
     }
 
@@ -148,6 +216,10 @@ public class TankControllerObjectEntity extends ObjectEntity {
         int amount = save.getInt("amount", 0, false);
         if (fluid != null && amount > 0) {
             storage.setContents(fluid, amount);
+        }
+        if (save.hasLoadDataByName("tankX")) {
+            kept = new TankBounds(save.getInt("tankX", 0, false), save.getInt("tankY", 0, false),
+                    save.getInt("tankWidth", 0, false), save.getInt("tankHeight", 0, false));
         }
         structureChanged = true;
     }
@@ -168,6 +240,13 @@ public class TankControllerObjectEntity extends ObjectEntity {
         writer.putNextByte((byte) (viewFluid == null ? -1 : viewFluid.ordinal()));
         writer.putNextInt(viewAmount);
         writer.putNextInt(viewCapacity);
+        writer.putNextBoolean(kept != null);
+        if (kept != null) {
+            writer.putNextInt(kept.x);
+            writer.putNextInt(kept.y);
+            writer.putNextInt(kept.outerWidth);
+            writer.putNextInt(kept.outerHeight);
+        }
     }
 
     @Override
@@ -189,6 +268,15 @@ public class TankControllerObjectEntity extends ObjectEntity {
         viewFluid = fluidIndex >= 0 && fluidIndex < FluidType.values().length ? FluidType.values()[fluidIndex] : null;
         viewAmount = reader.getNextInt();
         viewCapacity = reader.getNextInt();
+        if (reader.getNextBoolean()) {
+            int x = reader.getNextInt();
+            int y = reader.getNextInt();
+            int width = reader.getNextInt();
+            int height = reader.getNextInt();
+            kept = new TankBounds(x, y, width, height);
+        } else {
+            kept = null;
+        }
         if (isClient()) {
             TankFluidRendering.onTankViewChanged(getLevel(), oldBounds, oldFluid, viewBounds, viewFluid);
         }

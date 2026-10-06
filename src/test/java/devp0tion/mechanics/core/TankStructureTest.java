@@ -4,8 +4,8 @@ import devp0tion.mechanics.core.TankValidation.InteriorCondition;
 import devp0tion.mechanics.core.TankValidation.Reason;
 
 /**
- * Tank recognition rules (3-1, 4-1, 4-3, 4-4, 4-5, 5-5, 5-7, 5-11, 5-13, 7-1) and capacity
- * (8-1, N4-1, N4-2, N4-4). See {@link Grid} for the map legend.
+ * Tank recognition rules (3-1, 4-1, 4-3, 4-4, 4-5, 5-5, 5-7, 5-11, 5-13, 7-1, N15-4) and capacity
+ * (8-1, N4-1, N4-2, N4-4, N13-5). See {@link Grid} for the map legend.
  */
 final class TankStructureTest {
 
@@ -44,7 +44,7 @@ final class TankStructureTest {
                 "aaaaaaa");
         expectValid(result);
         Check.equal(25, result.getBounds().getInteriorCellCount());
-        Check.equal(MineralTier.SPIDERITE, result.getLowestWallTier());
+        Check.equal(MineralTier.SPIDERITE, result.getLowestTier());
         Check.equal(47000, result.getCapacity(), "spiderite 25 cells = 47000 (N4-4)");
     }
 
@@ -265,6 +265,67 @@ final class TankStructureTest {
         Check.equal(Reason.INVALID_INTERIOR_OBJECT, validateWhole("##C##", "#GnG#", "#####").getReason());
     }
 
+    // ---------- Interior layers and liquid floors (N15-4) ----------
+
+    public static void testLiquidFloorIsNotEmpty() {
+        TankValidation result = validateWhole(
+                "##C##",
+                "#.~.#",
+                "#####");
+        Check.equal(Reason.LIQUID_FLOOR, result.getReason());
+    }
+
+    public static void testGlassOnALiquidFloorIsInvalid() {
+        Grid grid = Grid.of(
+                "##C##",
+                "#GGG#",
+                "#####").set(2, 1, TankCell.of(CellKind.GLASS).withLiquidFloor(true));
+        Check.equal(Reason.LIQUID_FLOOR, TankStructure.validate(0, 0, 5, 3, grid).getReason());
+    }
+
+    public static void testObjectOnAnotherLayerIsNotEmpty() {
+        TankValidation result = validateWhole(
+                "##C##",
+                "#.*.#",
+                "#####");
+        Check.equal(Reason.INVALID_INTERIOR_OBJECT, result.getReason(), "a carpet is not empty (N15-4)");
+    }
+
+    public static void testObjectOnAnotherLayerOverGlassIsInvalid() {
+        Grid grid = Grid.of(
+                "##C##",
+                "#GGG#",
+                "#####").set(1, 1, TankCell.of(CellKind.GLASS).withOtherLayerObject(true));
+        Check.equal(Reason.INVALID_INTERIOR_OBJECT, TankStructure.validate(0, 0, 5, 3, grid).getReason());
+    }
+
+    public static void testTankFloorNeedsTheOtherLayersEmpty() {
+        Grid grid = Grid.of(
+                "##C##",
+                "#g,g#",
+                "#####").set(2, 1, TankCell.of(CellKind.EMPTY).withTankFloor(true).withOtherLayerObject(true));
+        Check.equal(Reason.INVALID_INTERIOR_OBJECT, TankStructure.validate(0, 0, 5, 3, grid).getReason());
+    }
+
+    public static void testInvalidObjectIsReportedBeforeLiquidFloor() {
+        TankValidation result = validateWhole(
+                "##C##",
+                "#~*.#",
+                "#####");
+        Check.equal(Reason.INVALID_INTERIOR_OBJECT, result.getReason());
+    }
+
+    public static void testBorderOnlyLooksAtTheBaseLayer() {
+        // The interior rules (5-5, 5-11) look at every layer (N15-4); the border is the base layer.
+        Grid grid = Grid.of(
+                "##C##",
+                "#...#",
+                "#####")
+                .set(0, 1, TankCell.mineralWall(MineralTier.COPPER).withOtherLayerObject(true))
+                .set(4, 1, TankCell.mineralWall(MineralTier.COPPER).withLiquidFloor(true));
+        expectValid(TankStructure.validate(0, 0, 5, 3, grid));
+    }
+
     // ---------- Capacity ----------
 
     public static void testCapacityUsesLowestWallTier() {
@@ -274,7 +335,7 @@ final class TankStructureTest {
                 "a...#",
                 "aaaaa");
         expectValid(result);
-        Check.equal(MineralTier.COPPER, result.getLowestWallTier());
+        Check.equal(MineralTier.COPPER, result.getLowestTier());
         Check.equal(6 * 40 * 1, result.getCapacity());
     }
 
@@ -287,8 +348,59 @@ final class TankStructureTest {
                 "2GGG5",
                 "55555");
         expectValid(result);
-        Check.equal(MineralTier.IRON, result.getLowestWallTier());
+        Check.equal(MineralTier.IRON, result.getLowestTier());
         Check.equal(9 * 40 * 2, result.getCapacity());
+    }
+
+    public static void testControllerNeverLowersTheMultiplier() {
+        // N13-5 ①: the controller counts as the highest tier.
+        Check.equal(MineralTier.SPIDERITE, TankStructure.CONTROLLER_TIER);
+        Check.equal(MineralTier.highest(), TankStructure.CONTROLLER_TIER);
+        for (MineralTier tier : MineralTier.values()) {
+            char wall = (char) (tier.ordinal() < 10 ? '0' + tier.ordinal() : 'a');
+            String row = "" + wall + 'C' + wall;
+            TankValidation result = validateWhole(row, "" + wall + 'G' + wall, "" + wall + wall + wall);
+            expectValid(result);
+            Check.equal(tier, result.getLowestTier(), tier.name());
+            Check.equal(40 * tier.getCapacityMultiplier(), result.getCapacity(), tier.name());
+        }
+    }
+
+    public static void testValveTierLowersTheMultiplier() {
+        // N13-5 ②③: spiderite walls with a copper valve: the copper valve sets the multiplier.
+        TankValidation result = validateWhole(
+                "aaCaa",
+                "a...V",
+                "aaaaa");
+        expectValid(result);
+        Check.equal(MineralTier.COPPER, result.getLowestTier());
+        Check.equal(3 * 40 * 1, result.getCapacity());
+    }
+
+    public static void testHigherValveTierDoesNotRaiseTheMultiplier() {
+        Grid grid = Grid.of(
+                "11C11",
+                "1...1",
+                "11111").set(4, 1, TankCell.valve(MineralTier.SPIDERITE));
+        TankValidation result = TankStructure.validate(0, 0, 5, 3, grid);
+        expectValid(result);
+        Check.equal(MineralTier.IRON, result.getLowestTier());
+        Check.equal(3 * 40 * 2, result.getCapacity());
+    }
+
+    public static void testOneMultiplierFromWallsAndValves() {
+        // Tungsten walls, gold and glacial valves: gold (multiplier 3) for the whole tank (N13-5 ③).
+        Grid grid = Grid.of(
+                "55C55",
+                "5GGG5",
+                "55555")
+                .set(0, 1, TankCell.valve(MineralTier.GOLD))
+                .set(4, 1, TankCell.valve(MineralTier.GLACIAL));
+        TankValidation result = TankStructure.validate(0, 0, 5, 3, grid);
+        expectValid(result);
+        Check.equal(MineralTier.GOLD, result.getLowestTier());
+        Check.equal(3 * 40 * 3, result.getCapacity());
+        Check.equal(2, result.getValveCount());
     }
 
     public static void testCapacityFormula() {
@@ -309,7 +421,21 @@ final class TankStructureTest {
 
     public static void testTankCellFactories() {
         Check.throwsException(IllegalArgumentException.class, () -> TankCell.of(CellKind.MINERAL_WALL));
+        Check.throwsException(IllegalArgumentException.class, () -> TankCell.of(CellKind.VALVE));
         Check.throwsException(NullPointerException.class, () -> TankCell.mineralWall(null));
+        Check.throwsException(NullPointerException.class, () -> TankCell.valve(null));
+        TankCell valve = TankCell.valve(MineralTier.IVY, new GridPos(3, 4));
+        Check.equal(CellKind.VALVE, valve.getKind());
+        Check.equal(MineralTier.IVY, valve.getMineral(), "a valve carries its tier (N13-5)");
+        Check.equal(new GridPos(3, 4), valve.getValveOwner());
+        Check.isNull(TankCell.valve(MineralTier.IVY).getValveOwner(), "no owner");
+        TankBounds kept = new TankBounds(0, 0, 3, 3);
+        Check.equal(kept, TankCell.controller(kept).getKeptTank());
+        Check.isNull(TankCell.controller().getKeptTank(), "keeps nothing");
+        Check.isNull(TankCell.controller().getMineral(), "the controller has no tier of its own");
+        TankCell floor = TankCell.of(CellKind.EMPTY).withLiquidFloor(true).withOtherLayerObject(true);
+        Check.isTrue(floor.isLiquidFloor() && floor.hasOtherLayerObject(), "interior flags");
+        Check.equal(TankCell.of(CellKind.EMPTY), floor.withLiquidFloor(false).withOtherLayerObject(false));
         TankCell wall = TankCell.mineralWall(MineralTier.GOLD);
         Check.equal(CellKind.MINERAL_WALL, wall.getKind());
         Check.equal(MineralTier.GOLD, wall.getMineral());

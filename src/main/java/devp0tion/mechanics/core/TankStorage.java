@@ -12,7 +12,9 @@ package devp0tion.mechanics.core;
  *     inactive: it keeps its fluid and its last capacity (5-9) but takes and gives nothing until it
  *     is valid again.</li>
  *     <li>When a valid structure is applied whose capacity is below the stored amount (the tank was
- *     rebuilt with fewer cells or lower-tier walls), the excess is lost (N11-2).</li>
+ *     rebuilt with fewer cells or lower-tier walls or valves), the excess is lost at once (N11-2,
+ *     N13-4), even when that smaller tank only exists for a moment while the tank is being rebuilt or
+ *     extended.</li>
  * </ul>
  */
 public final class TankStorage extends LiquidStorage {
@@ -27,7 +29,7 @@ public final class TankStorage extends LiquidStorage {
     /**
      * Applies the result of the controller's tank search: a valid tank activates the storage with
      * the tank's capacity and discards whatever no longer fits (N11-2); anything else (including
-     * {@code null}) deactivates it and keeps the fluid and the last capacity (5-9).
+     * {@code null}) deactivates it and keeps the fluid and the last capacity (5-9, N13-4).
      *
      * @return the amount lost because the new capacity is smaller than the stored amount
      */
@@ -35,10 +37,8 @@ public final class TankStorage extends LiquidStorage {
         if (validation != null && validation.isValid()) {
             setCapacity(validation.getCapacity());
             active = true;
-            // The only place where a tank loses fluid to a smaller capacity (N11-2).
-            // TODO(design): a capacity drop that is only temporary while the tank is being rebuilt
-            // (for example a lower-tier wall placed before the higher-tier one it replaces) also
-            // loses the excess; whether that should be spared is undecided.
+            // The only place where a tank loses fluid to a smaller capacity (N11-2). A capacity drop
+            // that is only temporary while the tank is being rebuilt loses the excess too (N13-4).
             return discardExcess();
         }
         active = false;

@@ -80,6 +80,12 @@ public enum MineralTier {
         return a.compareTo(b) <= 0 ? a : b;
     }
 
+    /** The highest tier in the tier order (spiderite, N4-3). */
+    public static MineralTier highest() {
+        MineralTier[] tiers = values();
+        return tiers[tiers.length - 1];
+    }
+
     /** Finds the tier whose bar item has the given stringID, or {@code null}. */
     public static MineralTier fromBarStringID(String barStringID) {
         for (MineralTier tier : values()) {

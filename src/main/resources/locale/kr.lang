@@ -13,9 +13,14 @@ anymineralwall=아무 광물 벽
 anypipe=아무 파이프
 
 [itemtooltip]
-// Placement rejection rules (N8-1, N11-1) and the valve's wire rule (N11-3), in the item descriptions (N11-6)
+// Placement rejection rules (N8-1, N11-1, N16-2) and the valve's wire rule (N11-3), in the item descriptions (N11-6)
 tankcontrollertip=두 탱크가 공유하는 벽에는 설치할 수 없습니다.
 tankvalvetip=두 탱크가 공유하는 벽에는 설치할 수 없습니다. 와이어 신호를 받으면 작동을 멈춥니다.
+tankinteriortip=인식된 탱크의 내부에는 설치할 수 없습니다.
+glassblocktip=인식된 탱크의 내부에는 유리 블럭만 설치할 수 있습니다.
+// Valve tier (N13-5): <wall> is the mineral wall's name.
+tankvalvetier=티어: <wall>
+tankvalvetierfromwall=티어: 제작에 쓴 광물 벽의 티어
 
 [fluid]
 // Fluid display names (12-5). The other fluids' names are undecided (TODO(design), FluidNames).

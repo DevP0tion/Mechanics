@@ -5,6 +5,8 @@ import devp0tion.mechanics.registry.MechanicsIngredients;
 import devp0tion.mechanics.registry.MechanicsObjects;
 import devp0tion.mechanics.registry.MechanicsRecipes;
 import devp0tion.mechanics.registry.MechanicsTech;
+import devp0tion.mechanics.tank.TankInteriorPlacement;
+import devp0tion.mechanics.tank.TankRegionsLevelData;
 import necesse.engine.modLoader.annotations.ModEntry;
 
 /**
@@ -20,6 +22,11 @@ public class MechanicsMod {
         MechanicsTech.load();
         MechanicsObjects.load();
         MechanicsContainers.load();
+        // Keeps the regions of each recognized tank loaded together (N15-6).
+        TankRegionsLevelData.register();
+        // Placement rejection inside recognized tanks (N16-2); objects also go through
+        // TankInteriorPatches.
+        TankInteriorPlacement.register();
     }
 
     public void initResources() {

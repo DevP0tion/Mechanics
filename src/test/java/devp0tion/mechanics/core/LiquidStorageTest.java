@@ -1,8 +1,8 @@
 package devp0tion.mechanics.core;
 
 /**
- * {@link LiquidStorage} capacity and type rules (12-7), tank storage (5-9, N4-4, N11-2), valves (N7-3,
- * N11-3) and sources (11-1, 11-2).
+ * {@link LiquidStorage} capacity and type rules (12-7), tank storage (5-9, N4-4, N11-2, N13-4), valves
+ * (N7-3, N11-3) and sources (11-1, 11-2).
  */
 final class LiquidStorageTest {
 
@@ -113,6 +113,60 @@ final class LiquidStorageTest {
         Check.equal(0, tank.applyStructure(null), "broken: nothing lost");
         Check.equal(90, tank.getAmount());
         Check.equal(100, tank.getCapacity(), "the last capacity is kept");
+    }
+
+    public static void testInvalidTankKeepsAllUntilValidAgainWithLessRoom() {
+        // N13-4: while invalid, everything is kept, however long; the moment it is valid again
+        // with a smaller capacity, the excess is lost.
+        TankStorage tank = Fluids.tank(100);
+        tank.insert(FluidType.SLIME, 90);
+        for (int i = 0; i < 3; i++) {
+            Check.equal(0, tank.applyStructure(null), "invalid: nothing lost");
+        }
+        Check.equal(90, tank.getAmount());
+        Check.equal(50, tank.applyStructure(Fluids.validTank(40)), "valid again with 40: 50 lost at once");
+        Check.equal(40, tank.getAmount());
+    }
+
+    public static void testTemporarySmallerTankWhileExtendingLosesTheExcess() {
+        // N13-4: a tank is extended to the right. Its right wall comes down (invalid, fluid kept);
+        // a wall placed inside first forms a smaller valid rectangle for a moment, and the excess is
+        // lost then; the bigger tank completed afterwards does not bring it back.
+        TankBounds original = new TankBounds(0, 0, 4, 3);
+        TankStorage tank = new TankStorage();
+        Grid built = Grid.of(
+                "#C##",
+                "#..#",
+                "####").set(1, 0, TankCell.controller(original));
+        tank.applyStructure(TankStructure.findTank(1, 0, built).getTank());
+        Check.equal(80, tank.getCapacity(), "2 cells x 40");
+        tank.insert(FluidType.FRESHWATER, 80);
+
+        Grid opened = Grid.of(
+                "#C###",
+                "#....",
+                "#####").set(1, 0, TankCell.controller(original));
+        Check.equal(0, tank.applyStructure(TankStructure.findTank(1, 0, opened).getTank()), "opened: kept");
+        Check.isFalse(tank.isActive(), "invalid while open");
+        Check.equal(80, tank.getAmount());
+
+        Grid smaller = Grid.of(
+                "#C###",
+                "#.#..",
+                "#####").set(1, 0, TankCell.controller(original));
+        TankValidation small = TankStructure.findTank(1, 0, smaller).getTank();
+        Check.equal(new TankBounds(0, 0, 3, 3), small.getBounds(), "the smaller rectangle");
+        Check.equal(40, tank.applyStructure(small), "40 lost at once");
+
+        Grid extended = Grid.of(
+                "#C####",
+                "#....#",
+                "######").set(1, 0, TankCell.controller(small.getBounds()));
+        TankValidation big = TankStructure.findTank(1, 0, extended).getTank();
+        Check.equal(new TankBounds(0, 0, 6, 3), big.getBounds());
+        Check.equal(0, tank.applyStructure(big));
+        Check.equal(40, tank.getAmount(), "the lost fluid does not come back");
+        Check.equal(160, tank.getCapacity());
     }
 
     public static void testLoadedFluidIsClampedOnlyByTheRecognizedTank() {

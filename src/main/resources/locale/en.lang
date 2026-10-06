@@ -15,10 +15,15 @@ anymineralwall=Any Mineral Wall
 anypipe=Any Pipe
 
 [itemtooltip]
-// Placement rejection rules (N8-1, N11-1) and the valve's wire rule (N11-3), in the item descriptions (N11-6).
+// Placement rejection rules (N8-1, N11-1, N16-2) and the valve's wire rule (N11-3), in the item descriptions (N11-6).
 // TODO(confirm): the English descriptions are not decided yet; plain translations of the Korean text.
 tankcontrollertip=Cannot be placed in a wall shared by two tanks.
 tankvalvetip=Cannot be placed in a wall shared by two tanks. Stops working while it receives a wire signal.
+tankinteriortip=Cannot be placed inside a recognized tank.
+glassblocktip=Inside a recognized tank, only glass blocks can be placed.
+// Valve tier (N13-5): <wall> is the mineral wall's name.
+tankvalvetier=Tier: <wall>
+tankvalvetierfromwall=Tier: that of the mineral wall used to craft it
 
 [fluid]
 // Fluid display names (12-5). The other fluids' names are undecided (TODO(design), FluidNames).

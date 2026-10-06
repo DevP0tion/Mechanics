@@ -10,19 +10,23 @@ import java.util.Map;
  * #        copper mineral wall
  * 0-9, a   mineral wall of MineralTier ordinal 0-9, a = 10 (0 = COPPER ... 8 = ANCIENTFOSSIL,
  *          9 = NIGHTSTEEL, a = SPIDERITE)
- * C        controller
- * V        valve
+ * C        controller keeping no tank
+ * V        copper valve belonging to no tank
  * G / g    glass (g: on the tank floor tile)
  * . / ,    empty (,: tank floor tile)
+ * ~        empty on a liquid floor tile
+ * *        empty base layer, but an object on another layer (a carpet, N15-4)
  * X / x    other object (x: on the tank floor tile)
  * n        the lookup returns null
  * </pre>
- * Tiles outside the rows are empty with a normal floor.
+ * Tiles outside the rows are empty with a normal floor. {@link #set} overrides single tiles (valve
+ * tiers, ownership, kept tanks).
  */
 final class Grid implements TankCellLookup {
 
     private final String[] rows;
     private final Map<Long, Integer> reads = new HashMap<>();
+    private final Map<Long, TankCell> overrides = new HashMap<>();
 
     private Grid(String[] rows) {
         this.rows = rows;
@@ -32,9 +36,22 @@ final class Grid implements TankCellLookup {
         return new Grid(rows);
     }
 
+    /** Replaces one tile's cell; returns this grid. */
+    Grid set(int tileX, int tileY, TankCell cell) {
+        overrides.put(key(tileX, tileY), cell);
+        return this;
+    }
+
+    private static long key(int tileX, int tileY) {
+        return ((long) tileX << 32) ^ (tileY & 0xffffffffL);
+    }
+
     @Override
     public TankCell getCell(int tileX, int tileY) {
-        reads.merge(((long) tileX << 32) ^ (tileY & 0xffffffffL), 1, Integer::sum);
+        reads.merge(key(tileX, tileY), 1, Integer::sum);
+        if (overrides.containsKey(key(tileX, tileY))) {
+            return overrides.get(key(tileX, tileY));
+        }
         if (tileY < 0 || tileY >= rows.length || tileX < 0 || tileX >= rows[tileY].length()) {
             return TankCell.of(CellKind.EMPTY);
         }
@@ -57,9 +74,9 @@ final class Grid implements TankCellLookup {
             case 'a':
                 return TankCell.mineralWall(MineralTier.values()[10]);
             case 'C':
-                return TankCell.of(CellKind.CONTROLLER);
+                return TankCell.controller();
             case 'V':
-                return TankCell.of(CellKind.VALVE);
+                return TankCell.valve(MineralTier.COPPER);
             case 'G':
                 return TankCell.of(CellKind.GLASS);
             case 'g':
@@ -68,6 +85,10 @@ final class Grid implements TankCellLookup {
                 return TankCell.of(CellKind.EMPTY);
             case ',':
                 return TankCell.of(CellKind.EMPTY).withTankFloor(true);
+            case '~':
+                return TankCell.of(CellKind.EMPTY).withLiquidFloor(true);
+            case '*':
+                return TankCell.of(CellKind.EMPTY).withOtherLayerObject(true);
             case 'X':
                 return TankCell.of(CellKind.OTHER);
             case 'x':

@@ -83,8 +83,9 @@ final class TankSearchTest {
     }
 
     public static void testControllerInSharedWallIsNotRecognized() {
-        // Two 3x3 tanks share the middle column, which holds the controller (N8-1 forbids it; this
-        // state can only arise when something other than the controller completes the second tank).
+        // Two 3x3 tanks share the middle column, which holds a controller that keeps no tank yet
+        // (N8-1 forbids placing it there; this state arises when one change completes both tanks,
+        // so neither came first). A controller that keeps a tank keeps it (TankOwnershipTest).
         Grid grid = Grid.of(
                 "#####",
                 "#GCG#",
@@ -121,7 +122,10 @@ final class TankSearchTest {
         Check.equal(new TankBounds(2, 2, 3, 3), TankStructure.findTank(4, 4, grid).getTank().getBounds());
     }
 
-    public static void testValveInSharedWallCountsForBothTanks() {
+    public static void testUnownedValveInSharedWallIsFreeForBothTanks() {
+        // A valve that belongs to no tank yet, between two tanks completed by the same change: each
+        // controller sees it as its own until one of them takes it (N13-3; which one is TODO(design),
+        // see TankSearchResult). TankOwnershipTest covers a valve that already has its tank.
         Grid grid = Grid.of(
                 "#####",
                 "CGVGC",

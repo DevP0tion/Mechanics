@@ -4,6 +4,7 @@ import devp0tion.mechanics.core.TankStructure;
 import devp0tion.mechanics.registry.MechanicsContainers;
 import devp0tion.mechanics.tank.LevelTankCellLookup;
 import devp0tion.mechanics.tank.TankControllerObjectEntity;
+import devp0tion.mechanics.tank.TankInteriorPlacement;
 import necesse.engine.localization.Localization;
 import necesse.engine.network.packet.PacketOpenContainer;
 import necesse.engine.registries.ContainerRegistry;
@@ -25,7 +26,9 @@ import java.awt.Color;
  *     breaking it loses the fluid (5-10).</li>
  *     <li>Interacting opens the controller window (5-4).</li>
  *     <li>Placement is rejected where the controller would be part of two tanks at once, i.e. in
- *     a wall shared by two tanks (N8-1); the item description says so (N11-6).</li>
+ *     a wall shared by two tanks (N8-1), judged against the tanks their controllers hold now (N13-3),
+ *     and inside a recognized tank (N16-2); the item description says so (N11-6).</li>
+ *     <li>It keeps the tank it recognized first (N13-3, {@link TankControllerObjectEntity}).</li>
  * </ul>
  */
 public class TankControllerObject extends TankBorderBlockObject {
@@ -87,8 +90,10 @@ public class TankControllerObject extends TankBorderBlockObject {
     @Override
     public ListGameTooltips getItemTooltips(InventoryItem item, PlayerMob perspective) {
         ListGameTooltips tooltips = super.getItemTooltips(item, perspective);
-        // Placement rejection rules (N11-6): not in a wall shared by two tanks (N8-1).
+        // Placement rejection rules (N11-6): not in a wall shared by two tanks (N8-1); not inside a
+        // recognized tank (N16-2).
         tooltips.add(Localization.translate("itemtooltip", "tankcontrollertip"), 400);
+        tooltips.add(TankInteriorPlacement.rejectedTooltip(), 400);
         return tooltips;
     }
 

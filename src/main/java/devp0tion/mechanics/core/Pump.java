@@ -1,6 +1,9 @@
 package devp0tion.mechanics.core;
 
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * A pump: the only thing that moves fluid (N7-1). It pulls from its source and pushes through the
@@ -25,9 +28,14 @@ import java.util.Objects;
  * pumps run one every 20 ticks from {@link #tick} (N6-1, N6-3); a cycle that cannot run is tried
  * again at the next interval. The game calls {@link #tick} once per game tick for every pump.
  *
- * <p>TODO(design): a pump standing on a liquid tile and attached to a valve (or attached to two
- * valves) has two sources; which one it uses is undecided. The game picks one for
- * {@link #setSource}.
+ * <p>Sources (11-1, N11-4, N13-3 ②): the liquid tile under the pump, or the tank of a valve
+ * attached to it. Placing a pump where it would have two or more sources is rejected
+ * ({@link #canPlace}); when a second source appears later (a valve attached next to it), the pump
+ * keeps its original source ({@link #updateSource}).
+ * <p>TODO(design) N16-3: a valve attached next to a pump that already has a source starts with its
+ * link to the pump disconnected, and several connected sources of the same fluid will be allowed
+ * through the wrench (pipe round). Neither exists yet: the pump uses one source, chosen by
+ * {@link #updateSource} from the sources the game reports as connected.
  * <p>TODO(design): which wire signal state switches a pump off is undecided (11-3); the game maps
  * the signal to {@link #setEnabled}.
  */
@@ -69,6 +77,43 @@ public class Pump extends LiquidStorage {
     /** The liquid tile under the pump, or the tank of the valve it is attached to (11-1). */
     public void setSource(FluidSource source) {
         this.source = source;
+    }
+
+    /**
+     * Placement check (N11-4): a pump may not be placed where it would have two or more sources
+     * (on a liquid tile and attached to a valve, or attached to two valves).
+     *
+     * @param sourceCount the sources the pump would have at that spot (the liquid tile under it and
+     *                    the tanks of the valves attached to it)
+     */
+    public static boolean canPlace(int sourceCount) {
+        return sourceCount < 2;
+    }
+
+    /**
+     * Updates the source from the sources connected to the pump now (the liquid tile under it and
+     * the tanks of the valves attached to it; equal sources count once). First come, first served
+     * (N13-3 ②):
+     * <ul>
+     *     <li>The current source is still there: the pump keeps it, even when another source has
+     *     appeared since (a valve attached next to it later).</li>
+     *     <li>Otherwise, exactly one source: the pump takes it. None: the pump has no source.</li>
+     * </ul>
+     * TODO(design) N16-3: the current source is gone (or the pump had none) and two or more sources
+     * are connected, so neither came first (for example two attached valves whose tanks become valid
+     * at once). Pulling from several connected sources of the same fluid comes with the wrench links
+     * (pipe round); until then the pump has no source until only one is left.
+     *
+     * @return the source in use afterwards, or {@code null}
+     */
+    public FluidSource updateSource(Collection<? extends FluidSource> available) {
+        if (source != null && available.contains(source)) {
+            return source;
+        }
+        Set<FluidSource> distinct = new LinkedHashSet<FluidSource>(available);
+        distinct.remove(null);
+        source = distinct.size() == 1 ? distinct.iterator().next() : null;
+        return source;
     }
 
     public void setFuelSupply(FuelSupply fuel) {

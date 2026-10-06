@@ -10,13 +10,13 @@ package devp0tion.mechanics.core;
  *     signal it is off and accepts nothing (N11-3, {@link #applyWireSignal}).</li>
  *     <li>A pump attached directly to a valve pulls from its tank instead (11-1 ②, 11-5); that is
  *     the pump's {@link Pump#setSource source}, not a destination.</li>
+ *     <li>It belongs to the tank that recognized it first (N13-3): another tank completed later
+ *     around it does not take it, and is no tank while the valve is in its border (N15-3). The game
+ *     passes that first tank's storage to {@link #setTank}, see
+ *     {@link TankStructure#effectiveValveOwner}.</li>
  * </ul>
  *
  * <p>TODO(design): automatic output from the valve is TODO (N7-3).
- * <p>TODO(design): placing a valve in a wall shared by two tanks is rejected (N11-1,
- * {@link TankStructure#canPlaceValve}), but another change (a wall, controller, glass block or floor
- * tile) can still complete a second tank around an existing valve; which tank it serves then is
- * undecided. The game passes no storage to {@link #setTank} in that case.
  */
 public final class TankValve {
 

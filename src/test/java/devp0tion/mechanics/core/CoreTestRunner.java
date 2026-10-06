@@ -20,11 +20,14 @@ public final class CoreTestRunner {
             PumpTierTest.class,
             TankStructureTest.class,
             TankSearchTest.class,
+            TankOwnershipTest.class,
+            TankRegionsTest.class,
             TankStatusTextTest.class,
             LiquidStorageTest.class,
             PipeLinkTest.class,
             PipeNetworkTest.class,
-            PumpPushTest.class
+            PumpPushTest.class,
+            PumpSourceTest.class
     };
 
     private CoreTestRunner() {

@@ -153,7 +153,12 @@ public final class PipeGrid {
         return result;
     }
 
-    /** Valves directly attached to a pump: the tanks it can pull from (11-1 ②, 11-5). */
+    /**
+     * Valves directly attached to a pump: the tanks it can pull from (11-1 ②, 11-5).
+     * TODO(design) N16-3: a valve attached next to a pump that already has a source starts with its
+     * link to the pump disconnected (the pump keeps its source, N13-3 ②); the link state and its
+     * wrench toggle come with the pipe round. Today every attached valve is listed.
+     */
     public List<TankValve> getAttachedValves(Pump pump) {
         List<TankValve> result = new ArrayList<>();
         for (Direction d : Direction.values()) {

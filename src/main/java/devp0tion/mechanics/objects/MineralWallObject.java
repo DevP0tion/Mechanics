@@ -2,9 +2,13 @@ package devp0tion.mechanics.objects;
 
 import devp0tion.mechanics.core.MineralTier;
 import devp0tion.mechanics.registry.MechanicsIngredients;
+import devp0tion.mechanics.tank.TankInteriorPlacement;
 import necesse.engine.localization.message.GameMessage;
 import necesse.engine.localization.message.LocalMessage;
 import necesse.engine.registries.ObjectRegistry;
+import necesse.entity.mobs.PlayerMob;
+import necesse.gfx.gameTooltips.ListGameTooltips;
+import necesse.inventory.InventoryItem;
 import necesse.inventory.item.toolItem.ToolType;
 import necesse.level.gameObject.WallObject;
 
@@ -26,6 +30,7 @@ import java.util.Locale;
  *     {@code items/<stringID>.png} (drawn by {@code tools/textures/draw_mineral_walls.py}).</li>
  *     <li>Belongs to the "any mineral wall" ingredient group
  *     ({@link MechanicsIngredients#ANY_MINERAL_WALL}).</li>
+ *     <li>Cannot be placed inside a recognized tank (N16-2); the item description says so (N11-6).</li>
  * </ul>
  */
 public class MineralWallObject extends WallObject {
@@ -63,7 +68,20 @@ public class MineralWallObject extends WallObject {
 
     @Override
     public GameMessage getNewLocalization() {
+        return displayNameOf(tier);
+    }
+
+    /** The name of the mineral wall of {@code tier} (also used for a valve's tier, N13-5). */
+    public static GameMessage displayNameOf(MineralTier tier) {
         return new LocalMessage("object", "mineralwall", "bar", new LocalMessage("item", tier.getBarStringID()));
+    }
+
+    @Override
+    public ListGameTooltips getItemTooltips(InventoryItem item, PlayerMob perspective) {
+        ListGameTooltips tooltips = super.getItemTooltips(item, perspective);
+        // Placement rejection rules (N11-6): not inside a recognized tank (N16-2).
+        tooltips.add(TankInteriorPlacement.rejectedTooltip(), 400);
+        return tooltips;
     }
 
 }

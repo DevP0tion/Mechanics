@@ -29,6 +29,17 @@ public final class LiquidTileSource implements FluidSource {
         return type == fluid ? LiquidStorage.requireNonNegative(maxAmount, "maxAmount") : 0;
     }
 
+    /** Liquid tiles of the same fluid are the same source: infinite and stateless (11-2). */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof LiquidTileSource && ((LiquidTileSource) o).fluid == fluid;
+    }
+
+    @Override
+    public int hashCode() {
+        return fluid.hashCode();
+    }
+
     @Override
     public String toString() {
         return "LiquidTileSource[" + fluid + "]";

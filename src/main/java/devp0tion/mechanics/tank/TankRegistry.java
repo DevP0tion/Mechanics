@@ -1,5 +1,6 @@
 package devp0tion.mechanics.tank;
 
+import devp0tion.mechanics.core.GridPos;
 import devp0tion.mechanics.core.TankBounds;
 import devp0tion.mechanics.core.TankStorage;
 import devp0tion.mechanics.core.TankStructure;
@@ -21,8 +22,9 @@ import java.util.concurrent.CopyOnWriteArraySet;
  *     <li>Server: {@link #onTileChanged} is called for every object or floor tile change
  *     ({@link TankChangePatches}); the controllers close enough to be affected search their tank
  *     again on their next tick (5-1).</li>
- *     <li>Both sides: finds the tank whose interior holds a tile (hover tooltip, fluid rendering)
- *     and the tank a valve belongs to.</li>
+ *     <li>Both sides: finds the tank whose interior holds a tile (hover tooltip, fluid rendering,
+ *     the interior placement rule N16).</li>
+ *     <li>Server: the tank a valve belongs to ({@link #findValveTank}, N13-3).</li>
  * </ul>
  * Safe to read from the client's draw threads.
  */
@@ -110,25 +112,48 @@ public final class TankRegistry {
     }
 
     /**
-     * The storage of the recognized tank whose border holds the valve at ({@code tileX},
-     * {@code tileY}), or {@code null} when there is none. Server only (clients hold no fluid).
-     * TODO(design): when the valve is in the border of two recognized tanks (possible when a change
-     * other than placing the valve completes the second tank; placing it there is rejected, N11-1),
-     * which tank it serves is undecided: it serves none.
+     * The storage of the tank the valve at ({@code tileX}, {@code tileY}) belongs to, or
+     * {@code null} when there is none. Server only (clients hold no fluid).
+     *
+     * <p>First come, first served (N13-3): the valve belongs to the controller that recognized it
+     * first ({@code owner}, set by {@link TankControllerObjectEntity}), as long as that controller
+     * keeps a tank with the valve in its border; while that tank is inactive its storage takes and
+     * gives nothing. Another tank completed around the valve later never gets it, and is no tank while
+     * the valve is in its border (N15-3).
      */
-    public static TankStorage findValveTank(Level level, int tileX, int tileY) {
-        TankStorage found = null;
-        for (TankControllerObjectEntity controller : getControllers(level)) {
-            TankBounds bounds = controller.getTankBounds();
-            if (bounds == null || !bounds.isOnBorder(tileX, tileY) || bounds.isCorner(tileX, tileY)) {
-                continue;
-            }
-            if (found != null) {
-                return null;
-            }
-            found = controller.getStorage();
+    public static TankStorage findValveTank(Level level, int tileX, int tileY, GridPos owner) {
+        if (owner == null) {
+            return null;
         }
-        return found;
+        for (TankControllerObjectEntity controller : getControllers(level)) {
+            if (controller.tileX == owner.x && controller.tileY == owner.y) {
+                return TankStructure.ownsValve(controller.getKeptTank(), tileX, tileY) ? controller.getStorage() : null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A controller stopped keeping {@code tank} (it took another tank, or it is gone): the valves
+     * and the controller cells of that tank may now belong to other tanks, so every controller close
+     * enough to have such a cell in its border searches its tank again on its next tick (N13-3).
+     * Server only.
+     */
+    static void onTankReleased(Level level, TankBounds tank) {
+        if (level == null || !level.isServer() || tank == null) {
+            return;
+        }
+        Set<TankControllerObjectEntity> set = CONTROLLERS.get(level);
+        if (set == null) {
+            return;
+        }
+        int reach = TankStructure.REACH;
+        for (TankControllerObjectEntity controller : set) {
+            if (controller.tileX >= tank.x - reach && controller.tileX <= tank.getMaxX() + reach
+                    && controller.tileY >= tank.y - reach && controller.tileY <= tank.getMaxY() + reach) {
+                controller.markStructureChanged();
+            }
+        }
     }
 
 }

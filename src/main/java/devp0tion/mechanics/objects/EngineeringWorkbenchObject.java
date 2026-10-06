@@ -1,6 +1,7 @@
 package devp0tion.mechanics.objects;
 
 import devp0tion.mechanics.registry.MechanicsTech;
+import devp0tion.mechanics.tank.TankInteriorPlacement;
 import necesse.engine.gameLoop.tickManager.TickManager;
 import necesse.engine.registries.ObjectRegistry;
 import necesse.entity.mobs.PlayerMob;
@@ -9,6 +10,8 @@ import necesse.gfx.drawOptions.DrawOptionsList;
 import necesse.gfx.drawables.LevelSortedDrawable;
 import necesse.gfx.drawables.OrderableDrawables;
 import necesse.gfx.gameTexture.GameTexture;
+import necesse.gfx.gameTooltips.ListGameTooltips;
+import necesse.inventory.InventoryItem;
 import necesse.inventory.recipe.Tech;
 import necesse.level.gameObject.container.CraftingStationObject;
 import necesse.level.maps.Level;
@@ -166,6 +169,14 @@ public class EngineeringWorkbenchObject extends CraftingStationObject {
                 .section(s[0], s[1], s[2], s[3])
                 .alpha(alpha)
                 .draw(drawX, drawY + s[4]);
+    }
+
+    @Override
+    public ListGameTooltips getItemTooltips(InventoryItem item, PlayerMob perspective) {
+        ListGameTooltips tooltips = super.getItemTooltips(item, perspective);
+        // Placement rejection rules (N11-6): not inside a recognized tank (N16-2).
+        tooltips.add(TankInteriorPlacement.rejectedTooltip(), 400);
+        return tooltips;
     }
 
 }

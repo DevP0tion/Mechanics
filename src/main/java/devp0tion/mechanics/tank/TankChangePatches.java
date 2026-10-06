@@ -13,11 +13,9 @@ import net.bytebuddy.asm.Advice;
  * through the region layer setters patched here (placing, breaking, replacing, world edits, packets
  * on clients). Both run on the server and on clients; only server levels react.
  *
- * <p>TODO(design): how changes next to a tank are detected is undecided (patching the level, as
- * here, vs polling from the controller vs refusing such placements). This class is the only
- * detection mechanism: replacing it means removing it and calling
- * {@link TankRegistry#onTileChanged} (or {@code TankControllerObjectEntity.markStructureChanged})
- * from the new mechanism.
+ * <p>This is the detection mechanism (N16-1). Placements inside a recognized tank's interior are
+ * rejected separately ({@link TankInteriorPlacement}, N16-2); every change that does happen near a
+ * tank is still reported here.
  */
 public final class TankChangePatches {
 

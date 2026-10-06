@@ -1,12 +1,15 @@
 package devp0tion.mechanics.objects;
 
 import necesse.engine.gameLoop.tickManager.TickManager;
+import necesse.engine.localization.Localization;
 import necesse.entity.mobs.PlayerMob;
 import necesse.gfx.camera.GameCamera;
 import necesse.gfx.drawOptions.texture.TextureDrawOptions;
 import necesse.gfx.drawables.LevelSortedDrawable;
 import necesse.gfx.drawables.OrderableDrawables;
 import necesse.gfx.gameTexture.GameTexture;
+import necesse.gfx.gameTooltips.ListGameTooltips;
+import necesse.inventory.InventoryItem;
 import necesse.level.gameObject.GameObject;
 import necesse.level.maps.Level;
 import necesse.level.maps.light.GameLight;
@@ -23,6 +26,9 @@ import java.util.List;
  * the tiles and the tank fluid, which the liquid shader draws in the tile stage under it (S4), and
  * before the sorted objects. The texture {@code objects/<stringID>.png} (32x32) is partly
  * transparent so the fluid shows through; drawn by {@code tools/textures/draw_tank_parts.py}.
+ *
+ * <p>Inside a recognized tank only glass blocks (and the tank floor tile and underground pipes, once
+ * they exist) may be placed (N16-2); the item description says so (N11-6).
  *
  * <p>TODO(design): whether a glass block blocks movement is undecided; it has a full-tile
  * collision like the other blocks.
@@ -72,6 +78,14 @@ public class GlassBlockObject extends GameObject {
         texture.initDraw()
                 .alpha(alpha)
                 .draw(drawX, drawY);
+    }
+
+    @Override
+    public ListGameTooltips getItemTooltips(InventoryItem item, PlayerMob perspective) {
+        ListGameTooltips tooltips = super.getItemTooltips(item, perspective);
+        // N11-6: the interior placement rule (N16-2) from the glass block's side.
+        tooltips.add(Localization.translate("itemtooltip", "glassblocktip"), 400);
+        return tooltips;
     }
 
 }
