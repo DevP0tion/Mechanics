@@ -1,0 +1,259 @@
+plugins {
+    id 'java'
+}
+
+// Adapted from the official Necesse ExampleMod build script.
+// To change the project name, edit the settings.gradle file.
+
+project.ext.modID = "devp0tion.mechanics" // Unique mod id. All lowercase, no special characters.
+project.ext.modName = "Mechanics" // Display name of the mod.
+project.ext.modVersion = "0.1.0" // Must follow the xx.xx... format.
+project.ext.gameVersion = "1.3.3" // Target game version.
+project.ext.modDescription = "A mechanical engineering mod: pump, pipe and store fluids in multiblock tanks." // N5-4
+project.ext.author = "DevP0tion"
+
+/**
+ * When clientside is true, servers do not need this mod for clients to connect and vice versa.
+ * This mod registers objects, items and recipes, so it must be false.
+ */
+project.ext.clientside = false
+
+/**
+ * Other mod dependencies (they define the default load order). Uncomment if needed.
+ */
+//project.ext.modDependencies = ["other.modid1", "other.modid2"]
+//project.ext.modOptionalDependencies = ["optional.modid1", "optional.modid2"]
+
+/**
+ * Game directory, in priority order:
+ *   1. -PgameDir=/path/to/Necesse         (Gradle property)
+ *   2. NECESSE_DIR=/path/to/Necesse       (environment variable)
+ *   3. The default Steam install path for the current OS
+ *
+ * The directory may be a Steam game install (contains Necesse.jar) or a dedicated server
+ * package (contains only Server.jar, which also has all game classes). Compiling, building the
+ * mod jar and runServer work with either; runClient/runDevClient need Necesse.jar.
+ */
+def gameDirectory = resolveGameDirectory()
+
+// =================================================
+
+def necesseJar = file(gameDirectory + "/Necesse.jar")
+def serverJar = file(gameDirectory + "/Server.jar")
+
+println "Looking for Necesse.jar or Server.jar inside: ${gameDirectory}"
+def gameJar
+if (necesseJar.exists()) {
+    gameJar = necesseJar
+} else if (serverJar.exists()) {
+    gameJar = serverJar
+} else {
+    throw new GradleException("Could not find Necesse.jar or Server.jar in '${gameDirectory}'. " +
+            "Pass -PgameDir=<dir> or set the NECESSE_DIR environment variable.")
+}
+println "Using game jar: ${gameJar}"
+
+// Name of the jar
+def jarName = "${project.ext.modName.replace(" ", "")}-${project.ext.gameVersion}-${project.ext.modVersion}"
+
+group project.ext.modID
+version project.ext.modVersion
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    libDepends
+}
+
+sourceSets.main.output.resourcesDir = file("build/mod/resources/")
+sourceSets.main.java.getDestinationDirectory().set(file("build/mod/"))
+sourceSets.main.compileClasspath += configurations.libDepends // Adds libDepends configuration to classpath
+def buildLocation = "build/jar/"
+
+compileJava.options.encoding = "UTF-8"
+compileTestJava.options.encoding = "UTF-8"
+
+dependencies {
+    implementation files(gameJar)
+    implementation fileTree(gameDirectory + "/lib/")
+    implementation fileTree("./mods/") // Add all mods located in the local (git-ignored) mods folder
+
+    // Third party libraries go in libDepends so they are bundled into the mod jar, e.g.:
+//    libDepends group: 'com.google.guava', name: 'guava', version: '31.1-jre'
+}
+
+// ---------- Tests ----------
+// The core logic (devp0tion.mechanics.core) has no game dependencies. Its tests are a plain Java
+// runner instead of JUnit, because Maven Central downloads are rate-limited (HTTP 429) in some
+// build environments. The runtime classpath deliberately leaves out the game jar, so a core class
+// that accidentally depends on Necesse fails the run.
+tasks.register('coreTest', JavaExec) {
+    group "verification"
+    description "Runs the dependency-free tests of the game-independent core logic"
+    dependsOn "testClasses"
+
+    classpath = sourceSets.test.output + sourceSets.main.output
+    getMainClass().set("devp0tion.mechanics.core.CoreTestRunner")
+}
+
+tasks.named('test') {
+    // No JUnit tests; 'test' runs coreTest instead.
+    enabled = false
+    dependsOn "coreTest"
+}
+
+tasks.named('check') {
+    dependsOn "coreTest"
+}
+
+// ---------- Necesse tasks ----------
+
+tasks.register('createAppID') {
+    group "necesse"
+    description "Creates steam_appid.txt file"
+
+    doLast {
+        file("steam_appid.txt").text = "1169040"
+    }
+}
+
+tasks.register('createModInfoFile', JavaExec) {
+    group "necesse"
+    description "Creates the mod info file"
+
+    classpath = files(gameJar)
+
+    getMainClass().set("CreateModInfoFile")
+
+    args "-file", "${sourceSets.main.java.getClassesDirectory().get()}/mod.info",
+            "-id", "${project.ext.modID}",
+            "-name", "${project.ext.modName}",
+            "-version", "${project.ext.modVersion}",
+            "-gameVersion", "${project.ext.gameVersion}",
+            "-description", "${project.ext.modDescription}",
+            "-author", "${project.ext.author}",
+            "-clientside", "${project.ext.clientside}",
+            "-dependencies", project.ext.has("modDependencies") ? "[" + project.ext.modDependencies.join(", ") + "]" : "",
+            "-optionalDependencies", project.ext.has("modOptionalDependencies") ? "[" + project.ext.modOptionalDependencies.join(", ") + "]" : ""
+}
+// Makes compiling also create mod info file
+classes.dependsOn("createModInfoFile")
+
+tasks.register('preAntialiasTextures', JavaExec) {
+    group "necesse"
+    description "Runs pre-antialiasing on all textures in the resources folder"
+
+    classpath = files(gameJar)
+
+    getMainClass().set("PreAntialiasTextures")
+    args "-folders", "${sourceSets.main.resources.srcDirs.stream().map { file -> file.path }.toArray().join(";")}"
+}
+
+def clientJvmArgs = ["-Xms512m", "-Xmx4G", "-XX:+UnlockExperimentalVMOptions", "-XX:+UseG1GC", "-XX:G1NewSizePercent=20", "-XX:G1ReservePercent=20", "-XX:MaxGCPauseMillis=50", "-XX:G1HeapRegionSize=32M"]
+
+def requireClientJar = {
+    if (!necesseJar.exists()) {
+        throw new GradleException("This task needs Necesse.jar (the Steam game install), but '${gameDirectory}' " +
+                "only contains Server.jar. Point -PgameDir or NECESSE_DIR at the game install.")
+    }
+}
+
+tasks.register('runClient', JavaExec) {
+    group "necesse"
+    description "Run client with current mod"
+    dependsOn "buildModJar", "createAppID"
+
+    classpath = files(necesseJar)
+
+    getMainClass().set("StartSteamClient")
+    jvmArgs clientJvmArgs
+    args "-dev", "-mod \"${buildLocation}\""
+    doFirst { requireClientJar() }
+}
+
+tasks.register('runDevClient', JavaExec) {
+    group "necesse"
+    description "Run client with current mod"
+    dependsOn "buildModJar", "createAppID"
+
+    classpath = files(necesseJar)
+
+    getMainClass().set("StartSteamClient")
+    jvmArgs clientJvmArgs
+    args "-dev 1", "-mod \"${buildLocation}\""
+    doFirst { requireClientJar() }
+}
+
+tasks.register('runServer', JavaExec) {
+    group "necesse"
+    description "Run server with current mod"
+    dependsOn "buildModJar"
+
+    // Server.jar ships with both the Steam game install and the dedicated server package.
+    classpath = files(serverJar)
+
+    getMainClass().set("StartDesktopServer")
+    jvmArgs clientJvmArgs
+    args "-mod \"${buildLocation}\""
+    doFirst {
+        if (!serverJar.exists()) {
+            throw new GradleException("runServer needs Server.jar in '${gameDirectory}'.")
+        }
+    }
+}
+
+tasks.register('buildModJar', Jar) {
+    group "necesse"
+    description "Generates the mod jar into the build folder"
+    dependsOn "classes", "createModInfoFile"
+
+    doFirst {
+        fileTree(dir: buildLocation).exclude("${jarName}.jar").visit { FileVisitDetails details ->
+            delete details.file
+        }
+    }
+
+    // Add mod output
+    from sourceSets.main.java.getClassesDirectory()
+    // Add the dependencies
+    from configurations.libDepends.collect { it.isDirectory() ? it : zipTree(it) }
+
+    setArchiveFileName("${jarName}.jar")
+    setDestinationDirectory(file(buildLocation))
+}
+
+// ---------- Game directory detection ----------
+
+String resolveGameDirectory() {
+    if (project.hasProperty("gameDir")) {
+        return project.property("gameDir").toString()
+    }
+    String env = System.getenv("NECESSE_DIR")
+    if (env != null && !env.trim().isEmpty()) {
+        return env
+    }
+    return getDefaultGamePath()
+}
+
+// Linux has more options, as Ubuntu-like, NixOS and OpenBSD may not contain "linux".
+// On an unknown OS we try the Linux-like path, as it is the most likely.
+String getDefaultGamePath() {
+    String os = System.getProperty("os.name").toLowerCase()
+    String homeDir = System.getProperty('user.home')
+    println "Detected OS: ${os}"
+
+    if (os.contains("win")) {
+        return "C:/Program Files (x86)/Steam/steamapps/common/Necesse"
+    } else if (os.contains("mac") || os.contains("darwin")) {
+        return homeDir + "/Library/Application Support/Steam/steamapps/common/Necesse"
+    } else {
+        return homeDir + "/.local/share/Steam/steamapps/common/Necesse"
+    }
+}

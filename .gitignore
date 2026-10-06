@@ -1,0 +1,18 @@
+# IntelliJ project files
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+gen/
+
+# Gradle / build output
+build/
+.gradle/
+
+# Necesse dev files
+steam_appid.txt
+latest-crash.log
+
+# Local mod jars added to the compile classpath (see build.gradle)
+mods/
