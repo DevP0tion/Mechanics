@@ -27,8 +27,8 @@ import java.util.List;
  * before the sorted objects. The texture {@code objects/<stringID>.png} (32x32) is partly
  * transparent so the fluid shows through; drawn by {@code tools/textures/draw_tank_parts.py}.
  *
- * <p>Inside a recognized tank only glass blocks (and the tank floor tile and underground pipes, once
- * they exist) may be placed (N16-2); the item description says so (N11-6).
+ * <p>Inside a recognized tank only glass blocks, the tank floor tile (once it exists) and underground
+ * pipes may be placed (N16-1); the item description says so (N11-6).
  *
  * <p>TODO(design): whether a glass block blocks movement is undecided; it has a full-tile
  * collision like the other blocks.

@@ -12,6 +12,7 @@ import devp0tion.mechanics.objects.MineralWallObject;
 import devp0tion.mechanics.objects.TankControllerObject;
 import devp0tion.mechanics.objects.TankValveObject;
 import devp0tion.mechanics.objects.TankValveObjectItem;
+import devp0tion.mechanics.pipe.UndergroundPipeLayer;
 import necesse.engine.registries.ObjectLayerRegistry;
 import necesse.level.gameObject.GameObject;
 import necesse.level.gameTile.GameTile;
@@ -117,13 +118,11 @@ public final class LevelTankCellLookup implements TankCellLookup {
 
     /**
      * Whether an object layer counts for the interior checks (N15-4): every layer except the
-     * underground pipe layer (9-1).
-     * TODO(game): the underground pipe layer does not exist yet (pipe implementation round). Once it
-     * is registered ({@code ObjectLayerRegistry.registerLayer}), return {@code false} for its layer ID
-     * here.
+     * underground pipe layer (9-1, {@link UndergroundPipeLayer}): underground pipes pass under tank
+     * interiors (10-4).
      */
     static boolean countsForInterior(int layerID) {
-        return true;
+        return layerID != UndergroundPipeLayer.ID;
     }
 
     /**

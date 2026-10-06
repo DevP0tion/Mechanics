@@ -44,7 +44,7 @@ public class TankValveObjectItem extends ObjectItem {
     /**
      * The tier of a valve item without tier data (made in creative mode or with commands, not
      * crafted) and of a placed valve without a saved tier (placed before tiers existed).
-     * TODO(design): provisional, the lowest tier (copper); the value for such valves is undecided.
+     * Copper, the lowest tier (decided: N19-7 (a)).
      */
     public static final MineralTier DEFAULT_TIER = MineralTier.COPPER;
 

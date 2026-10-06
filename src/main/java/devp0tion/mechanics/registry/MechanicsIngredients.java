@@ -20,8 +20,7 @@ public final class MechanicsIngredients {
 
     /**
      * Any pipe (아무 파이프): basic and underground pipes of every bar (N10-3), for the tank valve
-     * recipe. TODO(game): pipes do not exist yet (4th implementation round, N11-5), so no item is in
-     * this group and the tank valve cannot be crafted until they are added.
+     * recipe. Every pipe object tags itself ({@code BasicPipeObject}, {@code UndergroundPipeObject}).
      */
     public static final String ANY_PIPE = "anypipe";
 

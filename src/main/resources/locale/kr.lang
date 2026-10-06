@@ -6,11 +6,20 @@ mineralwall=<bar> 벽
 tankcontroller=탱크 컨트롤러
 tankvalve=탱크 밸브
 glassblock=유리 블럭
+// Pipes (9-1), one per bar: <bar> is the vanilla bar item's name (BasicPipeObject, UndergroundPipeObject).
+basicpipe=<bar> 파이프
+undergroundpipe=<bar> 지하 파이프
+// Pumps (11-3, 11-6)
+manualpump=수동 펌프
+firepump=화력 펌프
+advancedfirepump=고급 화력 펌프
 
 [item]
 // Ingredient groups (N10-2, N10-3)
 anymineralwall=아무 광물 벽
 anypipe=아무 파이프
+// The wrench (12-8). Note: the vanilla wire tool (wrench) is also named 렌치 in Korean.
+mechanicswrench=렌치
 
 [itemtooltip]
 // Placement rejection rules (N8-1, N11-1, N16-2) and the valve's wire rule (N11-3), in the item descriptions (N11-6)
@@ -18,6 +27,11 @@ tankcontrollertip=두 탱크가 공유하는 벽에는 설치할 수 없습니�
 tankvalvetip=두 탱크가 공유하는 벽에는 설치할 수 없습니다. 와이어 신호를 받으면 작동을 멈춥니다.
 tankinteriortip=인식된 탱크의 내부에는 설치할 수 없습니다.
 glassblocktip=인식된 탱크의 내부에는 유리 블럭만 설치할 수 있습니다.
+// Pump placement rejection (N17-1) and wire rule (N11-3), in the item descriptions (N11-6)
+pumpsourcestip=서로 다른 유체가 든 공급원이 함께 연결되는 자리에는 설치할 수 없습니다.
+pumpwiretip=와이어 신호를 받으면 작동을 멈춥니다.
+// Wrench controls (12-8, 13-4, 13-5)
+mechanicswrenchtip=좌클릭: 파이프 회수. 칸의 가장자리 쪽 우클릭: 그 방향 연결 또는 끊기. 칸 가운데 우클릭: 같은 칸의 기본·지하 연결 또는 끊기. 들고 있으면 지하 파이프가 보입니다.
 // Valve tier (N13-5): <wall> is the mineral wall's name.
 tankvalvetier=티어: <wall>
 tankvalvetierfromwall=티어: 제작에 쓴 광물 벽의 티어

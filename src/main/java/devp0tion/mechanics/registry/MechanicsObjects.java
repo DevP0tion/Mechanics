@@ -1,11 +1,15 @@
 package devp0tion.mechanics.registry;
 
 import devp0tion.mechanics.core.MineralTier;
+import devp0tion.mechanics.core.PumpTier;
+import devp0tion.mechanics.objects.BasicPipeObject;
 import devp0tion.mechanics.objects.EngineeringWorkbenchObject;
 import devp0tion.mechanics.objects.GlassBlockObject;
 import devp0tion.mechanics.objects.MineralWallObject;
+import devp0tion.mechanics.objects.PumpObject;
 import devp0tion.mechanics.objects.TankControllerObject;
 import devp0tion.mechanics.objects.TankValveObject;
+import devp0tion.mechanics.objects.UndergroundPipeObject;
 import necesse.engine.registries.ObjectRegistry;
 
 import java.awt.Color;
@@ -32,6 +36,21 @@ public final class MechanicsObjects {
     /** Object IDs of the mineral walls (5-12, 8-2), in tier order. */
     public static final Map<MineralTier, Integer> MINERAL_WALL_IDS = new EnumMap<>(MineralTier.class);
 
+    /** Object IDs of the basic pipes (9-1, 9-11), in tier order. */
+    public static final Map<MineralTier, Integer> BASIC_PIPE_IDS = new EnumMap<>(MineralTier.class);
+
+    /** Object IDs of the underground pipes (9-1, 10-3), in tier order. */
+    public static final Map<MineralTier, Integer> UNDERGROUND_PIPE_IDS = new EnumMap<>(MineralTier.class);
+
+    /** Manual pump (수동 펌프, tier 1) stringID; also its item's and texture's name. */
+    public static final String MANUAL_PUMP = "manualpump";
+
+    /** Fire pump (화력 펌프, tier 2) stringID. */
+    public static final String FIRE_PUMP = "firepump";
+
+    /** Advanced fire pump (고급 화력 펌프, tier 3) stringID. */
+    public static final String ADVANCED_FIRE_PUMP = "advancedfirepump";
+
     private MechanicsObjects() {
     }
 
@@ -45,13 +64,29 @@ public final class MechanicsObjects {
         ObjectRegistry.registerObject(TANK_CONTROLLER, new TankControllerObject(TANK_CONTROLLER), -1f, true);
         ObjectRegistry.registerObject(TANK_VALVE, new TankValveObject(TANK_VALVE), -1f, true);
         ObjectRegistry.registerObject(GLASS_BLOCK, new GlassBlockObject(GLASS_BLOCK), -1f, true);
+
+        // Pipes (9-1): basic and underground, one per bar (9-11). The underground pipes go on the
+        // mod's own layer, registered before this (UndergroundPipeLayer).
+        for (MineralTier tier : MineralTier.values()) {
+            String basic = BasicPipeObject.stringIDOf(tier);
+            BASIC_PIPE_IDS.put(tier, ObjectRegistry.registerObject(basic, new BasicPipeObject(tier, basic, mapColor(tier)), -1f, true));
+            String underground = UndergroundPipeObject.stringIDOf(tier);
+            UNDERGROUND_PIPE_IDS.put(tier, ObjectRegistry.registerObject(underground,
+                    new UndergroundPipeObject(tier, underground, mapColor(tier).darker()), -1f, true));
+        }
+
+        // Pumps (11-3, 11-6). Minimap colors: the base shades of their textures (art choice).
+        ObjectRegistry.registerObject(MANUAL_PUMP, new PumpObject(PumpTier.MANUAL, MANUAL_PUMP, new Color(140, 98, 60)), -1f, true);
+        ObjectRegistry.registerObject(FIRE_PUMP, new PumpObject(PumpTier.FIRE, FIRE_PUMP, new Color(176, 92, 52)), -1f, true);
+        ObjectRegistry.registerObject(ADVANCED_FIRE_PUMP, new PumpObject(PumpTier.ADVANCED_FIRE, ADVANCED_FIRE_PUMP,
+                new Color(120, 52, 112)), -1f, true);
     }
 
     /**
-     * Minimap color of each mineral wall: the base shade of its texture palette
+     * Minimap color of each mineral wall (and pipe): the base shade of its texture palette
      * (tools/textures/draw_mineral_walls.py). Art choice, not a design value.
      */
-    private static Color mapColor(MineralTier tier) {
+    public static Color mapColor(MineralTier tier) {
         switch (tier) {
             case COPPER:
                 return new Color(196, 98, 52);

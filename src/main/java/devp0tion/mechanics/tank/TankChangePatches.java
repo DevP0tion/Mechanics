@@ -1,5 +1,6 @@
 package devp0tion.mechanics.tank;
 
+import devp0tion.mechanics.pipe.PipeSystem;
 import necesse.engine.modLoader.annotations.ModMethodPatch;
 import necesse.level.maps.regionSystem.layers.ObjectRegionLayer;
 import necesse.level.maps.regionSystem.layers.TileRegionLayer;
@@ -12,6 +13,9 @@ import net.bytebuddy.asm.Advice;
  * <p>The game has no event for object or tile changes, but every change of a loaded tile goes
  * through the region layer setters patched here (placing, breaking, replacing, world edits, packets
  * on clients). Both run on the server and on clients; only server levels react.
+ *
+ * <p>Object changes on the underground pipe layer also keep the level's pipe grid in step
+ * ({@link PipeSystem#onObjectChanged}).
  *
  * <p>This is the detection mechanism (N16-1). Placements inside a recognized tank's interior are
  * rejected separately ({@link TankInteriorPlacement}, N16-2); every change that does happen near a
@@ -28,10 +32,12 @@ public final class TankChangePatches {
     public static class ObjectChanged {
 
         @Advice.OnMethodExit
-        static void onExit(@Advice.This ObjectRegionLayer layer,
+        static void onExit(@Advice.This ObjectRegionLayer layer, @Advice.Argument(0) int layerID,
                            @Advice.Argument(1) int regionTileX, @Advice.Argument(2) int regionTileY) {
-            TankRegistry.onTileChanged(layer.level, regionTileX + layer.region.tileXOffset,
-                    regionTileY + layer.region.tileYOffset);
+            int tileX = regionTileX + layer.region.tileXOffset;
+            int tileY = regionTileY + layer.region.tileYOffset;
+            TankRegistry.onTileChanged(layer.level, tileX, tileY);
+            PipeSystem.onObjectChanged(layer.level, layerID, tileX, tileY, layer.region.isLoadingComplete());
         }
 
     }

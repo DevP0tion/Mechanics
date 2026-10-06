@@ -1,8 +1,11 @@
 package devp0tion.mechanics.registry;
 
 import devp0tion.mechanics.core.MineralTier;
+import devp0tion.mechanics.items.MechanicsWrenchItem;
+import devp0tion.mechanics.objects.BasicPipeObject;
 import devp0tion.mechanics.objects.MineralWallObject;
 import devp0tion.mechanics.objects.TankValveObjectItem;
+import devp0tion.mechanics.objects.UndergroundPipeObject;
 import necesse.engine.network.gameNetworkData.GNDItemMap;
 import necesse.engine.registries.RecipeTechRegistry;
 import necesse.inventory.recipe.Ingredient;
@@ -16,8 +19,7 @@ public final class MechanicsRecipes {
 
     /**
      * Any stone: the recipes' "stone" (돌) means any stone, the vanilla {@code anystone} ingredient
-     * (N8-3). Used by the engineering workbench (N1-1) and, once the pump exists, the manual pump
-     * (N3-1: anylog 20 + anystone 20).
+     * (N8-3). Used by the engineering workbench (N1-1) and the manual pump (N3-1).
      */
     public static final String ANY_STONE = "anystone";
 
@@ -70,8 +72,6 @@ public final class MechanicsRecipes {
         // mineral wall used (N13-5 ②): the recipe's crafted event lists the items used, and the
         // listener stores the wall's tier in the result item. The display item says where the tier
         // comes from instead of showing one.
-        // TODO(game): no pipe exists yet, so the "any pipe" group is empty and this recipe cannot be
-        // crafted until the pipes are added (4th implementation round).
         Recipes.registerModRecipe(new Recipe(
                 MechanicsObjects.TANK_VALVE,
                 1,
@@ -91,6 +91,72 @@ public final class MechanicsRecipes {
                 MechanicsTech.ENGINEERING,
                 new Ingredient[]{
                         new Ingredient("glass", 5)
+                }
+        ));
+
+        for (MineralTier tier : MineralTier.values()) {
+            // Basic pipe: 1 bar -> 1 pipe (N9-1).
+            Recipes.registerModRecipe(new Recipe(
+                    BasicPipeObject.stringIDOf(tier),
+                    1,
+                    MechanicsTech.ENGINEERING,
+                    new Ingredient[]{
+                            new Ingredient(tier.getBarStringID(), 1)
+                    }
+            ));
+            // Underground pipe: the basic pipe + 1 of the same bar -> 1 (N9-2, N10-1).
+            Recipes.registerModRecipe(new Recipe(
+                    UndergroundPipeObject.stringIDOf(tier),
+                    1,
+                    MechanicsTech.ENGINEERING,
+                    new Ingredient[]{
+                            new Ingredient(BasicPipeObject.stringIDOf(tier), 1),
+                            new Ingredient(tier.getBarStringID(), 1)
+                    }
+            ));
+        }
+
+        // Manual pump: any log 20, any stone 20 (N2-2, N3-1, N8-3).
+        Recipes.registerModRecipe(new Recipe(
+                MechanicsObjects.MANUAL_PUMP,
+                1,
+                MechanicsTech.ENGINEERING,
+                new Ingredient[]{
+                        new Ingredient("anylog", 20),
+                        new Ingredient(ANY_STONE, 20)
+                }
+        ));
+
+        // Fire pump: copper bar 10, iron bar 10 (N9-3).
+        Recipes.registerModRecipe(new Recipe(
+                MechanicsObjects.FIRE_PUMP,
+                1,
+                MechanicsTech.ENGINEERING,
+                new Ingredient[]{
+                        new Ingredient("copperbar", 10),
+                        new Ingredient("ironbar", 10)
+                }
+        ));
+
+        // Advanced fire pump: fire pump 1, demonic bar 10, iron bar 10 (N9-3).
+        Recipes.registerModRecipe(new Recipe(
+                MechanicsObjects.ADVANCED_FIRE_PUMP,
+                1,
+                MechanicsTech.ENGINEERING,
+                new Ingredient[]{
+                        new Ingredient(MechanicsObjects.FIRE_PUMP, 1),
+                        new Ingredient("demonicbar", 10),
+                        new Ingredient("ironbar", 10)
+                }
+        ));
+
+        // Wrench: iron bar 10 -> 1 (N9-4).
+        Recipes.registerModRecipe(new Recipe(
+                MechanicsWrenchItem.STRING_ID,
+                1,
+                MechanicsTech.ENGINEERING,
+                new Ingredient[]{
+                        new Ingredient("ironbar", 10)
                 }
         ));
     }

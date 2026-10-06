@@ -1,6 +1,7 @@
 package devp0tion.mechanics.core;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -13,15 +14,15 @@ public final class PumpResult {
         PUMPED,
         /** Not time for a cycle yet (cycle interval or click cooldown, N3-3, N6-1, N6-3). */
         WAITING,
-        /** Switched off by wire (11-3). */
+        /** Switched off by wire (11-3, N11-3). */
         DISABLED,
-        /** The pump has nothing to pull (no source, or the source is empty). No fuel used. */
+        /** The pump has nothing to pull (no source, or every source is empty). No log is lit. */
         NO_SOURCE,
-        /** The pump's tier cannot move the source's fluid (12-1, 12-5, 12-6). No fuel used. */
+        /** The pump's tier cannot move the source's fluid (12-1, 12-5, 12-6). No log is lit. */
         FLUID_NOT_ALLOWED,
-        /** No destination, or every destination is full: the pump stops and uses no fuel (N7-4). */
+        /** No destination, or every destination is full: the pump stops and lights no log (N7-4). */
         NO_DESTINATION,
-        /** A log-fueled pump with no burn time left and no log to burn. */
+        /** A log-fueled pump with no lit log and no log to light. */
         NO_FUEL
     }
 
@@ -37,20 +38,24 @@ public final class PumpResult {
     private final int moved;
     private final int pipeFill;
     private final int pipesUpdated;
+    private final int lost;
     private final Map<TankValve, Integer> delivered;
+    private final List<PipeNode> broken;
 
     private PumpResult(Status status) {
-        this(status, null, 0, 0, 0, Collections.<TankValve, Integer>emptyMap());
+        this(status, null, 0, 0, 0, 0, Collections.<TankValve, Integer>emptyMap(), Collections.<PipeNode>emptyList());
     }
 
-    PumpResult(Status status, FluidType fluid, int moved, int pipeFill, int pipesUpdated,
-               Map<TankValve, Integer> delivered) {
+    PumpResult(Status status, FluidType fluid, int moved, int pipeFill, int pipesUpdated, int lost,
+               Map<TankValve, Integer> delivered, List<PipeNode> broken) {
         this.status = status;
         this.fluid = fluid;
         this.moved = moved;
         this.pipeFill = pipeFill;
         this.pipesUpdated = pipesUpdated;
+        this.lost = lost;
         this.delivered = Collections.unmodifiableMap(delivered);
+        this.broken = Collections.unmodifiableList(broken);
     }
 
     public Status getStatus() {
@@ -66,7 +71,7 @@ public final class PumpResult {
         return fluid;
     }
 
-    /** Total units pushed out of the pump: {@link #getPipeFill()} plus everything delivered. */
+    /** Units that arrived somewhere: {@link #getPipeFill()} plus everything delivered. */
     public int getMoved() {
         return moved;
     }
@@ -81,6 +86,11 @@ public final class PumpResult {
         return pipesUpdated;
     }
 
+    /** Units lost with the shares headed into pipes that broke (N14-1). */
+    public int getLost() {
+        return lost;
+    }
+
     /** Units delivered per destination valve, nearest first. */
     public Map<TankValve, Integer> getDelivered() {
         return delivered;
@@ -92,10 +102,19 @@ public final class PumpResult {
         return amount == null ? 0 : amount;
     }
 
+    /**
+     * Pipes that broke this cycle (N12-4, N12-5, N14-1): already removed from the grid; the game
+     * removes their objects without a drop.
+     */
+    public List<PipeNode> getBroken() {
+        return broken;
+    }
+
     @Override
     public String toString() {
         return "PumpResult[" + status + (status == Status.PUMPED ? ", " + fluid + " " + moved + " (pipes " + pipeFill
-                + ", updated " + pipesUpdated + "), delivered " + delivered.values() : "") + "]";
+                + ", updated " + pipesUpdated + ", lost " + lost + "), delivered " + delivered.values()
+                + (broken.isEmpty() ? "" : ", broken " + broken) : "") + "]";
     }
 
 }

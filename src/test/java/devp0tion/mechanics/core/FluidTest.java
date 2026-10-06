@@ -1,6 +1,6 @@
 package devp0tion.mechanics.core;
 
-/** FluidUnits (N2-1) and FluidType (12-1, 12-2, 12-5, S10). */
+/** FluidUnits (N2-1) and FluidType (12-1, 12-2, 12-5, S10, N17-5). */
 final class FluidTest {
 
     private FluidTest() {
@@ -11,7 +11,7 @@ final class FluidTest {
     }
 
     public static void testFluidListAndTiles() {
-        Check.equal(7, FluidType.values().length, "fluid count");
+        Check.equal(8, FluidType.values().length, "fluid count: 6 liquid tiles, water split, crude oil (N17-5)");
         Check.equal("watertile", FluidType.SEAWATER.getLiquidTileStringID());
         Check.equal("watertile", FluidType.FRESHWATER.getLiquidTileStringID());
         Check.equal("lavatile", FluidType.LAVA.getLiquidTileStringID());
@@ -19,6 +19,9 @@ final class FluidTest {
         Check.equal("liquidoozetile", FluidType.OOZE.getLiquidTileStringID());
         Check.equal("spiritwatertile", FluidType.SPIRIT_WATER.getLiquidTileStringID());
         Check.equal("quicksandtile", FluidType.QUICKSAND.getLiquidTileStringID());
+        Check.isNull(FluidType.CRUDE_OIL.getLiquidTileStringID(), "crude oil has no vanilla tile (N17-5)");
+        Check.isFalse(FluidType.CRUDE_OIL.hasLiquidTile(), "crude oil has no vanilla tile");
+        Check.isFalse(FluidType.CRUDE_OIL.isWater(), "crude oil is not water");
     }
 
     public static void testWaterSplitBySalinity() {
@@ -51,6 +54,12 @@ final class FluidTest {
         Check.equal(FluidType.QUICKSAND, FluidType.fromLiquidTile("quicksandtile", false));
         Check.isNull(FluidType.fromLiquidTile("grasstile", false), "non-liquid tile");
         Check.isNull(FluidType.fromLiquidTile(null, false), "null tile");
+    }
+
+    public static void testDeepSeaHeight() {
+        Check.equal(-3, FluidType.DEEP_SEA_HEIGHT, "the bucket's deep sea limit (11-9)");
+        Check.isTrue(FluidType.isDeepSeaHeight(-4), "below -3");
+        Check.isFalse(FluidType.isDeepSeaHeight(-3), "-3 is not deep");
     }
 
 }

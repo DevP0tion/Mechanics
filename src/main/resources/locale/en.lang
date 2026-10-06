@@ -7,12 +7,24 @@ mineralwall=<bar> Wall
 tankcontroller=Tank Controller
 tankvalve=Tank Valve
 glassblock=Glass Block
+// Pipes (9-1), one per bar: <bar> is the vanilla bar item's name (BasicPipeObject, UndergroundPipeObject).
+// TODO(confirm): the English names are not decided yet; plain translations of 파이프 / 지하 파이프.
+basicpipe=<bar> Pipe
+undergroundpipe=<bar> Underground Pipe
+// Pumps (11-3, 11-6).
+// TODO(confirm): the English names are not decided yet; plain translations of 수동 펌프 / 화력 펌프 / 고급 화력 펌프.
+manualpump=Manual Pump
+firepump=Fire Pump
+advancedfirepump=Advanced Fire Pump
 
 [item]
 // Ingredient groups (N10-2, N10-3).
 // TODO(confirm): plain translations of 아무 광물 벽 / 아무 파이프.
 anymineralwall=Any Mineral Wall
 anypipe=Any Pipe
+// The wrench (렌치, 12-8). TODO(confirm): the English name is not decided; "Wrench" is the vanilla
+// wire tool's name, so a distinct placeholder is used.
+mechanicswrench=Pipe Wrench
 
 [itemtooltip]
 // Placement rejection rules (N8-1, N11-1, N16-2) and the valve's wire rule (N11-3), in the item descriptions (N11-6).
@@ -21,6 +33,11 @@ tankcontrollertip=Cannot be placed in a wall shared by two tanks.
 tankvalvetip=Cannot be placed in a wall shared by two tanks. Stops working while it receives a wire signal.
 tankinteriortip=Cannot be placed inside a recognized tank.
 glassblocktip=Inside a recognized tank, only glass blocks can be placed.
+// Pump placement rejection (N17-1) and wire rule (N11-3), in the item descriptions (N11-6).
+pumpsourcestip=Cannot be placed where it would connect sources holding different fluids.
+pumpwiretip=Stops working while it receives a wire signal.
+// Wrench controls (12-8, 13-4, 13-5).
+mechanicswrenchtip=Left click: pick up a pipe. Right click near a side: cut or link that side. Right click on the middle: cut or link the pipes above and below. Shows underground pipes.
 // Valve tier (N13-5): <wall> is the mineral wall's name.
 tankvalvetier=Tier: <wall>
 tankvalvetierfromwall=Tier: that of the mineral wall used to craft it

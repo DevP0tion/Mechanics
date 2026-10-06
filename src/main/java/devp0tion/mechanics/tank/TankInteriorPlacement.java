@@ -1,7 +1,10 @@
 package devp0tion.mechanics.tank;
 
 import devp0tion.mechanics.core.TankInteriorRule;
+import devp0tion.mechanics.objects.BasicPipeObject;
 import devp0tion.mechanics.objects.GlassBlockObject;
+import devp0tion.mechanics.objects.UndergroundPipeObject;
+import devp0tion.mechanics.pipe.PlacementCorrection;
 import necesse.engine.GameEventListener;
 import necesse.engine.GameEvents;
 import necesse.engine.localization.Localization;
@@ -37,6 +40,9 @@ import java.util.Iterator;
  *     ({@link ItemPlaceEvent}) is prevented. Liquid from a bucket is placed as its liquid tile item, a
  *     tile item.</li>
  * </ul>
+ * A placement the server refuses here but the client already made (its view of the recognized
+ * tanks can lag) is corrected on that client ({@link PlacementCorrection}): objects through the
+ * refused object placement hook, floor tiles right here.
  * TODO(design): wires and logic gates are placed on their own layers (not object layers, not floor
  * tiles) and are not rejected.
  */
@@ -55,6 +61,8 @@ public final class TankInteriorPlacement {
             public void onEvent(ItemPlaceEvent event) {
                 if (!event.isPrevented() && rejects(event)) {
                     event.preventDefault();
+                    // The client may have placed it already (its tank view can lag): correct it (D1).
+                    PlacementCorrection.correct(event.level, event.player, event.tileX, event.tileY);
                 }
             }
         });
@@ -73,8 +81,12 @@ public final class TankInteriorPlacement {
         if (object instanceof GlassBlockObject) {
             return TankInteriorRule.Placement.GLASS_BLOCK;
         }
-        // TODO(game): pipes do not exist yet (pipe round). Map basic pipe objects to BASIC_PIPE and
-        // underground pipe objects to UNDERGROUND_PIPE here.
+        if (object instanceof UndergroundPipeObject) {
+            return TankInteriorRule.Placement.UNDERGROUND_PIPE;
+        }
+        if (object instanceof BasicPipeObject) {
+            return TankInteriorRule.Placement.BASIC_PIPE;
+        }
         return TankInteriorRule.Placement.OTHER;
     }
 

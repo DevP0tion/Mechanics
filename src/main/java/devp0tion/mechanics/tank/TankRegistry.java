@@ -134,6 +134,23 @@ public final class TankRegistry {
     }
 
     /**
+     * The controller of the tank the valve at ({@code tileX}, {@code tileY}) belongs to, or
+     * {@code null} (N13-3). Both sides: clients read the synced owner and kept tanks, so placement
+     * checks that need the tank's fluid (N17-1) agree with the server.
+     */
+    public static TankControllerObjectEntity findValveController(Level level, int tileX, int tileY, GridPos owner) {
+        if (owner == null) {
+            return null;
+        }
+        for (TankControllerObjectEntity controller : getControllers(level)) {
+            if (controller.tileX == owner.x && controller.tileY == owner.y) {
+                return TankStructure.ownsValve(controller.getKeptTank(), tileX, tileY) ? controller : null;
+            }
+        }
+        return null;
+    }
+
+    /**
      * A controller stopped keeping {@code tank} (it took another tank, or it is gone): the valves
      * and the controller cells of that tank may now belong to other tanks, so every controller close
      * enough to have such a cell in its border searches its tank again on its next tick (N13-3).

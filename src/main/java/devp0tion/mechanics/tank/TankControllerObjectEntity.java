@@ -40,19 +40,30 @@ import java.util.Objects;
  *
  * <h2>Clients</h2>
  * Clients get a view (recognized bounds, fluid, amount, capacity) through the object entity
- * content packet whenever it changes. The controller window, the hover tooltip and the fluid
- * rendering read that view.
+ * content packet: structural changes at once, amount-only changes at most every
+ * {@link #AMOUNT_SYNC_TICKS} ticks (coalesced). The controller window, the hover tooltip and the
+ * fluid rendering read that view.
  */
 public class TankControllerObjectEntity extends ObjectEntity {
 
     /** Object entity type; must stay the same for saved worlds. */
     public static final String TYPE = "tankcontroller";
 
+    /**
+     * Amount-only view changes are sent at most every this many ticks, coalesced (the latest amount
+     * goes out). Structural changes (recognition, bounds, fluid, capacity) are sent at once. A
+     * technical sync rate, not a design value.
+     */
+    static final int AMOUNT_SYNC_TICKS = 5;
+
     // Server state.
     private final TankStorage storage = new TankStorage();
     private boolean structureChanged = true;
+    /** Whether a search (or a re-validation of the kept tank) has completed since creation or loading. */
+    private boolean searchCompleted;
     private TankBounds regionsRegisteredFor;
     private boolean regionsRegistered;
+    private int ticksSinceViewSync = AMOUNT_SYNC_TICKS;
 
     // The tank this controller keeps (N13-3): saved, and synced to clients for their placement checks.
     private TankBounds kept;
@@ -118,10 +129,13 @@ public class TankControllerObjectEntity extends ObjectEntity {
             // The regions a recognized tank spans are kept loaded together (N15-6), so a tank is not
             // judged by half of it. The search area (the whole reach) can still cover regions beyond
             // the tank: the controller keeps its previous state and searches again once everything
-            // within reach is loaded (retried every tick).
+            // within reach is loaded (retried every tick). The kept tank itself is checked as soon as
+            // its own rectangle is loaded: the search would find it first anyway (N13-3).
+            revalidateKeptTank(level);
             return;
         }
         structureChanged = false;
+        searchCompleted = true;
         TankValidation tank = TankStructure.findTank(tileX, tileY, new LevelTankCellLookup(level)).getTank();
         // A valid smaller tank loses the excess at once, an invalid one keeps everything (N13-4).
         storage.applyStructure(tank);
@@ -130,6 +144,35 @@ public class TankControllerObjectEntity extends ObjectEntity {
             claimValves(tank);
         }
         // No tank: the kept tank is still remembered (N13-3) and the storage is inactive (5-9).
+    }
+
+    /**
+     * While the search area is not fully loaded: when the kept tank's rectangle is loaded and still
+     * a valid tank for this controller, it is recognized again right away (the full search would
+     * return it first, {@link TankStructure#findTank}). Otherwise nothing changes until the search.
+     */
+    private void revalidateKeptTank(Level level) {
+        if (kept == null || !isLoaded(level, kept)) {
+            return;
+        }
+        TankValidation tank = TankStructure.validate(kept, new LevelTankCellLookup(level), new GridPos(tileX, tileY));
+        if (tank.isValid()) {
+            structureChanged = false;
+            searchCompleted = true;
+            storage.applyStructure(tank);
+            claimValves(tank);
+        }
+    }
+
+    private static boolean isLoaded(Level level, TankBounds bounds) {
+        for (int y = bounds.y; y <= bounds.getMaxY(); y++) {
+            for (int x = bounds.x; x <= bounds.getMaxX(); x++) {
+                if (level.isTileWithinBounds(x, y) && !level.regionManager.isTileLoaded(x, y)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private void setKeptTank(TankBounds bounds) {
@@ -153,8 +196,16 @@ public class TankControllerObjectEntity extends ObjectEntity {
         }
     }
 
-    /** Keeps the regions of the recognized tank loaded together (N15-6). */
+    /**
+     * Keeps the regions of the recognized tank loaded together (N15-6). Nothing is registered or
+     * cleared before the first completed search: a controller loaded from a save starts inactive,
+     * and clearing its saved entry then would let the tank's other regions unload (for example an
+     * offline owner's settlement on a dedicated server).
+     */
     private void updateRegionKeeping() {
+        if (!searchCompleted) {
+            return;
+        }
         TankBounds active = storage.isActive() ? kept : null;
         if (regionsRegistered && Objects.equals(active, regionsRegisteredFor)) {
             return;
@@ -170,13 +221,19 @@ public class TankControllerObjectEntity extends ObjectEntity {
     private void updateView() {
         boolean active = storage.isActive();
         TankBounds bounds = active ? kept : null;
-        if (active != viewActive || !Objects.equals(bounds, viewBounds) || storage.getFluid() != viewFluid
-                || storage.getAmount() != viewAmount || storage.getCapacity() != viewCapacity) {
+        if (ticksSinceViewSync < AMOUNT_SYNC_TICKS) {
+            ticksSinceViewSync++;
+        }
+        boolean structural = active != viewActive || !Objects.equals(bounds, viewBounds) || storage.getFluid() != viewFluid
+                || storage.getCapacity() != viewCapacity;
+        boolean amountDue = storage.getAmount() != viewAmount && ticksSinceViewSync >= AMOUNT_SYNC_TICKS;
+        if (structural || amountDue) {
             viewActive = active;
             viewBounds = bounds;
             viewFluid = storage.getFluid();
             viewAmount = storage.getAmount();
             viewCapacity = storage.getCapacity();
+            ticksSinceViewSync = 0;
             markDirty();
         }
     }
@@ -294,9 +351,9 @@ public class TankControllerObjectEntity extends ObjectEntity {
         return viewBounds;
     }
 
-    /** The stored fluid, or {@code null} when empty. */
+    /** The stored fluid, or {@code null} when empty (the synced view; on the server the live value). */
     public FluidType getFluid() {
-        return viewFluid;
+        return isServer() ? storage.getFluid() : viewFluid;
     }
 
     public int getAmount() {

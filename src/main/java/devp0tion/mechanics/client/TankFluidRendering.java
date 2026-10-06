@@ -9,7 +9,9 @@ import necesse.engine.modLoader.annotations.ModMethodPatch;
 import necesse.engine.registries.TileRegistry;
 import necesse.engine.util.GameMath;
 import necesse.entity.mobs.PlayerMob;
+import necesse.gfx.Renderer;
 import necesse.gfx.camera.GameCamera;
+import necesse.gfx.drawOptions.texture.TextureDrawOptions;
 import necesse.gfx.drawOptions.texture.SharedTextureDrawOptions;
 import necesse.gfx.drawables.LevelDrawUtils;
 import necesse.gfx.drawables.LevelTileDamageDrawOptions;
@@ -24,6 +26,7 @@ import necesse.level.maps.liquidManager.LiquidManager;
 import necesse.level.maps.regionSystem.Region;
 import net.bytebuddy.asm.Advice;
 
+import java.awt.Color;
 import java.util.List;
 import java.util.Objects;
 
@@ -86,22 +89,32 @@ public final class TankFluidRendering {
         static void onExit(@Advice.FieldValue("level") Level level,
                            @Advice.Argument(1) GameCamera camera,
                            @Advice.Argument(2) LevelDrawUtils.DrawArea tileArea,
-                           @Advice.Argument(5) LevelTileLiquidDrawOptions liquidDrawables) {
-            TankFluidRendering.addFluidDrawables(level, camera, tileArea, liquidDrawables);
+                           @Advice.Argument(5) LevelTileLiquidDrawOptions liquidDrawables,
+                           @Advice.Argument(11) OrderableDrawables objectTileDrawables) {
+            TankFluidRendering.addFluidDrawables(level, camera, tileArea, liquidDrawables, objectTileDrawables);
         }
 
     }
 
-    /** Adds the fluid of every recognized tank in the drawn area to the liquid draw list. */
+    /**
+     * Adds the fluid of every recognized tank in the drawn area to the liquid draw list. A fluid
+     * without a vanilla liquid tile (crude oil, N17-5) is drawn as a flat colour in the object tile
+     * list under the glass blocks instead ({@link #CRUDE_OIL_COLOR}).
+     */
     public static void addFluidDrawables(Level level, GameCamera camera, LevelDrawUtils.DrawArea tileArea,
-                                         LevelTileLiquidDrawOptions liquidDrawables) {
+                                         LevelTileLiquidDrawOptions liquidDrawables, OrderableDrawables objectTileDrawables) {
         if (!ENABLED || level == null || !level.isClient() || camera == null || tileArea == null
                 || liquidDrawables == null) {
             return;
         }
         for (TankControllerObjectEntity tank : TankRegistry.getControllers(level)) {
             TankBounds bounds = tank.getTankBounds();
-            LiquidTile liquid = liquidTileOf(tank.getFluid());
+            FluidType fluid = tank.getFluid();
+            if (bounds != null && fluid != null && !fluid.hasLiquidTile() && objectTileDrawables != null) {
+                addFlatFluid(level, camera, tileArea, bounds, objectTileDrawables);
+                continue;
+            }
+            LiquidTile liquid = liquidTileOf(fluid);
             if (bounds == null || liquid == null) {
                 continue;
             }
@@ -113,6 +126,28 @@ public final class TankFluidRendering {
                     }
                     liquid.addFullDrawables(liquidDrawables, level, x, y, camera.getTileDrawX(x), camera.getTileDrawY(y));
                 }
+            }
+        }
+    }
+
+    /**
+     * The colour crude oil is drawn with: it has no vanilla liquid tile to borrow (N17-5).
+     * TODO(design): provisional dark colour; crude oil's look is undecided.
+     */
+    public static final Color CRUDE_OIL_COLOR = new Color(28, 22, 18, 230);
+
+    /** Draws a fluid without a vanilla liquid tile as a flat colour on the interior cells, under glass blocks. */
+    private static void addFlatFluid(Level level, GameCamera camera, LevelDrawUtils.DrawArea tileArea, TankBounds bounds,
+                                     OrderableDrawables objectTileDrawables) {
+        for (int y = bounds.y + 1; y < bounds.getMaxY(); y++) {
+            for (int x = bounds.x + 1; x < bounds.getMaxX(); x++) {
+                if (!tileArea.isIn(x, y)) {
+                    continue;
+                }
+                final TextureDrawOptions options = Renderer.initQuadDraw(32, 32)
+                        .colorLight(CRUDE_OIL_COLOR, level.getLightLevel(x, y))
+                        .pos(camera.getTileDrawX(x), camera.getTileDrawY(y));
+                objectTileDrawables.add(-1, tm -> options.draw());
             }
         }
     }
@@ -236,9 +271,9 @@ public final class TankFluidRendering {
         }
     }
 
-    /** The vanilla liquid tile a fluid is drawn with (D7, S10), or {@code null}. */
+    /** The vanilla liquid tile a fluid is drawn with (D7, S10), or {@code null} (also for crude oil). */
     private static LiquidTile liquidTileOf(FluidType fluid) {
-        if (fluid == null) {
+        if (fluid == null || !fluid.hasLiquidTile()) {
             return null;
         }
         GameTile tile = TileRegistry.getTile(fluid.getLiquidTileStringID());

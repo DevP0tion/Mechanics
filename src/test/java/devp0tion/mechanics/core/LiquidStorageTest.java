@@ -187,12 +187,12 @@ final class LiquidStorageTest {
         Check.isNull(tank.getFluid(), "type cleared");
     }
 
-    public static void testLiquidTileIsInfinite() {
-        LiquidTileSource tile = new LiquidTileSource(FluidType.SEAWATER);
+    public static void testOpenWaterIsInfinite() {
+        LiquidTileSource tile = LiquidTileSource.infinite(FluidType.SEAWATER);
         Check.equal(FluidType.SEAWATER, tile.getSourceFluid());
-        Check.equal(Integer.MAX_VALUE, tile.getAvailable(FluidType.SEAWATER), "infinite (11-2)");
+        Check.equal(Integer.MAX_VALUE, tile.getAvailable(FluidType.SEAWATER), "infinite (N19-3 ①)");
         Check.equal(40, tile.extract(FluidType.SEAWATER, 40));
-        Check.equal(40, tile.extract(FluidType.SEAWATER, 40), "never used up (11-2)");
+        Check.equal(40, tile.extract(FluidType.SEAWATER, 40), "never used up (N19-3 ①)");
         Check.equal(0, tile.extract(FluidType.FRESHWATER, 40), "other fluid");
         Check.equal(0, tile.getAvailable(FluidType.FRESHWATER), "other fluid");
     }

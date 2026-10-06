@@ -16,9 +16,9 @@ public final class TankInteriorRule {
         GLASS_BLOCK,
         /** The tank floor tile (5-6, 8-8; does not exist yet): allowed. */
         TANK_FLOOR,
-        /** An underground pipe (9-1, 10-3; does not exist yet): allowed. */
+        /** An underground pipe (9-1, 10-3): allowed. */
         UNDERGROUND_PIPE,
-        /** A basic (base layer) pipe (9-1; does not exist yet): rejected like everything else. */
+        /** A basic (base layer) pipe (9-1): rejected like everything else. */
         BASIC_PIPE,
         /** Anything else: any other object on any object layer, any other floor tile, liquids. */
         OTHER
