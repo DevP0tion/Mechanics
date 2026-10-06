@@ -48,6 +48,7 @@
 - **S7.** nightsteel·spiderite 주괴 제작품(FALLEN_ANVIL): 무기(nightrazorboomerang, nightpiercer, phantompopper, phantomcaller / causticexecutioner, arachnidwebbow, webweaver, empresscommand), 갑옷(투구 4종·흉갑·부츠/각반), spideritearrow, spideritearmorstand. 채굴 도구 없음.
 - **S8.** 오브젝트는 `canPlaceOnLiquid` 값을 켜면 액체 타일 위에 놓을 수 있음(`GameObject.canPlace`의 "liquid" 검사).
 - **S9.** 바닐라에 통나무 아무거나(anylog)를 연료로 쓰는 오브젝트 엔티티가 있음(`AnyLogFueledInventoryObjectEntity`, `AnyLogFueledProcessingTechInventoryObjectEntity`).
+- **S10.** 바닷물/민물은 타일 종류가 아니라 위치로 정해짐: 같은 `watertile`이라도 `LiquidManager.isSaltWater(x, y)`(해안 거리 기반 계산)로 구분됨.
 
 ## 멀티블럭 탱크 구조 규칙 (사용자 정의, 규칙 빈틈 해소)
 
@@ -73,3 +74,12 @@
 - 별도 아이템으로 배치 (10-3)
 - 파이프 철거 도구로만 철거, 곡괭이 불가(10-1, 10-5)
 - 벽·오브젝트·액체 타일 아래 어디든 지나감 (10-4)
+
+## 유체 규칙 (사용자 정의, 규칙 빈틈 해소)
+
+- 액체 6종: 물·용암·슬라임·우즈·영혼의 물·유사 (12-1)
+- 바닷물·민물은 다른 유체 (12-2)
+- 온도: 유체마다 고정, 값 **`미정`** (12-4)
+- 기체: TODO (12-3)
+- 펌프 티어별 제한: 수동=물, 화력=용암까지, 고급 화력부터 전부 (12-1)
+- 파이프 티어가 운송 가능한 종류·온도·상태를 정함 (9-2)
