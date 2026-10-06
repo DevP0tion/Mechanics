@@ -46,6 +46,8 @@
 - **S5.** 바닐라 곡괭이(`CustomPickaxeToolItem`: 채굴 위력 toolDps / 곡괭이 티어 toolTier): wood 50/0, copper 65/0, iron 80/0, gold 95/0, frost 110/1, demonic 125/2, runic 140/3, ivy 155/4, quartz 170/5, tungsten 185/6, glacial 200/7, dryad 215/8, mycelium 230/9, ancientfossil 245/10, ice 245/10. nightsteel·spiderite 곡괭이는 없음.
 - **S6.** 광석의 toolTier는 광석이 박힌 암석의 티어를 따름(`RockOreObject`). 암석 티어: rock·snowrock 0, graniterock 2, swamprock 3, sandstonerock 4, deeprock 5, deepsnowrock 6, basaltrock 7, deepswamprock 8, deepsandstonerock 9, spiderrock 10, 크립트 nightsteel 바위 4. 그래서 copper·iron·gold는 0~9 여러 티어에 존재하고, demonic은 광석 없이 주괴만 있음.
 - **S7.** nightsteel·spiderite 주괴 제작품(FALLEN_ANVIL): 무기(nightrazorboomerang, nightpiercer, phantompopper, phantomcaller / causticexecutioner, arachnidwebbow, webweaver, empresscommand), 갑옷(투구 4종·흉갑·부츠/각반), spideritearrow, spideritearmorstand. 채굴 도구 없음.
+- **S8.** 오브젝트는 `canPlaceOnLiquid` 값을 켜면 액체 타일 위에 놓을 수 있음(`GameObject.canPlace`의 "liquid" 검사).
+- **S9.** 바닐라에 통나무 아무거나(anylog)를 연료로 쓰는 오브젝트 엔티티가 있음(`AnyLogFueledInventoryObjectEntity`, `AnyLogFueledProcessingTechInventoryObjectEntity`).
 
 ## 멀티블럭 탱크 구조 규칙 (사용자 정의, 규칙 빈틈 해소)
 
