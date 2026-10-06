@@ -1,7 +1,9 @@
 package devp0tion.mechanics.core;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -27,6 +29,9 @@ import java.util.Set;
  * <p>TODO(design): the search for connected tiles is limited to {@link #MAX_CONNECTED_TILES} loaded
  * tiles (the nearest ones), a technical bound so that a pump at the edge of a large body of liquid
  * does not search all of it; "the farthest" is the farthest of those.
+ * <p>Within one pump cycle ({@link #beginCycle}) the area checks and the connected-tile search run
+ * once and are reused; only {@link #extract} changes tiles in a cycle and it keeps them up to date,
+ * with the same results as searching again (a technical optimization, the rules above unchanged).
  */
 public final class LiquidTileSource implements FluidSource {
 
@@ -41,6 +46,17 @@ public final class LiquidTileSource implements FluidSource {
     private final int pumpY;
     private FluidType bufferedFluid;
     private int buffered;
+    /** What one pump cycle has computed so far, or {@code null} outside a cycle. */
+    private CycleMemo memo;
+
+    /** Results reused within one pump cycle. */
+    private static final class CycleMemo {
+        Boolean areaLoaded;
+        Boolean infinite;
+        List<long[]> connected;
+        /** The connected-tile search stopped at {@link #MAX_CONNECTED_TILES} with tiles left. */
+        boolean truncated;
+    }
 
     public LiquidTileSource(LiquidTileLookup lookup, int pumpX, int pumpY) {
         this.lookup = Objects.requireNonNull(lookup, "lookup");
@@ -89,8 +105,33 @@ public final class LiquidTileSource implements FluidSource {
         this.buffered = amount;
     }
 
+    /**
+     * Start of a pump cycle ({@link Pump}): until {@link #endCycle}, the area checks and the
+     * connected-tile search are computed once and reused. Nothing but this source's
+     * {@link #extract} may change the tiles in between.
+     */
+    void beginCycle() {
+        memo = new CycleMemo();
+    }
+
+    /** End of the pump cycle: the next reads see the level as it is then. */
+    void endCycle() {
+        memo = null;
+    }
+
     /** Whether every tile of the 5x5 area is loaded and holds the pump tile's fluid (N19-3 ①). */
     public boolean isInfinite() {
+        if (memo != null && memo.infinite != null) {
+            return memo.infinite;
+        }
+        boolean infinite = computeInfinite();
+        if (memo != null) {
+            memo.infinite = infinite;
+        }
+        return infinite;
+    }
+
+    private boolean computeInfinite() {
         FluidType center = lookup.getFluid(pumpX, pumpY);
         if (center == null) {
             return false;
@@ -106,6 +147,17 @@ public final class LiquidTileSource implements FluidSource {
     }
 
     private boolean isAreaLoaded() {
+        if (memo != null && memo.areaLoaded != null) {
+            return memo.areaLoaded;
+        }
+        boolean loaded = computeAreaLoaded();
+        if (memo != null) {
+            memo.areaLoaded = loaded;
+        }
+        return loaded;
+    }
+
+    private boolean computeAreaLoaded() {
         for (int y = pumpY - AREA_RADIUS; y <= pumpY + AREA_RADIUS; y++) {
             for (int x = pumpX - AREA_RADIUS; x <= pumpX + AREA_RADIUS; x++) {
                 if (!lookup.isLoaded(x, y)) {
@@ -173,6 +225,7 @@ public final class LiquidTileSource implements FluidSource {
                 break;
             }
             lookup.consume((int) farthest[0], (int) farthest[1]);
+            onConsumed(farthest);
             int use = Math.min(FluidUnits.BUCKET, maxAmount - taken);
             taken += use;
             if (use < FluidUnits.BUCKET) {
@@ -200,9 +253,29 @@ public final class LiquidTileSource implements FluidSource {
         return best;
     }
 
+    /**
+     * The farthest tile was used up within a cycle. The area stays loaded and not infinite. When the
+     * search had found every connected tile, the others keep their steps (each is reached through
+     * nearer tiles only), so dropping the tile gives what a new search would; when the search was cut
+     * off at {@link #MAX_CONNECTED_TILES}, a new search may reach further, so it runs again.
+     */
+    private void onConsumed(long[] tile) {
+        if (memo == null || memo.connected == null) {
+            return;
+        }
+        if (memo.truncated) {
+            memo.connected = null;
+        } else {
+            memo.connected.remove(tile);
+        }
+    }
+
     /** Loaded tiles of the pump tile's fluid connected to it: {x, y, steps}, nearest first. */
-    private java.util.List<long[]> connectedTiles() {
-        java.util.List<long[]> result = new java.util.ArrayList<>();
+    private List<long[]> connectedTiles() {
+        if (memo != null && memo.connected != null) {
+            return memo.connected;
+        }
+        List<long[]> result = new ArrayList<>();
         FluidType fluid = lookup.getFluid(pumpX, pumpY);
         if (fluid == null) {
             return result;
@@ -221,6 +294,10 @@ public final class LiquidTileSource implements FluidSource {
                     queue.add(new long[]{x, y, tile[2] + 1});
                 }
             }
+        }
+        if (memo != null) {
+            memo.connected = result;
+            memo.truncated = !queue.isEmpty();
         }
         return result;
     }

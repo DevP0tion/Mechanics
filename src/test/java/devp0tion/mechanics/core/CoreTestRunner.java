@@ -27,7 +27,8 @@ public final class CoreTestRunner {
             PipeLinkTest.class,
             PipeNetworkTest.class,
             PumpPushTest.class,
-            PumpSourceTest.class
+            PumpSourceTest.class,
+            TileBucketsTest.class
     };
 
     private CoreTestRunner() {

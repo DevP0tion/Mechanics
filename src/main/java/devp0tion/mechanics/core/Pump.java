@@ -167,10 +167,19 @@ public class Pump extends LiquidStorage {
         }
     }
 
-    /** Appends a source (connected now: last in the pull order). */
+    /** Appends a source (connected now: last in the pull order, also when a stale entry was left). */
     void addSourceSlot(SourceSlot slot) {
-        if (!sourceSlots.contains(slot)) {
-            sourceSlots.add(slot);
+        sourceSlots.remove(slot);
+        sourceSlots.add(slot);
+    }
+
+    /** Drops the valve slots behind its own cut sides: a cut link is no source (N16-3). */
+    void dropCutSourceSlots() {
+        for (int i = sourceSlots.size() - 1; i >= 0; i--) {
+            Direction direction = sourceSlots.get(i).direction;
+            if (direction != null && !isSideOpen(direction)) {
+                sourceSlots.remove(i);
+            }
         }
     }
 
@@ -197,11 +206,12 @@ public class Pump extends LiquidStorage {
         if (slot.direction == null) {
             return tileSource;
         }
-        if (grid == null) {
+        if (grid == null || !grid.isPumpValveLinked(this, slot.direction)) {
+            // No valve there now (its region is unloaded), or a stale saved slot of a cut link: a
+            // valve is a source only while it is linked (N16-3).
             return null;
         }
-        TankValve valve = grid.getValve(x + slot.direction.dx, y + slot.direction.dy);
-        return valve == null ? null : valve.getTank();
+        return grid.getValve(x + slot.direction.dx, y + slot.direction.dy).getTank();
     }
 
     /** The tanks the pump pulls from: never destinations of its own push. */
@@ -418,6 +428,21 @@ public class Pump extends LiquidStorage {
         if (grid == null) {
             throw new IllegalStateException("Pump is not placed in a grid");
         }
+        // The liquid tile source searches its tiles once per cycle (N19-3, technical).
+        LiquidTileSource tiles = tileSource instanceof LiquidTileSource ? (LiquidTileSource) tileSource : null;
+        if (tiles != null) {
+            tiles.beginCycle();
+        }
+        try {
+            return runCycleSteps();
+        } finally {
+            if (tiles != null) {
+                tiles.endCycle();
+            }
+        }
+    }
+
+    private PumpResult runCycleSteps() {
         FluidType fluid = cycleFluid();
         if (fluid == null) {
             return PumpResult.NO_SOURCE;

@@ -21,6 +21,9 @@ public final class LinkFlags {
     /** The vertical link bit. */
     public static final int VERTICAL = 1 << 4;
 
+    /** The four side bits. */
+    public static final int SIDES = ALL_OPEN & ~VERTICAL;
+
     private LinkFlags() {
     }
 

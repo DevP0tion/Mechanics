@@ -1,5 +1,6 @@
 package devp0tion.mechanics.pipe;
 
+import devp0tion.mechanics.core.Direction;
 import devp0tion.mechanics.core.FluidType;
 import devp0tion.mechanics.core.LinkFlags;
 import devp0tion.mechanics.core.MineralTier;
@@ -10,6 +11,7 @@ import devp0tion.mechanics.core.PipeTierRules;
 import devp0tion.mechanics.core.PumpResult;
 import devp0tion.mechanics.objects.BasicPipeObject;
 import devp0tion.mechanics.objects.UndergroundPipeObject;
+import devp0tion.mechanics.tank.TankRegionsLevelData;
 import devp0tion.mechanics.tank.TankValveObjectEntity;
 import necesse.engine.network.packet.PacketChangeObject;
 import necesse.engine.network.server.ServerClient;
@@ -17,6 +19,7 @@ import necesse.engine.registries.LevelDataRegistry;
 import necesse.engine.save.LoadData;
 import necesse.engine.save.SaveData;
 import necesse.entity.manager.RegionLoadedListenerEntityComponent;
+import necesse.entity.objectEntity.ObjectEntity;
 import necesse.level.gameObject.GameObject;
 import necesse.level.maps.Level;
 import necesse.level.maps.levelData.LevelData;
@@ -44,7 +47,8 @@ import java.util.Map;
  *     known also after a restart. A region's own data replaces its mirror when it loads.</li>
  *     <li>Clients get the underground pipes' link flags (the only underground state they draw) per
  *     region when the region is sent to them ({@link PipeSyncPatches}) and per tile when it changes
- *     ({@link PacketUndergroundPipes}); fluid amounts stay on the server.</li>
+ *     ({@link PacketUndergroundPipes}); fluid amounts stay on the server. Basic pipes sync their link
+ *     flags and the faces blocked by another fluid themselves ({@link BasicPipeObjectEntity}).</li>
  *     <li>The grid clock advances every level tick (the 20-tick cycle windows of the transport cap,
  *     N14-2).</li>
  * </ul>
@@ -60,7 +64,17 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     private boolean scanned;
 
     public PipeSystem() {
-        grid.setListener(this::onLinksChanged);
+        grid.setListener(new PipeGrid.Listener() {
+            @Override
+            public void onLinksChanged(int tileX, int tileY, PipeGrid.Part part) {
+                PipeSystem.this.onLinksChanged(tileX, tileY, part);
+            }
+
+            @Override
+            public void onPipeFluidChanged(int tileX, int tileY, PipeLayer layer) {
+                PipeSystem.this.onPipeFluidChanged(tileX, tileY, layer);
+            }
+        });
     }
 
     /** Registers the level data type (mod init). */
@@ -103,6 +117,20 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         }
     }
 
+    /**
+     * Creates the level's pipe system before its level data tick (server) when the level has tank
+     * region data. That data's tick loads the regions of kept tanks (N15-6, {@link TankRegionsLevelData}),
+     * and the valves and pipes in them get the pipe system when they are created: creating it then
+     * would change the level data map while the game iterates it ({@code LevelDataManager.tick}).
+     * This happens on levels saved before round 4b, which have tanks but no pipe system.
+     */
+    public static void ensureBeforeLevelDataTick(Level level) {
+        if (level != null && level.isServer() && getIfExists(level) == null
+                && level.getLevelData(TankRegionsLevelData.KEY) != null) {
+            get(level);
+        }
+    }
+
     /** The level's pipe system if it exists (server only). */
     public static PipeSystem getIfExists(Level level) {
         if (level == null || !level.isServer()) {
@@ -114,6 +142,20 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
 
     public PipeGrid getGrid() {
         return grid;
+    }
+
+    /**
+     * Whether an object entity that is being removed is only replaced by another entity of the same
+     * object, its tile still holding the object ({@code objectID}) it was created for. The engine
+     * does that when a region loads (a fresh entity for every object, then the saved one replaces it:
+     * {@code ObjectRegionLayer.loadSaveData}, {@code TileEntityList.addHidden}) and when an object is
+     * placed (two entities in a row). When the object itself is removed, the tile holds another one
+     * by then. A replaced part must leave the grid as an unloaded one does: pumps keep their valve
+     * sources (N19-1) and pipes their state, with no network rebuild.
+     */
+    public static boolean isReplacedEntity(ObjectEntity entity, int objectID) {
+        return objectID >= 0 && entity.getLevel() != null
+                && entity.getLevel().getObjectID(entity.tileX, entity.tileY) == objectID;
     }
 
     @Override
@@ -162,6 +204,28 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
                 break;
             default:
                 break;
+        }
+    }
+
+    /**
+     * A basic pipe started or stopped holding fluid: it and the basic pipes next to it sync the faces
+     * blocked by another fluid (N13-2), which clients draw as cut. Underground pipes are not covered:
+     * their clients only get link flags ({@link PacketUndergroundPipes}).
+     */
+    private void onPipeFluidChanged(int tileX, int tileY, PipeLayer layer) {
+        if (layer != PipeLayer.BASE || level == null) {
+            return;
+        }
+        syncBlockedSides(tileX, tileY);
+        for (Direction d : Direction.values()) {
+            syncBlockedSides(tileX + d.dx, tileY + d.dy);
+        }
+    }
+
+    private void syncBlockedSides(int tileX, int tileY) {
+        BasicPipeObjectEntity pipe = level.entityManager.getObjectEntity(tileX, tileY, BasicPipeObjectEntity.class);
+        if (pipe != null) {
+            pipe.syncBlockedSides();
         }
     }
 

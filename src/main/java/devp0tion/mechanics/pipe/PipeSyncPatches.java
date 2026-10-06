@@ -24,6 +24,9 @@ import net.bytebuddy.asm.Advice;
  *     known before the player picks up a wrench.</li>
  *     <li>{@link RegionDataApplied}: the level's {@link PipeSystem} exists before a region's saved
  *     underground pipe state is read, also when the level file was saved before it was created.</li>
+ *     <li>{@link LevelDataTick}: the level's {@link PipeSystem} exists before its level data tick,
+ *     whose region loading would otherwise create it while the game iterates the level data
+ *     ({@link PipeSystem#ensureBeforeLevelDataTick}).</li>
  * </ul>
  */
 public final class PipeSyncPatches {
@@ -65,6 +68,17 @@ public final class PipeSyncPatches {
         @Advice.OnMethodEnter
         static void onEnter(@Advice.This LevelDataManager manager, @Advice.Argument(1) LoadData save) {
             PipeSystem.ensureForRegionData(manager.level, save);
+        }
+
+    }
+
+    /** {@code LevelDataManager.tick()}: before the level data of a level tick. */
+    @ModMethodPatch(target = LevelDataManager.class, name = "tick", arguments = {})
+    public static class LevelDataTick {
+
+        @Advice.OnMethodEnter
+        static void onEnter(@Advice.This LevelDataManager manager) {
+            PipeSystem.ensureBeforeLevelDataTick(manager.level);
         }
 
     }

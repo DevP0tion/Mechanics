@@ -6,8 +6,8 @@ import java.util.List;
 
 /**
  * Links: auto-connect (9-4), layers (9-3, 9-9, 11-5), the wrench (12-8, 13-4, 13-5, N16-3), cut
- * flags that stay (N16-4), the vertical link only by wrench (N16-4) and placement never refused for
- * fluids (N13-2).
+ * flags that stay (N16-4), the vertical link only by wrench (N16-4), placement never refused for
+ * fluids (N13-2) and the faces two fluids block (N13-2).
  */
 final class PipeLinkTest {
 
@@ -293,6 +293,64 @@ final class PipeLinkTest {
         grid.removeValve(-1, 0);
         Check.equal(Collections.singletonList(Pump.SourceSlot.valve(Direction.EAST)), pump.getSourceSlots(),
                 "removed: gone");
+    }
+
+
+    // ---------- faces between two fluids (N13-2) ----------
+
+    public static void testFacesBetweenTwoFluidsAreBlocked() {
+        PipeGrid grid = grid();
+        Fluids.baseLine(grid, 0, 2, 0, MineralTier.COPPER);
+        grid.placePipe(1, 1, PipeLayer.BASE, MineralTier.COPPER);
+        grid.placePipe(1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
+        Fluids.set(grid, 0, 0, PipeLayer.BASE, FluidType.FRESHWATER, 5);
+        Fluids.set(grid, 1, 0, PipeLayer.BASE, FluidType.LAVA, 5);
+        Fluids.set(grid, 1, 0, PipeLayer.UNDERGROUND, FluidType.FRESHWATER, 5);
+        Check.equal(LinkFlags.bit(Direction.WEST), grid.getFluidBlockedSides(1, 0, PipeLayer.BASE),
+                "lava with water on its west side; the empty pipes and the other layer do not count");
+        Check.equal(LinkFlags.bit(Direction.EAST), grid.getFluidBlockedSides(0, 0, PipeLayer.BASE), "both sides of the face");
+        Check.equal(0, grid.getFluidBlockedSides(2, 0, PipeLayer.BASE), "an empty pipe is blocked by nothing");
+        Check.equal(0, grid.getFluidBlockedSides(1, 1, PipeLayer.BASE));
+        Check.equal(0, grid.getFluidBlockedSides(1, 0, PipeLayer.UNDERGROUND), "no underground neighbours");
+        Check.equal(0, grid.getFluidBlockedSides(5, 5, PipeLayer.BASE), "no pipe");
+        Check.isTrue(grid.areLinked(base(grid, 0, 0), base(grid, 1, 0)), "the flags are open: only the fluids block");
+        Fluids.set(grid, 2, 0, PipeLayer.BASE, FluidType.FRESHWATER, 5);
+        Check.equal(LinkFlags.bit(Direction.WEST) | LinkFlags.bit(Direction.EAST),
+                grid.getFluidBlockedSides(1, 0, PipeLayer.BASE), "water on both sides");
+    }
+
+    public static void testListenerHearsWhenAPipeStartsOrStopsHoldingFluid() {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        final List<String> heard = new ArrayList<>();
+        grid.setListener(new PipeGrid.Listener() {
+            @Override
+            public void onLinksChanged(int tileX, int tileY, PipeGrid.Part part) {
+            }
+
+            @Override
+            public void onPipeFluidChanged(int tileX, int tileY, PipeLayer layer) {
+                heard.add(layer + "@" + tileX + "," + tileY);
+            }
+        });
+        Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
+        Fluids.baseLine(grid, 1, 2, 0, MineralTier.COPPER);
+        grid.placeValve(3, 0, Fluids.valve(1000));
+        Check.equal("[]", heard.toString(), "empty pipes hold no fluid");
+        Fluids.cycle(pump);
+        Check.equal("[BASE@1,0]", heard.toString(), "reached by the push");
+        Fluids.cycle(pump);
+        Check.equal("[BASE@1,0, BASE@2,0]", heard.toString());
+        heard.clear();
+        Fluids.cycle(pump);
+        Check.equal("[]", heard.toString(), "more of the same fluid changes nothing");
+        grid.removePipe(1, 0, PipeLayer.BASE);
+        Check.equal("[BASE@1,0]", heard.toString(), "removed with its fluid");
+        heard.clear();
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
+        grid.removePipe(1, 0, PipeLayer.BASE);
+        Check.equal("[]", heard.toString(), "an empty pipe placed and removed");
+        Fluids.set(grid, 2, 0, PipeLayer.BASE, null, 0);
+        Check.equal("[BASE@2,0]", heard.toString(), "loaded empty over a mirror that held fluid");
     }
 
 }

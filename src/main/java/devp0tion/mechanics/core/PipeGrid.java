@@ -36,7 +36,8 @@ import java.util.Set;
  *     pump's other sources (N16-3, {@link Check#DIFFERENT_SOURCE_FLUID}).</li>
  * </ul>
  * Pipes may always be placed and linked: where two fluids meet, the face is simply not used, a
- * dead end (N13-2). Only the pump's sources are checked for mixing (N16-3, N17-1).
+ * dead end (N13-2; {@link #getFluidBlockedSides}, so the game can draw it). Only the pump's sources
+ * are checked for mixing (N16-3, N17-1).
  *
  * <h2>Networks (N13-1, N18-2, N18-3)</h2>
  * A network ({@link PipeNetwork}) is the set of pipes the fluid has actually reached, linked and
@@ -44,7 +45,8 @@ import java.util.Set;
  * network. A new pump starts a network of its own; when its fluid reaches a pipe of another network
  * of the same fluid, the networks merge. Changes rebuild the networks around them, as before.
  * Route caching is per network: each network keeps the routes of its pumps with the tiles they
- * cross, and a change on one of those tiles drops only those routes.
+ * cross, and a change on one of those tiles drops only those routes. The pumps with cached routes
+ * are filed by region ({@link TileBuckets}), so a change only looks at the routes near it.
  *
  * <h2>Pushing (N7, N12, N14, N18-1)</h2>
  * <ul>
@@ -106,6 +108,14 @@ public final class PipeGrid {
     /** Told about every link flag change, so the game can save and sync it. */
     public interface Listener {
         void onLinksChanged(int tileX, int tileY, Part part);
+
+        /**
+         * The pipe at the tile started or stopped holding fluid (reached, removed or loaded with
+         * other contents), so the faces it shares with the pipes next to it may have become or
+         * stopped being dead ends between two fluids ({@link #getFluidBlockedSides}).
+         */
+        default void onPipeFluidChanged(int tileX, int tileY, PipeLayer layer) {
+        }
     }
 
     /** The cycle window of the transport cap: one pump cycle, 20 ticks (N6-1, N14-2). */
@@ -122,6 +132,8 @@ public final class PipeGrid {
     private final Map<TankValve, Long> valvePositions = new IdentityHashMap<>();
     private final Map<Long, Pump> pumps = new HashMap<>();
     private final Set<PipeNetwork> networks = new LinkedHashSet<>();
+    /** The pumps with cached routes, filed under the buckets their routes' tiles are in (tests read it). */
+    final TileBuckets<Pump> routeBuckets = new TileBuckets<>();
     private long tick;
 
     public PipeGrid(PipeTierRules tierRules) {
@@ -181,6 +193,27 @@ public final class PipeGrid {
         return Collections.unmodifiableList(new ArrayList<>(networks));
     }
 
+    /**
+     * The sides of the pipe at the tile whose neighbouring pipe of the same layer holds another
+     * fluid than it does ({@link LinkFlags} side bits): those faces are dead ends whatever their link
+     * flags say (N13-2). 0 when there is no pipe or it is empty.
+     */
+    public int getFluidBlockedSides(int x, int y, PipeLayer layer) {
+        PipeNode node = getPipe(x, y, layer);
+        FluidType fluid = node == null ? null : node.getFluid();
+        if (fluid == null) {
+            return 0;
+        }
+        int sides = 0;
+        for (Direction d : Direction.values()) {
+            PipeNode next = getPipe(x + d.dx, y + d.dy, layer);
+            if (next != null && next.getFluid() != null && next.getFluid() != fluid) {
+                sides |= LinkFlags.bit(d);
+            }
+        }
+        return sides;
+    }
+
     /** Whether two pipes are linked (both facing flags open, 9-4, N16-4). Fluids are not considered. */
     public boolean areLinked(PipeNode a, PipeNode b) {
         return linkedPipes(a).contains(b);
@@ -221,11 +254,8 @@ public final class PipeGrid {
     public List<TankValve> getSourceValves(Pump pump) {
         List<TankValve> result = new ArrayList<>();
         for (Pump.SourceSlot slot : pump.getSourceSlots()) {
-            if (slot.direction != null) {
-                TankValve valve = valves.get(key(pump.getTileX() + slot.direction.dx, pump.getTileY() + slot.direction.dy));
-                if (valve != null) {
-                    result.add(valve);
-                }
+            if (slot.direction != null && isPumpValveLinked(pump, slot.direction)) {
+                result.add(valves.get(key(pump.getTileX() + slot.direction.dx, pump.getTileY() + slot.direction.dy)));
             }
         }
         return result;
@@ -289,6 +319,7 @@ public final class PipeGrid {
                 return existing;
             }
             // The same pipe with other saved state: update it in place and regroup its network.
+            boolean emptied = existing.getFluid() != null && contents == null;
             PipeNetwork network = existing.network;
             if (network != null) {
                 network.nodes.remove(existing);
@@ -302,6 +333,8 @@ public final class PipeGrid {
             }
             if (existing.isReached()) {
                 attachReached(existing);
+            } else if (emptied) {
+                listener.onPipeFluidChanged(x, y, layer);
             }
             onStructureChanged(x, y);
             return existing;
@@ -355,6 +388,9 @@ public final class PipeGrid {
             rebuild(Collections.singletonList(network));
         }
         onStructureChanged(x, y);
+        if (node.getFluid() != null) {
+            listener.onPipeFluidChanged(x, y, layer);
+        }
         return node;
     }
 
@@ -480,9 +516,14 @@ public final class PipeGrid {
         addPump(x, y, pump);
     }
 
-    /** Adds a pump with its saved state (its region was loaded). */
+    /**
+     * Adds a pump with its saved state (its region was loaded). Saved valve sources behind its own
+     * cut sides are dropped; a slot whose valve cut the link is skipped while it is cut
+     * ({@link Pump#getSources}), and linking it again makes it the last source (N19-1).
+     */
     public void loadPump(int x, int y, Pump pump) {
         Objects.requireNonNull(pump, "pump");
+        pump.dropCutSourceSlots();
         addPump(x, y, pump);
     }
 
@@ -508,6 +549,7 @@ public final class PipeGrid {
             pump.grid = null;
             PipeNetwork network = pump.network;
             if (network != null) {
+                dropRoutes(pump, network.routeCache.get(pump));
                 network.pumps.remove(pump);
                 pump.network = null;
                 rebuild(Collections.singletonList(network));
@@ -785,6 +827,7 @@ public final class PipeGrid {
             target.addNode(node);
         }
         onReached(node);
+        listener.onPipeFluidChanged(node.getTileX(), node.getTileY(), node.getLayer());
     }
 
     /**
@@ -870,29 +913,70 @@ public final class PipeGrid {
         final FluidType fluid;
         final List<Route> routes;
         final Set<Long> footprint;
+        /** The {@link TileBuckets} of the footprint's tiles. */
+        final Set<Long> buckets = new HashSet<>();
 
         PumpRoutes(FluidType fluid, List<Route> routes, Set<Long> footprint) {
             this.fluid = fluid;
             this.routes = routes;
             this.footprint = footprint;
+            for (long tile : footprint) {
+                buckets.add(TileBuckets.bucketOf(keyX(tile), keyY(tile)));
+            }
+        }
+    }
+
+    /**
+     * Caches a pump's routes in its network and files the pump under the buckets they cross, so a
+     * change on a tile only looks at the pumps whose routes are near it.
+     */
+    private void cacheRoutes(PipeNetwork network, Pump pump, PumpRoutes routes) {
+        dropRoutes(pump, network.routeCache.get(pump));
+        network.routeCache.put(pump, routes);
+        for (long bucket : routes.buckets) {
+            routeBuckets.add(bucket, pump);
+        }
+    }
+
+    /** Drops a pump's cached routes ({@code routes}, if they are still its cache) and their index entries. */
+    private void dropRoutes(Pump pump, PumpRoutes routes) {
+        if (routes == null) {
+            return;
+        }
+        if (pump.network != null && pump.network.routeCache.get(pump) == routes) {
+            pump.network.routeCache.remove(pump);
+        }
+        for (long bucket : routes.buckets) {
+            routeBuckets.remove(bucket, pump);
+        }
+    }
+
+    /**
+     * The cached routes of the pumps filed under the tile's bucket that cross the tile and match
+     * {@code drop}, dropped. Index entries that no longer match a pump's cache are cleaned up.
+     */
+    private void dropRoutesAt(int x, int y, java.util.function.Predicate<PumpRoutes> drop) {
+        long key = key(x, y);
+        long bucket = TileBuckets.bucketOf(x, y);
+        for (Pump pump : routeBuckets.at(x, y)) {
+            PumpRoutes routes = pump.network == null ? null : pump.network.routeCache.get(pump);
+            if (routes == null || !routes.buckets.contains(bucket)) {
+                routeBuckets.remove(bucket, pump);
+            } else if (routes.footprint.contains(key) && drop.test(routes)) {
+                dropRoutes(pump, routes);
+            }
         }
     }
 
     /** Something changed on a tile: the cached routes crossing it or next to it are dropped. */
     private void onStructureChanged(int x, int y) {
-        long key = key(x, y);
-        for (PipeNetwork network : networks) {
-            network.routeCache.values().removeIf(routes -> routes.footprint.contains(key));
-        }
+        dropRoutesAt(x, y, routes -> true);
     }
 
     /** A pipe was reached: routes of other fluids crossing it are dropped (it is a dead end for them now). */
     private void onReached(PipeNode node) {
-        long key = key(node.getTileX(), node.getTileY());
         FluidType fluid = node.getFluid();
-        for (PipeNetwork network : networks) {
-            network.routeCache.values().removeIf(routes -> routes.fluid != fluid && routes.footprint.contains(key));
-        }
+        dropRoutesAt(node.getTileX(), node.getTileY(), routes -> routes.fluid != fluid);
     }
 
     /** Whether {@code fluid} may pass the pipe: not removed, empty or holding it, and readable. */
@@ -953,7 +1037,7 @@ public final class PipeGrid {
         }
         routes.sort(Route.ORDER);
         if (network != null) {
-            network.routeCache.put(pump, new PumpRoutes(fluid, routes, footprint));
+            cacheRoutes(network, pump, new PumpRoutes(fluid, routes, footprint));
         }
         return routes;
     }

@@ -34,7 +34,10 @@ import java.util.Objects;
  *     tank completed around it later does not take it (N15-3). Saved and synced to clients.</li>
  *     <li>In the level's pipe grid (server): a new valve's link toward a pump already next to it
  *     starts cut (N13-3, N16-3); its link flags (sides and the underground pipe on its tile) are
- *     saved and synced to clients, which draw cut faces (N16-4). Its tank is looked up every tick.</li>
+ *     saved and synced to clients, which draw cut faces (N16-4). Its tank is looked up every tick.
+ *     When its region unloads, or the engine only replaces this entity with another one of the same
+ *     valve (region loading, placement, {@link PipeSystem#isReplacedEntity}), it leaves the grid
+ *     but the pumps next to it keep it as a source; only a removed valve stops being one.</li>
  * </ul>
  * TODO(design): automatic output from the valve is TODO (N7-3).
  */
@@ -49,6 +52,8 @@ public class TankValveObjectEntity extends ObjectEntity {
     private boolean loadedFromSave;
     private boolean registered;
     private boolean unloading;
+    /** The object this entity was created for ({@link PipeSystem#isReplacedEntity}). */
+    private int objectID = -1;
     private int links = LinkFlags.ALL_OPEN;
 
     public TankValveObjectEntity(Level level, int tileX, int tileY) {
@@ -59,6 +64,7 @@ public class TankValveObjectEntity extends ObjectEntity {
     @Override
     public void init() {
         super.init();
+        objectID = getLevel().getObjectID(tileX, tileY);
         updateWireSignal();
         PipeSystem system = PipeSystem.get(getLevel());
         if (system == null) {
@@ -91,8 +97,9 @@ public class TankValveObjectEntity extends ObjectEntity {
         super.remove();
         PipeSystem system = PipeSystem.getIfExists(getLevel());
         if (system != null && registered && system.getGrid().getValve(tileX, tileY) == valve) {
-            if (unloading) {
-                // Pumps next to it keep it as a source while its region is unloaded.
+            if (unloading || PipeSystem.isReplacedEntity(this, objectID)) {
+                // Pumps next to it keep it as a source while its region is unloaded, and when the
+                // engine only replaces this entity with another one of the same valve.
                 system.getGrid().unloadValve(tileX, tileY);
             } else {
                 system.getGrid().removeValve(tileX, tileY);

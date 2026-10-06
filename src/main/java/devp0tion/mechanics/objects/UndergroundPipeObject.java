@@ -100,7 +100,7 @@ public class UndergroundPipeObject extends GameObject {
         }
         int links = PipeRendering.undergroundLinks(level, tileX, tileY);
         final DrawOptionsList options = PipeRendering.pipeOptions(level, tileX, tileY, camera.getTileDrawX(tileX),
-                camera.getTileDrawY(tileY), texture, links, true, true, 0.85f);
+                camera.getTileDrawY(tileY), texture, links, 0, true, true, 0.85f);
         list.add(new LevelSortedDrawable(this, tileX, tileY) {
             @Override
             public int getSortY() {

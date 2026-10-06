@@ -18,6 +18,9 @@ import necesse.level.maps.Level;
  *     <li>A used-up tile becomes what a bucket leaves: dirt, marked as player placed, sent to the
  *     clients and the tiles and objects around it re-checked (vanilla {@code BucketItem.onPlace}).
  *     No item is given.</li>
+ *     <li>Tiles outside the level count as loaded and hold no liquid: they never will be loaded, so
+ *     a pump near the edge of a level is judged by the tiles that exist (as
+ *     {@code LevelTankCellLookup.isAreaLoaded} does for tanks).</li>
  * </ul>
  * TODO(design): buckets cannot scoop the deep sea at all; a pump using up a deep seawater (crude
  * oil) tile turns it into dirt the same way, a placeholder until it is decided.
@@ -32,15 +35,20 @@ public final class LevelLiquidTileLookup implements LiquidTileLookup {
 
     @Override
     public boolean isLoaded(int tileX, int tileY) {
-        return level.isTileWithinBounds(tileX, tileY) && level.regionManager.isTileLoaded(tileX, tileY);
+        return !level.isTileWithinBounds(tileX, tileY) || level.regionManager.isTileLoaded(tileX, tileY);
     }
 
     @Override
     public FluidType getFluid(int tileX, int tileY) {
-        if (!isLoaded(tileX, tileY)) {
+        if (!isReadable(tileX, tileY)) {
             return null;
         }
         return fluidAt(level, tileX, tileY);
+    }
+
+    /** Within the level and loaded. */
+    private boolean isReadable(int tileX, int tileY) {
+        return level.isTileWithinBounds(tileX, tileY) && level.regionManager.isTileLoaded(tileX, tileY);
     }
 
     /** The fluid a pump gets from a loaded tile, or {@code null} when it is not liquid. */
@@ -55,7 +63,7 @@ public final class LevelLiquidTileLookup implements LiquidTileLookup {
 
     @Override
     public void consume(int tileX, int tileY) {
-        if (!level.isServer() || !isLoaded(tileX, tileY)) {
+        if (!level.isServer() || !isReadable(tileX, tileY)) {
             return;
         }
         level.setTile(tileX, tileY, TileRegistry.dirtID);

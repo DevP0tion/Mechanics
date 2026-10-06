@@ -94,8 +94,8 @@ public class BasicPipeObject extends GameObject {
                              TickManager tickManager, GameCamera camera, PlayerMob perspective) {
         int links = PipeRendering.baseLinks(level, tileX, tileY);
         final DrawOptionsList options = PipeRendering.pipeOptions(level, tileX, tileY, camera.getTileDrawX(tileX),
-                camera.getTileDrawY(tileY), texture, links < 0 ? LinkFlags.ALL_OPEN : links, false,
-                PipeRendering.undergroundVisible(perspective), 1f);
+                camera.getTileDrawY(tileY), texture, links < 0 ? LinkFlags.ALL_OPEN : links,
+                PipeRendering.baseBlockedSides(level, tileX, tileY), false, PipeRendering.undergroundVisible(perspective), 1f);
         tileList.add(tm -> options.draw());
     }
 

@@ -6,7 +6,10 @@ package devp0tion.mechanics.core;
  */
 public interface LiquidTileLookup {
 
-    /** Whether the tile is loaded (readable and changeable now). */
+    /**
+     * Whether the tile is loaded (readable and changeable now). A tile that can never be loaded
+     * (outside a finite level) counts as loaded and holds no liquid.
+     */
     boolean isLoaded(int tileX, int tileY);
 
     /**

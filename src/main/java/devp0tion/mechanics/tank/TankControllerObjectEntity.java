@@ -31,7 +31,8 @@ import java.util.Objects;
  *     and it remembers that tank while it is invalid. The valves of its tank become its own
  *     ({@link TankValveObjectEntity#getOwner()}). The kept tank is saved and synced to clients.</li>
  *     <li>The regions its recognized tank spans are kept loaded together (N15-6,
- *     {@link TankRegionsLevelData}).</li>
+ *     {@link TankRegionsLevelData}); a controller loaded with a kept tank registers that tank's
+ *     regions right away, so a tank loaded only in part gets the rest loaded.</li>
  *     <li>One fluid type and amount, saved with the world ({@link TankStorage}, 12-7). A broken
  *     wall deactivates the tank and keeps the fluid (5-9); a rebuilt tank smaller than the stored
  *     amount loses the excess (N11-2); breaking the controller loses the fluid with this entity
@@ -197,13 +198,24 @@ public class TankControllerObjectEntity extends ObjectEntity {
     }
 
     /**
-     * Keeps the regions of the recognized tank loaded together (N15-6). Nothing is registered or
-     * cleared before the first completed search: a controller loaded from a save starts inactive,
-     * and clearing its saved entry then would let the tank's other regions unload (for example an
-     * offline owner's settlement on a dedicated server).
+     * Keeps the regions of the recognized tank loaded together (N15-6). Nothing is cleared before
+     * the first completed search: a controller loaded from a save starts inactive, and clearing its
+     * saved entry then would let the tank's other regions unload (for example an offline owner's
+     * settlement on a dedicated server). A controller loaded with a kept tank registers that tank's
+     * regions at once instead: when only part of the tank is loaded, the rest is loaded with it, so
+     * the tank can be recognized again; the first completed search then sets the entry as usual.
      */
     private void updateRegionKeeping() {
         if (!searchCompleted) {
+            // Before the first search only a saved kept tank can be set (searches set it after).
+            if (kept != null && !regionsRegistered) {
+                TankRegionsLevelData data = TankRegionsLevelData.get(getLevel(), true);
+                if (data != null) {
+                    data.setTank(tileX, tileY, kept);
+                }
+                regionsRegisteredFor = kept;
+                regionsRegistered = true;
+            }
             return;
         }
         TankBounds active = storage.isActive() ? kept : null;

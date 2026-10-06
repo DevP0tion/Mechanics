@@ -30,7 +30,9 @@ import necesse.level.maps.light.GameLight;
  * marks north, east, south, west, then the vertical link marker linked and cut.
  *
  * <p>Cut faces are drawn (N16-4): a pipe marks every side whose own flag is cut and every side
- * facing a part whose flag toward it is cut; a pump marks its cut links to valves. The vertical
+ * facing a part whose flag toward it is cut; a pump marks its cut links to valves. A face between
+ * two basic pipes holding different fluids is a dead end (N13-2) and is drawn the same way, from the
+ * blocked sides the server syncs ({@link BasicPipeObjectEntity#getBlockedSides}). The vertical
  * link marker is drawn while underground pipes are visible.
  *
  * <p>Underground pipes are visible only while the local player holds the wrench or an underground
@@ -85,6 +87,12 @@ public final class PipeRendering {
         return LinkFlags.ALL_OPEN;
     }
 
+    /** The sides of the basic pipe at a tile blocked by another fluid next to it (N13-2), or 0. */
+    public static int baseBlockedSides(Level level, int tileX, int tileY) {
+        ObjectEntity entity = level.entityManager.getObjectEntity(tileX, tileY);
+        return entity instanceof BasicPipeObjectEntity ? ((BasicPipeObjectEntity) entity).getBlockedSides() : 0;
+    }
+
     /** The link flags of the underground pipe at a tile, or -1 when there is none. */
     public static int undergroundLinks(Level level, int tileX, int tileY) {
         if (!(level.getObject(UndergroundPipeLayer.ID, tileX, tileY) instanceof UndergroundPipeObject)) {
@@ -98,11 +106,13 @@ public final class PipeRendering {
      *
      * @param sheet       the pipe's sheet
      * @param ownLinks    the pipe's own flags
+     * @param blockedSides the sides blocked by another fluid next to it (N13-2), drawn as cut
      * @param underground whether it is an underground pipe (neighbours on the underground layer)
      * @param showVertical whether to draw the vertical link marker
      */
     public static DrawOptionsList pipeOptions(Level level, int tileX, int tileY, int drawX, int drawY, GameTexture sheet,
-                                              int ownLinks, boolean underground, boolean showVertical, float alpha) {
+                                              int ownLinks, int blockedSides, boolean underground, boolean showVertical,
+                                              float alpha) {
         GameLight light = level.getLightLevel(tileX, tileY);
         DrawOptionsList options = new DrawOptionsList();
         options.add(cell(sheet, 0, drawX, drawY, light, alpha));
@@ -112,10 +122,11 @@ public final class PipeRendering {
             int neighbour = underground ? undergroundLinks(level, nx, ny) : baseLinks(level, nx, ny);
             boolean own = LinkFlags.isSideOpen(ownLinks, d);
             boolean other = neighbour >= 0 && LinkFlags.isSideOpen(neighbour, d.opposite());
-            if (own && other) {
+            boolean blocked = LinkFlags.isSideOpen(blockedSides, d);
+            if (own && other && !blocked) {
                 options.add(cell(sheet, 1 + d.ordinal(), drawX, drawY, light, alpha));
             }
-            if (!own || neighbour >= 0 && !other) {
+            if (!own || neighbour >= 0 && !other || blocked) {
                 options.add(cell(links, d.ordinal(), drawX, drawY, light, alpha));
             }
         }

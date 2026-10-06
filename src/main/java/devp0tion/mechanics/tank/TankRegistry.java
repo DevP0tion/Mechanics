@@ -4,6 +4,7 @@ import devp0tion.mechanics.core.GridPos;
 import devp0tion.mechanics.core.TankBounds;
 import devp0tion.mechanics.core.TankStorage;
 import devp0tion.mechanics.core.TankStructure;
+import devp0tion.mechanics.core.TileBuckets;
 import necesse.level.maps.Level;
 
 import java.util.ArrayList;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
@@ -26,14 +28,35 @@ import java.util.concurrent.CopyOnWriteArraySet;
  *     the interior placement rule N16).</li>
  *     <li>Server: the tank a valve belongs to ({@link #findValveTank}, N13-3).</li>
  * </ul>
- * Safe to read from the client's draw threads.
+ * Safe to read from the client's draw threads. Two indexes keep the frequent server lookups from
+ * scanning every controller: by tile (the owner lookup of every valve, every tick) and by region
+ * bucket ({@link TileBuckets}: the controllers near a changed tile).
  */
 public final class TankRegistry {
 
-    private static final Map<Level, Set<TankControllerObjectEntity>> CONTROLLERS =
-            Collections.synchronizedMap(new WeakHashMap<Level, Set<TankControllerObjectEntity>>());
+    private static final Map<Level, LevelControllers> LEVELS =
+            Collections.synchronizedMap(new WeakHashMap<Level, LevelControllers>());
+
+    /** The controllers of one level and their indexes. */
+    private static final class LevelControllers {
+        final Set<TankControllerObjectEntity> all = new CopyOnWriteArraySet<>();
+        /** By controller tile. */
+        final Map<GridPos, TankControllerObjectEntity> byTile = new ConcurrentHashMap<>();
+        /** By region bucket of the controller tile; guarded by itself. */
+        final TileBuckets<TankControllerObjectEntity> nearby = new TileBuckets<>();
+
+        List<TankControllerObjectEntity> near(int x0, int y0, int x1, int y1) {
+            synchronized (nearby) {
+                return nearby.near(x0, y0, x1, y1);
+            }
+        }
+    }
 
     private TankRegistry() {
+    }
+
+    private static LevelControllers of(Level level) {
+        return level == null ? null : LEVELS.get(level);
     }
 
     static void add(TankControllerObjectEntity controller) {
@@ -41,43 +64,63 @@ public final class TankRegistry {
         if (level == null) {
             return;
         }
-        Set<TankControllerObjectEntity> set;
-        synchronized (CONTROLLERS) {
-            set = CONTROLLERS.get(level);
-            if (set == null) {
-                set = new CopyOnWriteArraySet<>();
-                CONTROLLERS.put(level, set);
+        LevelControllers controllers;
+        synchronized (LEVELS) {
+            controllers = LEVELS.get(level);
+            if (controllers == null) {
+                controllers = new LevelControllers();
+                LEVELS.put(level, controllers);
             }
         }
-        set.add(controller);
+        controllers.all.add(controller);
+        controllers.byTile.put(new GridPos(controller.tileX, controller.tileY), controller);
+        synchronized (controllers.nearby) {
+            controllers.nearby.add(controller.tileX, controller.tileY, controller);
+        }
     }
 
     static void remove(TankControllerObjectEntity controller) {
-        Level level = controller.getLevel();
-        if (level == null) {
+        LevelControllers controllers = of(controller.getLevel());
+        if (controllers == null) {
             return;
         }
-        Set<TankControllerObjectEntity> set = CONTROLLERS.get(level);
-        if (set != null) {
-            set.remove(controller);
+        controllers.all.remove(controller);
+        controllers.byTile.remove(new GridPos(controller.tileX, controller.tileY), controller);
+        synchronized (controllers.nearby) {
+            controllers.nearby.remove(controller.tileX, controller.tileY, controller);
         }
+    }
+
+    private static boolean isGone(TankControllerObjectEntity controller) {
+        return controller.removed() || controller.isDisposed();
     }
 
     /** The live controllers of a level. */
     public static List<TankControllerObjectEntity> getControllers(Level level) {
-        Set<TankControllerObjectEntity> set = level == null ? null : CONTROLLERS.get(level);
-        if (set == null || set.isEmpty()) {
+        LevelControllers controllers = of(level);
+        if (controllers == null || controllers.all.isEmpty()) {
             return Collections.emptyList();
         }
-        List<TankControllerObjectEntity> result = new ArrayList<>(set.size());
-        for (TankControllerObjectEntity controller : set) {
-            if (controller.removed() || controller.isDisposed()) {
-                set.remove(controller);
+        List<TankControllerObjectEntity> result = new ArrayList<>(controllers.all.size());
+        for (TankControllerObjectEntity controller : controllers.all) {
+            if (isGone(controller)) {
+                remove(controller);
             } else {
                 result.add(controller);
             }
         }
         return result;
+    }
+
+    /** The live controller at the tile, or {@code null}. */
+    private static TankControllerObjectEntity controllerAt(Level level, GridPos tile) {
+        LevelControllers controllers = of(level);
+        TankControllerObjectEntity controller = controllers == null ? null : controllers.byTile.get(tile);
+        if (controller != null && isGone(controller)) {
+            remove(controller);
+            return null;
+        }
+        return controller;
     }
 
     /**
@@ -88,13 +131,13 @@ public final class TankRegistry {
         if (level == null || !level.isServer()) {
             return;
         }
-        Set<TankControllerObjectEntity> set = CONTROLLERS.get(level);
-        if (set == null) {
+        LevelControllers controllers = of(level);
+        if (controllers == null) {
             return;
         }
-        for (TankControllerObjectEntity controller : set) {
-            if (Math.abs(controller.tileX - tileX) <= TankStructure.REACH
-                    && Math.abs(controller.tileY - tileY) <= TankStructure.REACH) {
+        int reach = TankStructure.REACH;
+        for (TankControllerObjectEntity controller : controllers.near(tileX - reach, tileY - reach, tileX + reach, tileY + reach)) {
+            if (Math.abs(controller.tileX - tileX) <= reach && Math.abs(controller.tileY - tileY) <= reach) {
                 controller.markStructureChanged();
             }
         }
@@ -122,15 +165,8 @@ public final class TankRegistry {
      * the valve is in its border (N15-3).
      */
     public static TankStorage findValveTank(Level level, int tileX, int tileY, GridPos owner) {
-        if (owner == null) {
-            return null;
-        }
-        for (TankControllerObjectEntity controller : getControllers(level)) {
-            if (controller.tileX == owner.x && controller.tileY == owner.y) {
-                return TankStructure.ownsValve(controller.getKeptTank(), tileX, tileY) ? controller.getStorage() : null;
-            }
-        }
-        return null;
+        TankControllerObjectEntity controller = findValveController(level, tileX, tileY, owner);
+        return controller == null ? null : controller.getStorage();
     }
 
     /**
@@ -142,12 +178,8 @@ public final class TankRegistry {
         if (owner == null) {
             return null;
         }
-        for (TankControllerObjectEntity controller : getControllers(level)) {
-            if (controller.tileX == owner.x && controller.tileY == owner.y) {
-                return TankStructure.ownsValve(controller.getKeptTank(), tileX, tileY) ? controller : null;
-            }
-        }
-        return null;
+        TankControllerObjectEntity controller = controllerAt(level, owner);
+        return controller != null && TankStructure.ownsValve(controller.getKeptTank(), tileX, tileY) ? controller : null;
     }
 
     /**
@@ -160,12 +192,13 @@ public final class TankRegistry {
         if (level == null || !level.isServer() || tank == null) {
             return;
         }
-        Set<TankControllerObjectEntity> set = CONTROLLERS.get(level);
-        if (set == null) {
+        LevelControllers controllers = of(level);
+        if (controllers == null) {
             return;
         }
         int reach = TankStructure.REACH;
-        for (TankControllerObjectEntity controller : set) {
+        for (TankControllerObjectEntity controller : controllers.near(tank.x - reach, tank.y - reach,
+                tank.getMaxX() + reach, tank.getMaxY() + reach)) {
             if (controller.tileX >= tank.x - reach && controller.tileX <= tank.getMaxX() + reach
                     && controller.tileY >= tank.y - reach && controller.tileY <= tank.getMaxY() + reach) {
                 controller.markStructureChanged();
