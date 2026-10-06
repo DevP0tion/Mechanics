@@ -31,4 +31,28 @@
 
 ## 세션 중 수집한 규칙
 
-(아직 없음)
+- **S1.** 바닐라 벽 티어(`toolTier`):
+  - 0 = 나무 계열(wood, pine, palm, willow, dryad, bamboo), stone, sandstone, swampstone, snowstone, granite, ice, brick
+  - 1 = dungeon
+  - 2 = deepstone
+  - 6 = obsidian, deepsnowstone
+  - 7 = basalt
+  - 8 = deepswampstone
+  - 9 = deepsandstone
+  - 10 = crypt, spidercastle, dawn, dusk, ancientruin, raven, arcanic, factory
+- **S2.** 바닐라 벽 중 광석·주괴로 만드는 벽은 없음. 나무 외 벽의 재료는 돌류(stone, granite, deepstone 등), 점토(brick), 흑요석(obsidian), 고철(factory), 서리 조각·깃털·마나 등.
+- **S3.** 물결 셰이더(`LiquidShader`): 레벨 그리기에서 타일 단계의 액체 목록(`LevelTileLiquidDrawOptions`)에만 적용됨. 모든 타일의 `addDrawables`가 이 목록을 받으므로, 모드 타일(예: 탱크용 바닥타일)도 액체 그림을 제출해 셰이더를 거칠 수 있음. 셰이더는 리전별 액체 데이터 텍스처(깊이·바닷물·해안·투명도, `LiquidManager.updateTextures`)를 읽기 때문에, 액체가 아닌 칸은 그대로면 육지 값으로 처리됨 → 해당 칸 값을 바꾸는 패치(`@ModMethodPatch`)가 필요할 수 있음. 오브젝트는 정렬 그리기 단계라 셰이더 밖에서 그려짐 — 물 텍스처의 애니메이션 프레임은 빌려 쓸 수 있으나 셰이더 효과는 없음. GLSL 원본은 서버판에 없어 미확인.
+
+## 멀티블럭 탱크 구조 규칙 (사용자 정의, 규칙 빈틈 해소)
+
+- 이름: 멀티블럭 탱크 (3-1)
+- 테두리: 광물 벽·탱크 컨트롤러·탱크 밸브로 된 직사각형 (5-13)
+- 내부: ① 전부 유리 블럭 ② 완전히 빔 ③ 바닥 전부 탱크용 바닥타일, 그 위엔 유리 블럭만 (5-5, 5-11)
+- 크기: 내부 구조상 최소 ~ 5×5, 가로·세로 각각 (4-1, 4-2)
+- 탱크 컨트롤러: 반드시 1개, 모서리 가능 (4-3, 4-5)
+- 탱크 밸브: 개수 제한 없음·0개 가능, 모서리 불가 (4-4, 4-5)
+- 인식: 블록·바닥 타일 변경 시 자동 (5-1)
+- 용량: 광물 벽 최저 티어 + 내부 칸 수, 조합 방식 **`미정`** (5-8)
+- 벽 파괴 → 비활성화, 유체 보존, 데이터는 컨트롤러에 (5-9)
+- 컨트롤러 파괴 → 유체 소실 (5-10)
+- 상태 표시: 컨트롤러 UI 창 + 내부 마우스 오버 툴팁 (5-4)
