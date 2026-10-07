@@ -6,7 +6,6 @@ import devp0tion.mechanics.core.LinkFlags;
 import devp0tion.mechanics.core.LiquidTileSource;
 import devp0tion.mechanics.core.PipeGrid;
 import devp0tion.mechanics.core.Pump;
-import devp0tion.mechanics.core.PumpResult;
 import devp0tion.mechanics.core.PumpTier;
 import necesse.engine.network.PacketReader;
 import necesse.engine.network.PacketWriter;
@@ -29,14 +28,19 @@ import java.util.List;
  *     <li>Server: a new pump connects its sources (the liquid tile under it when it stands on
  *     liquid, then the valves next to it whose links are open, N17-1) and starts a network of its
  *     own (N18-2); a loaded one restores its sources in their order (N19-1), link flags, burn time,
- *     the fluid in the pump and the liquid tile source's left-over units. It ticks the pump every
- *     game tick; pipes that break are removed without a drop (N12-5).</li>
+ *     the fluid in the pump and the liquid tile source's left-over units. While its region loads,
+ *     the engine's fresh entity registers nothing: the saved entity replaces it, or the region's
+ *     loaded event registers it (A1).</li>
+ *     <li>It holds data only (N22-5): the pipe system's systems run the pump every tick
+ *     ({@link PipeSystem#tick}); pipes that break are removed there without a drop (N12-5).</li>
  *     <li>The liquid tile source's 5x5 judgment (N20-7) is made when a new pump registers, with the
  *     cells loaded then, and is saved with the pump. TODO(confirm): a pump saved before the judgment
- *     was stored is judged at its first tick after loading, with the cells loaded then (N20-7).</li>
+ *     was stored is judged at its first tick after loading, with the cells loaded then (N20-7); the
+ *     systems do it ({@link devp0tion.mechanics.core.PipeGrid#runTick}).</li>
  *     <li>Wire (11-3, N11-3): from tier 2 up, a wire signal on its tile switches it off.</li>
- *     <li>Manual pump: a click is one cycle, applied only on the server, at most every 20 ticks per
- *     pump (N3-2, N3-3; see the per-player TODO(design) in {@link Pump}).</li>
+ *     <li>Manual pump: a click is one cycle, applied only on the server in the next tick of the
+ *     systems (N22-5), at most every 20 ticks per pump (N3-2, N3-3; see the per-player TODO(design) in
+ *     {@link Pump}).</li>
  *     <li>Fuel (11-7, 11-8): the log-fueled pumps burn any log from one slot. TODO(confirm): how
  *     logs get into the pump is not decided; a vanilla-style container with one fuel slot is the
  *     placeholder (the vanilla object inventory window).</li>
@@ -49,6 +53,7 @@ public class PumpObjectEntity extends InventoryObjectEntity {
     private final Pump pump;
     private LiquidTileSource tileSource;
     private boolean registered;
+    private boolean deferred;
     private boolean loadedFromSave;
     private int links = LinkFlags.ALL_OPEN;
 
@@ -77,6 +82,27 @@ public class PumpObjectEntity extends InventoryObjectEntity {
     @Override
     public void init() {
         super.init();
+        if (!getLevel().isServer()) {
+            return;
+        }
+        if (!loadedFromSave && PipeSystem.isRegionLoading(this)) {
+            // A fresh entity of a loading region (A1): the saved one replaces it, or the region's
+            // loaded event registers it.
+            deferred = true;
+            return;
+        }
+        register();
+    }
+
+    /** Registers a pump whose fresh entity no saved one replaced while its region loaded. */
+    void registerIfDeferred() {
+        if (deferred && !removed()) {
+            deferred = false;
+            register();
+        }
+    }
+
+    private void register() {
         PipeSystem system = PipeSystem.get(getLevel());
         if (system == null) {
             return;
@@ -144,37 +170,22 @@ public class PumpObjectEntity extends InventoryObjectEntity {
 
     @Override
     public void serverTick() {
+        // The inventory's own sync only: the pump runs in the pipe system's systems (N22-5).
         super.serverTick();
-        if (!registered) {
-            return;
-        }
-        if (tileSource != null && tileSource.getJudgment() == null) {
-            // Not judged yet: a pump saved before the judgment was stored (TODO(confirm) in the class
-            // comment), or one whose tile was not loaded when it registered. Judged with the loaded cells.
-            tileSource.judgeArea();
-        }
-        PumpResult result = pump.tick();
-        if (!result.getBroken().isEmpty()) {
-            PipeSystem system = PipeSystem.getIfExists(getLevel());
-            if (system != null) {
-                system.applyResult(result);
-            }
-        }
     }
 
-    /** A click on the manual pump (11-3): server only, one cycle at most every 20 ticks (N3-3). */
-    public PumpResult click() {
+    /**
+     * A click on the manual pump (11-3): server only, queued for the next tick of the systems
+     * (N22-5), one cycle at most every 20 ticks (N3-3).
+     */
+    public void click() {
         if (!isServer() || !registered || pump.getTier().getPower() != PumpTier.Power.HAND_CLICK) {
-            return null;
+            return;
         }
-        PumpResult result = pump.click();
-        if (!result.getBroken().isEmpty()) {
-            PipeSystem system = PipeSystem.getIfExists(getLevel());
-            if (system != null) {
-                system.applyResult(result);
-            }
+        PipeSystem system = PipeSystem.getIfExists(getLevel());
+        if (system != null) {
+            system.queueClick(tileX, tileY);
         }
-        return result;
     }
 
     /** Reads the wire signal on the pump's tile: a signal switches tier 2 and up off (11-3, N11-3). */
