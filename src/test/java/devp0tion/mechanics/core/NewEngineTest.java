@@ -396,20 +396,10 @@ final class NewEngineTest {
         Check.equal(Status.NO_DESTINATION, results.get(PipeGrid.key(3, -3)).getStatus());
         Check.equal(0L, pumps[0].getInstallNumber(), "unchanged");
 
-        // Pumps saved before install numbers get them at the next tick, by tile y then x.
-        PipeGrid old = grid(Fluids.uniform(20));
-        Pump p1 = new Pump(PumpTier.FIRE);
-        Pump p2 = new Pump(PumpTier.FIRE);
-        Pump p3 = new Pump(PumpTier.FIRE);
-        old.loadPump(5, 2, p1);
-        old.loadPump(1, 3, p2);
-        old.loadPump(3, 2, p3);
-        Check.equal(-1L, p1.getInstallNumber(), "none yet");
-        old.runTick();
-        Check.equal(0L, p3.getInstallNumber(), "(3,2)");
-        Check.equal(1L, p1.getInstallNumber(), "(5,2)");
-        Check.equal(2L, p2.getInstallNumber(), "(1,3)");
-        Check.equal(3L, old.getNextInstallNumber());
+        // A pump saved without one (older formats are not read, N28-19) is numbered as if placed now.
+        Pump unnumbered = new Pump(PumpTier.FIRE);
+        grid.loadPump(20, 20, unnumbered);
+        Check.equal(2L, unnumbered.getInstallNumber(), "the next number");
     }
 
     // ---------------------------------------------------------------- N23-2
@@ -1057,20 +1047,6 @@ final class NewEngineTest {
         Check.equal(Status.PUMPED, results.get(PipeGrid.key(0, 0)).getStatus(), "the click ran");
         grid.queueClick(0, 0);
         Check.equal(Status.WAITING, grid.runTick().get(PipeGrid.key(0, 0)).getStatus(), "click cooldown (N3-3)");
-    }
-
-    public static void testSystemsJudgeTheTileSourceBeforeTheCycle() {
-        // N20-7 in the source system: an unjudged liquid tile source is judged in the tick.
-        PipeGrid grid = grid(Fluids.uniform(20));
-        Fluids.Liquids lake = new Fluids.Liquids("fffff", "fffff", "fffff", "fffff", "fffff");
-        LiquidTileSource tile = new LiquidTileSource(lake, 2, 2);
-        Pump pump = new Pump(PumpTier.FIRE);
-        pump.setTileSource(tile);
-        pump.setFuelSupply(new Fluids.Logs(10));
-        grid.placePump(2, 2, pump);
-        Check.isNull(tile.getJudgment(), "not judged yet");
-        grid.runTick();
-        Check.equal(Boolean.TRUE, tile.getJudgment(), "judged by the systems");
     }
 
 }

@@ -35,9 +35,9 @@ import java.util.List;
  *     <li>It holds data only (N22-5): the pipe system's systems run the pump every tick
  *     ({@link PipeSystem#tick}); pipes that break are removed there without a drop (N12-5).</li>
  *     <li>The liquid tile source's 5x5 judgment (N20-7) is made when a new pump registers, with the
- *     cells loaded then, and is saved with the pump. TODO(confirm): a pump saved before the judgment
- *     was stored is judged at its first tick after loading, with the cells loaded then (N20-7); the
- *     systems do it ({@link devp0tion.mechanics.core.PipeGrid#runTick}).</li>
+ *     cells loaded then, and is saved with the pump. A save without one (older formats are not read,
+ *     N28-19) is judged when the pump registers, as when it is placed; so is a pump without an install
+ *     number given one then (N28-17).</li>
  *     <li>Wire (11-3, N11-3): from tier 2 up, a wire signal on its tile switches it off.</li>
  *     <li>Manual pump: a click is one cycle, applied only on the server in the next tick of the
  *     systems (N22-5), at most every 20 ticks per pump (N3-2, N3-3; see the per-player TODO(design) in
@@ -122,6 +122,10 @@ public class PumpObjectEntity extends InventoryObjectEntity {
                     tileSource = new LiquidTileSource(lookup, tileX, tileY);
                     tileSource.setBuffered(savedBufferFluid, savedBufferFluid == null ? 0 : savedBuffer);
                     tileSource.setJudgment(savedJudgment);
+                    if (savedJudgment == null) {
+                        // No saved judgment (N28-19): judged now, as when the pump is placed (N20-7).
+                        tileSource.judgeArea();
+                    }
                     pump.setTileSource(tileSource);
                 }
                 pump.setLinks(links);
@@ -325,7 +329,7 @@ public class PumpObjectEntity extends InventoryObjectEntity {
             }
         }
         pump.setBurnTicksLeft(Math.max(0, save.getInt("burn", 0, false)));
-        // Pumps saved before install numbers (N28-17) get one from the engine when they load.
+        // A save without an install number gets the next one when the pump registers (N28-17, N28-19).
         pump.setInstallNumber(save.getLong("install", -1L, false));
         pump.setLastPushedFluid(save.getEnum(FluidType.class, "pushed", null, false));
         FluidType fluid = save.getEnum(FluidType.class, "fluid", null, false);

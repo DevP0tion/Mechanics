@@ -255,8 +255,6 @@ public final class PipeGrid implements PumpHost {
     private final Map<Long, Pump> pumps = new LinkedHashMap<>();
     /** The next install number (N28-17): level-wide placement order, saved with the level. */
     private long nextInstall;
-    /** Loaded pumps saved before install numbers, numbered at the next tick by tile, y then x. */
-    private final List<Pump> unnumbered = new ArrayList<>();
     private final Set<PipeNetwork> networks = new LinkedHashSet<>();
     /** Tiles of parts that left because their region unloaded, while no {@link #loadedLookup} is set. */
     private final Set<Long> unloadedTiles = new HashSet<>();
@@ -393,7 +391,6 @@ public final class PipeGrid implements PumpHost {
      * system's level data tick, after the entity ticks; object entities run nothing themselves.
      * <ol>
      *     <li>Clock (cycle windows, N14-2).</li>
-     *     <li>Sources: a liquid tile source not judged yet is judged with the loaded cells (N20-7).</li>
      *     <li>Timers: lit logs burn down (N18-4), cycle counters advance (N6-1, N3-3), wire state is
      *     the pump's {@code enabled} (N11-3). Every log-fueled pump of the level pushes on the same
      *     ticks (N28-16): one global phase, every cycle, when the engine tick is a multiple of the
@@ -410,14 +407,9 @@ public final class PipeGrid implements PumpHost {
      */
     public Map<Long, PumpResult> runTick() {
         tick();
-        numberOldPumps();
         List<Pump> due = new ArrayList<>();
         Set<Pump> clicked = Collections.newSetFromMap(new IdentityHashMap<Pump, Boolean>());
         for (Pump pump : new ArrayList<>(pumps.values())) {
-            FluidSource tile = pump.getTileSource();
-            if (tile instanceof LiquidTileSource && ((LiquidTileSource) tile).getJudgment() == null) {
-                ((LiquidTileSource) tile).judgeArea();
-            }
             PumpResult timers = compatMode ? pump.advanceTimers()
                     : pump.advanceTimersAligned(Math.floorMod(tick, pump.getTier().getCycleTicks()) == 0);
             if (timers == null) {
@@ -1107,8 +1099,8 @@ public final class PipeGrid implements PumpHost {
         if (pump.getInstallNumber() >= 0) {
             nextInstall = Math.max(nextInstall, pump.getInstallNumber() + 1);
         } else {
-            // Saved before install numbers (N28-17): numbered at the next tick, by tile y then x.
-            unnumbered.add(pump);
+            // Saved without one (older formats are not read, N28-19): numbered as if placed now.
+            pump.setInstallNumber(nextInstall++);
         }
     }
 
@@ -1122,25 +1114,7 @@ public final class PipeGrid implements PumpHost {
         nextInstall = Math.max(nextInstall, next);
     }
 
-    /**
-     * Numbers the loaded pumps that were saved before install numbers existed (N28-17): in tile
-     * order, y then x, after every number already given, so the order is the same on every load.
-     */
-    private void numberOldPumps() {
-        if (unnumbered.isEmpty()) {
-            return;
-        }
-        List<Pump> old = new ArrayList<>(unnumbered);
-        unnumbered.clear();
-        old.sort((a, b) -> a.getTileY() != b.getTileY() ? Integer.compare(a.getTileY(), b.getTileY())
-                : Integer.compare(a.getTileX(), b.getTileX()));
-        for (Pump pump : old) {
-            if (pump.host == this && pump.getInstallNumber() < 0) {
-                pump.setInstallNumber(nextInstall++);
-            }
-        }
-        changed();
-    }
+
 
     private void addPump(int x, int y, Pump pump) {
         long key = key(x, y);
@@ -1188,7 +1162,6 @@ public final class PipeGrid implements PumpHost {
             routeMemo.remove(pump);
             summaryRecordedAt.remove(pump);
             pump.host = null;
-            unnumbered.remove(pump);
             PipeNetwork network = pump.network;
             if (network != null) {
                 network.pumps.remove(pump);

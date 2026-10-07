@@ -71,8 +71,6 @@ public class TankControllerObjectEntity extends ObjectEntity {
     private boolean structureChanged = true;
     /** The next judgment is the first one after loading with a saved judgment (N22-7). */
     private boolean justLoaded;
-    /** Loaded from a save made before the judgment was saved: judged with the cells loaded then. */
-    private boolean judgmentUnknown;
     /** A search waits for the whole search area to load (tried every tick). */
     private boolean searchWaiting;
     /** The region is unloading: nothing about the tank changes for the others (N21-2). */
@@ -158,8 +156,7 @@ public class TankControllerObjectEntity extends ObjectEntity {
     /** Judges the tank ({@link TankJudgment}) and applies the result. */
     private void judge(TankJudgment.Mode mode) {
         Level level = getLevel();
-        TankJudgment.Prior prior = judgmentUnknown ? TankJudgment.Prior.UNKNOWN
-                : storage.isActive() ? TankJudgment.Prior.ACTIVE : TankJudgment.Prior.INACTIVE;
+        TankJudgment.Prior prior = storage.isActive() ? TankJudgment.Prior.ACTIVE : TankJudgment.Prior.INACTIVE;
         TankJudgment.Result result = TankJudgment.judge(tileX, tileY, new LevelTankCellLookup(level), mode, prior);
         // The judgment sees the natural growth as broken already (N23-4). Breaking it is a change
         // within reach: the controllers nearby judge again.
@@ -172,7 +169,6 @@ public class TankControllerObjectEntity extends ObjectEntity {
         if (!result.appliesJudgment()) {
             return;
         }
-        judgmentUnknown = false;
         TankValidation tank = result.getTank();
         // A valid smaller tank loses the excess at once, an invalid one keeps everything (N13-4).
         storage.applyStructure(tank);
@@ -250,12 +246,9 @@ public class TankControllerObjectEntity extends ObjectEntity {
             save.addInt("tankWidth", kept.outerWidth);
             save.addInt("tankHeight", kept.outerHeight);
         }
-        // The judgment (N20-7, N22-7): the range above, the active state and the capacity. A
-        // controller not judged yet since it loaded from an older save has none to save.
-        if (!judgmentUnknown) {
-            save.addBoolean("active", storage.isActive());
-            save.addInt("capacity", storage.getCapacity());
-        }
+        // The judgment (N20-7, N22-7): the range above, the active state and the capacity.
+        save.addBoolean("active", storage.isActive());
+        save.addInt("capacity", storage.getCapacity());
     }
 
     @Override
@@ -270,14 +263,13 @@ public class TankControllerObjectEntity extends ObjectEntity {
             kept = new TankBounds(save.getInt("tankX", 0, false), save.getInt("tankY", 0, false),
                     save.getInt("tankWidth", 0, false), save.getInt("tankHeight", 0, false));
         }
-        if (save.hasLoadDataByName("active")) {
-            // The saved judgment applies at once (N22-7): an active tank works before the first tick.
+        // The saved judgment applies at once (N22-7): an active tank works before the first tick. A
+        // save without one (older formats are not read, N28-19) starts as a new controller: inactive,
+        // judged as after a change.
+        boolean judged = save.hasLoadDataByName("active");
+        if (judged) {
             storage.restoreJudgment(kept != null && save.getBoolean("active", false, false),
                     Math.max(0, save.getInt("capacity", 0, false)));
-            judgmentUnknown = false;
-        } else {
-            // Saved before the judgment was saved: inactive until judged with the cells loaded then.
-            judgmentUnknown = kept != null;
         }
         // The view starts from the saved judgment: clients and the natural growth check of the
         // region loading now (its world time simulation, N20-1) see the tank at once.
@@ -287,7 +279,7 @@ public class TankControllerObjectEntity extends ObjectEntity {
         viewAmount = storage.getAmount();
         viewCapacity = storage.getCapacity();
         structureChanged = true;
-        justLoaded = true;
+        justLoaded = judged;
     }
 
     // ------------------------------------------------------------------ sync

@@ -32,10 +32,6 @@ import java.util.Set;
  *     the world time simulation of a region that loaded before the controller's. The judgment sees
  *     those cells as broken ({@link Result#getNaturalGrowth}: the game breaks them). Inside an
  *     inactive tank natural growth is not blocked (N20-1) and still makes the tank invalid.</li>
- *     <li>A controller saved before the judgment was saved ({@link Prior#UNKNOWN}) is judged at its
- *     first judgment with the cells loaded then, as after a change.
- *     TODO(design): its kept tank counts as active for the natural growth break at that judgment
- *     (the level data that blocked growth while such a tank's regions loaded is discarded).</li>
  * </ul>
  * TODO(design): a search for another tank than the kept one (no kept tank, or the kept tank is
  * invalid) still waits until the whole search area is loaded ({@link Mode#SEARCH}, D5); the
@@ -56,9 +52,7 @@ public final class TankJudgment {
     /** The controller's judgment before this one. */
     public enum Prior {
         ACTIVE,
-        INACTIVE,
-        /** Loaded from a save made before the judgment was saved. */
-        UNKNOWN
+        INACTIVE
     }
 
     /** What the judgment did. */
@@ -144,10 +138,6 @@ public final class TankJudgment {
         TankBounds kept = start != null && start.getKind() == CellKind.CONTROLLER ? start.getKeptTank() : null;
         if (kept != null && !kept.isOnBorder(controllerX, controllerY)) {
             kept = null;
-        }
-        if (mode == Mode.LOAD && prior == Prior.UNKNOWN) {
-            // Nothing saved to use: judged with the cells loaded now.
-            mode = Mode.CHANGE;
         }
         boolean areaLoaded = TankStructure.isSearchAreaLoaded(controllerX, controllerY, lookup);
         if (!areaLoaded && (kept == null || mode == Mode.SEARCH)) {

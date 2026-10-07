@@ -48,12 +48,13 @@ import java.util.Map;
  *     <li>Underground pipe holders (N22-2, N24-1): one {@link UndergroundPipeHolder} per underground
  *     pipe of a loaded region, in this system's own entity list, saved in the region's object entity
  *     section ({@link HolderSavePatches}). Placed and removed with the layer object; created from the
- *     save entry when the region loads, else (older worlds) from the region's old pipe records, else
- *     from the old level mirror, else as a new pipe.</li>
+ *     save entry when the region loads, else as a new pipe (N28-19: older save formats are not
+ *     read).</li>
  *     <li>Unloaded regions (N23-2): the engine keeps no mirror; the network summaries are saved with
  *     the level ({@code SUMMARY}), and next to them the structure change numbers of the regions they
- *     pass ({@code REGIONCHANGES}, N28-1; see {@link PipeGrid} for why the level file). The old
- *     mirror ({@code MIRROR}) is only read, to migrate.</li>
+ *     pass ({@code REGIONCHANGES}, N28-1; see {@link PipeGrid} for why the level file), the pipe
+ *     groups' number tables ({@code HINTTABLE}, N28-15) and the next pump install number (N28-17).
+ *     Older save formats (the level mirror, the regions' pipe records) are not read (N28-19).</li>
  *     <li>Clients get the underground pipes' link flags and the faces blocked by another fluid
  *     ({@link PipeGrid#getFluidBlockedSides}, N13-2) per region when the region is sent to them
  *     ({@link PipeSyncPatches}) and per tile when either changes ({@link PacketUndergroundPipes},
@@ -69,10 +70,6 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     /** The underground pipe holders of the loaded regions (N22-2); created with the level. */
     private TileEntityList<UndergroundPipeHolder> holders;
     private boolean holderRemoved;
-    /** Old worlds: underground pipe records of the region data ({@code PIPE}), until the region loads. */
-    private final Map<Long, List<PipeRecord>> pendingRegions = new HashMap<>();
-    /** Old worlds: the level mirror ({@code MIRROR}), read only to migrate pipes without other state. */
-    private final Map<String, PipeRecord> legacyMirror = new HashMap<>();
     /** The underground pipes' faces blocked by another fluid as last sent to clients (N13-2). */
     private final BlockedFaceSync undergroundBlocked = new BlockedFaceSync(grid, PipeLayer.UNDERGROUND);
     /** The registered valves' object entities, by tile: read every tick before the systems run (N22-5). */
@@ -131,19 +128,6 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         PipeSystem system = getIfExists(level);
         if (system != null && region != null && client != null) {
             system.sendRegion(region, client);
-        }
-    }
-
-    /** Creates the level's pipe system before region data holding its key is read. */
-    public static void ensureForRegionData(Level level, LoadData save) {
-        if (level == null || !level.isServer() || save == null || getIfExists(level) != null) {
-            return;
-        }
-        for (LoadData data : save.getLoadDataByName("LEVELDATA")) {
-            if (KEY.equals(data.getSafeString("key", null, false))) {
-                get(level);
-                return;
-            }
         }
     }
 
@@ -516,18 +500,10 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
 
     /**
      * Registers the parts of a loaded region (idempotent): every underground pipe takes its holder's
-     * saved state, else (older worlds, N24-1 migration) the region's old record, else the old level
-     * mirror, else starts new; holders without their pipe object are dropped. Basic pipes, pumps and
-     * valves whose fresh entity no saved one replaced while the region loaded register now.
+     * saved state, else starts new; holders without their pipe object are dropped. Basic pipes, pumps
+     * and valves whose fresh entity no saved one replaced while the region loaded register now.
      */
     private void registerRegion(Region region) {
-        List<PipeRecord> records = pendingRegions.remove(PipeGrid.key(region.regionX, region.regionY));
-        Map<Long, PipeRecord> byTile = new HashMap<>();
-        if (records != null) {
-            for (PipeRecord record : records) {
-                byTile.put(PipeGrid.key(record.x, record.y), record);
-            }
-        }
         forEachTile(region, (x, y) -> {
             GameObject under = level.getObject(UndergroundPipeLayer.ID, x, y);
             UndergroundPipeHolder holder = getHolder(x, y);
@@ -537,7 +513,7 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
                 if (holder != null && holder.getNode() != null && holder.getNode() == node && node.getTier() == tier) {
                     // Registered already.
                 } else {
-                    registerUnderground(x, y, tier, holder, byTile.get(PipeGrid.key(x, y)));
+                    registerUnderground(x, y, tier, holder);
                 }
             } else {
                 if (node != null) {
@@ -545,8 +521,6 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
                 }
                 removeHolder(holder);
             }
-            legacyMirror.remove(mirrorKey(x, y, PipeLayer.UNDERGROUND));
-            legacyMirror.remove(mirrorKey(x, y, PipeLayer.BASE));
             ObjectEntity entity = level.entityManager.getObjectEntity(x, y);
             if (entity instanceof BasicPipeObjectEntity) {
                 ((BasicPipeObjectEntity) entity).registerIfDeferred();
@@ -558,7 +532,7 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         });
     }
 
-    private void registerUnderground(int x, int y, MineralTier tier, UndergroundPipeHolder holder, PipeRecord record) {
+    private void registerUnderground(int x, int y, MineralTier tier, UndergroundPipeHolder holder) {
         if (grid.getPipe(x, y, PipeLayer.UNDERGROUND) != null) {
             grid.unloadPipe(x, y, PipeLayer.UNDERGROUND);
         }
@@ -573,16 +547,11 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
                     target.getSavedAmount(), target.getSavedHintTable(), target.getSavedHintNumbers(),
                     target.getSavedHintCodes());
         } else {
-            PipeRecord old = record != null && record.tier == tier ? record : legacyMirror.get(mirrorKey(x, y, PipeLayer.UNDERGROUND));
-            if (old != null && old.tier == tier) {
-                // Migrated (N24-1): the region's old record, else the old mirror.
-                node = grid.loadPipe(x, y, PipeLayer.UNDERGROUND, tier, old.links, old.fluid, old.amount, true);
-            } else {
-                // No state anywhere: as when it was placed (vertical link cut over a basic pipe, N16-4).
-                int links = grid.getPipe(x, y, PipeLayer.BASE) != null ? LinkFlags.withVertical(LinkFlags.ALL_OPEN, false)
-                        : LinkFlags.ALL_OPEN;
-                node = grid.loadPipe(x, y, PipeLayer.UNDERGROUND, tier, links, null, 0, true);
-            }
+            // No saved state (N28-19: older formats are not read): as when it was placed, empty, its
+            // vertical link cut over a basic pipe (N16-4).
+            int links = grid.getPipe(x, y, PipeLayer.BASE) != null ? LinkFlags.withVertical(LinkFlags.ALL_OPEN, false)
+                    : LinkFlags.ALL_OPEN;
+            node = grid.loadPipe(x, y, PipeLayer.UNDERGROUND, tier, links, null, 0, true);
         }
         target.setNode(node);
     }
@@ -596,27 +565,17 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
 
     @Override
     public void addRegionSaveData(Region region, SaveData save) {
-        // Underground pipe state is saved by the holders in the object entity section (N24-1); the old
-        // records (PIPE) are only read, to migrate.
+        // Underground pipe state is saved by the holders in the object entity section (N24-1).
     }
 
     @Override
     public void loadRegionSaveData(Region region, LoadData save) {
-        List<PipeRecord> records = new ArrayList<>();
-        for (LoadData pipe : save.getLoadDataByName("PIPE")) {
-            PipeRecord record = PipeRecord.load(pipe, PipeLayer.UNDERGROUND);
-            if (record != null) {
-                records.add(record);
-            }
-        }
-        if (!records.isEmpty()) {
-            pendingRegions.put(PipeGrid.key(region.regionX, region.regionY), records);
-        }
+        // Nothing of this system is saved with the region: the old pipe records (PIPE) of older
+        // worlds are discarded (N28-19).
     }
 
     @Override
     public void onUnloadedRegion(Region region) {
-        pendingRegions.remove(PipeGrid.key(region.regionX, region.regionY));
         if (holders == null) {
             return;
         }
@@ -659,7 +618,7 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
 
     @Override
     public boolean shouldSave() {
-        return !grid.getSummaries().isEmpty() || !legacyMirror.isEmpty() || grid.getNextInstallNumber() > 0
+        return !grid.getSummaries().isEmpty() || grid.getNextInstallNumber() > 0
                 || !grid.getHintTables().isEmpty();
     }
 
@@ -695,14 +654,6 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
             }
             save.addIntArray("REGIONCHANGES", values);
         }
-        if (!legacyMirror.isEmpty()) {
-            // Old mirror entries of regions not loaded since the update: kept to migrate them later.
-            SaveData mirror = new SaveData("MIRROR");
-            for (PipeRecord record : legacyMirror.values()) {
-                mirror.addSaveData(record.toSave(record.layer == PipeLayer.BASE ? "BASIC" : "UNDERGROUND"));
-            }
-            save.addSaveData(mirror);
-        }
     }
 
     @Override
@@ -725,28 +676,9 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
                 grid.loadSummary(loaded);
             }
         }
-        LoadData mirror = save.getFirstLoadDataByName("MIRROR");
-        if (mirror != null) {
-            for (LoadData pipe : mirror.getLoadDataByName("BASIC")) {
-                putMirror(PipeRecord.load(pipe, PipeLayer.BASE));
-            }
-            for (LoadData pipe : mirror.getLoadDataByName("UNDERGROUND")) {
-                putMirror(PipeRecord.load(pipe, PipeLayer.UNDERGROUND));
-            }
-        }
     }
 
-    private void putMirror(PipeRecord record) {
-        if (record != null && record.layer == PipeLayer.UNDERGROUND) {
-            legacyMirror.put(mirrorKey(record.x, record.y, record.layer), record);
-        }
-    }
-
-    private static String mirrorKey(int x, int y, PipeLayer layer) {
-        return x + "," + y + "," + layer;
-    }
-
-    /** Values per run in a saved summary (11 before the region structure change number, N28-1). */
+    /** Values per run in a saved summary. */
     private static final int RUN_INTS = 12;
 
     private static SaveData saveSummary(PipeGrid.RouteSummary summary) {
@@ -780,8 +712,11 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     private static PipeGrid.RouteSummary loadSummary(LoadData save) {
         try {
             int[] values = save.getIntArray("runs", new int[0], false);
-            // Summaries saved before N28-1 have 11 values per run and no number: as if written at 0.
-            int width = Math.max(11, save.getInt("runInts", 11, false));
+            int width = save.getInt("runInts", 0, false);
+            if (width != RUN_INTS) {
+                // An older format (N28-19): not read.
+                return null;
+            }
             PipeGrid.SummaryRun[] runs = new PipeGrid.SummaryRun[values.length / width];
             PipeLayer[] layers = PipeLayer.values();
             for (int i = 0; i < runs.length; i++) {
@@ -790,7 +725,7 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
                 runs[i] = new PipeGrid.SummaryRun(devp0tion.mechanics.core.TileBuckets.bucketOf(values[o], values[o + 1]),
                         values[o], values[o + 1], layers[values[o + 2]], values[o + 3], values[o + 4], layers[values[o + 5]],
                         values[o + 6], values[o + 7], MineralTier.values()[values[o + 8]], values[o + 9] != 0,
-                        fluid < 0 ? null : FluidType.values()[fluid], width > 11 ? values[o + 11] : 0);
+                        fluid < 0 ? null : FluidType.values()[fluid], values[o + 11]);
             }
             return new PipeGrid.RouteSummary(save.getInt("pumpX"), save.getInt("pumpY"), save.getInt("valveX"),
                     save.getInt("valveY"), runs);
@@ -811,52 +746,6 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
             for (int x = region.tileXOffset; x < region.tileXOffset + region.tileWidth; x++) {
                 consumer.accept(x, y);
             }
-        }
-    }
-
-    /** One pipe's state in the old formats (region data PIPE, level MIRROR), read to migrate them. */
-    static final class PipeRecord {
-        final int x;
-        final int y;
-        final PipeLayer layer;
-        final MineralTier tier;
-        final int links;
-        final FluidType fluid;
-        final int amount;
-
-        PipeRecord(int x, int y, PipeLayer layer, MineralTier tier, int links, FluidType fluid, int amount) {
-            this.x = x;
-            this.y = y;
-            this.layer = layer;
-            this.tier = tier;
-            this.links = links;
-            this.fluid = fluid;
-            this.amount = amount;
-        }
-
-        SaveData toSave(String name) {
-            SaveData save = new SaveData(name);
-            save.addInt("x", x);
-            save.addInt("y", y);
-            save.addEnum("tier", tier);
-            save.addInt("links", links);
-            if (fluid != null && amount > 0) {
-                save.addEnum("fluid", fluid);
-                save.addInt("amount", amount);
-            }
-            return save;
-        }
-
-        static PipeRecord load(LoadData save, PipeLayer layer) {
-            MineralTier tier = save.getEnum(MineralTier.class, "tier", null, false);
-            if (tier == null) {
-                return null;
-            }
-            FluidType fluid = save.getEnum(FluidType.class, "fluid", null, false);
-            int amount = save.getInt("amount", 0, false);
-            return new PipeRecord(save.getInt("x", 0, false), save.getInt("y", 0, false), layer, tier,
-                    LinkFlags.sanitize(save.getInt("links", LinkFlags.ALL_OPEN, false)), fluid == null ? null : fluid,
-                    fluid == null ? 0 : Math.max(0, amount));
         }
     }
 

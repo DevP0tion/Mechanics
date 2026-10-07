@@ -158,13 +158,6 @@ final class TankJudgmentTest {
         Check.isTrue(result.isSettled(), "settled");
     }
 
-    public static void testUnknownJudgmentIsJudgedWithTheLoadedCells() {
-        // Saved before the judgment was saved: judged like after a change.
-        TankJudgment.Result result = TankJudgment.judge(0, 1, new Partial(tank("..."), 4), Mode.LOAD, Prior.UNKNOWN);
-        Check.equal(Kind.KEPT_VALID, result.getKind());
-        Check.equal(3 * 40, result.getTank().getCapacity());
-    }
-
     // ---------- Changes: loaded cells only (N20-7, N21-3) ----------
 
     public static void testChangeJudgesWithTheLoadedCellsOnly() {
@@ -245,14 +238,6 @@ final class TankJudgmentTest {
         Check.equal(0, result.getNaturalGrowth().size());
         Check.isNull(result.getTank(), "invalid");
         Check.equal(Reason.INVALID_INTERIOR_OBJECT, TankStructure.validate(TANK, grid, CONTROLLER).getReason());
-    }
-
-    public static void testNaturalGrowthOfAnUnknownJudgmentIsBroken() {
-        // TODO(design) in TankJudgment: a controller saved before the judgment was saved.
-        Grid grid = tank("...").set(2, 1, grass());
-        TankJudgment.Result result = TankJudgment.judge(0, 1, grid, Mode.LOAD, Prior.UNKNOWN);
-        Check.equal(Collections.singletonList(new GridPos(2, 1)), result.getNaturalGrowth());
-        Check.equal(TANK, result.getTank().getBounds());
     }
 
     public static void testOtherObjectsAreNotBroken() {

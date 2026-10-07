@@ -36,9 +36,8 @@ import java.util.Set;
  *     <li>The loaded cells are watched for changes, once per pump cycle: a cell whose fluid changed
  *     since it was last seen loaded makes the area judged again, the same way. A cell that unloads is
  *     no longer watched; when it loads again it is watched from then on.</li>
- *     <li>A source without a judgment (restored from a pump saved before the judgment was stored)
- *     is judged at its first use, or when the game calls {@link #judgeArea}, with the cells loaded
- *     then.</li>
+ *     <li>A source without a judgment (not judged yet) is judged at its first use, or when the game
+ *     calls {@link #judgeArea}, with the cells loaded then.</li>
  * </ul>
  * The connected-tile search of a finite source also uses loaded tiles only (N20-7).
  *
@@ -192,8 +191,7 @@ public final class LiquidTileSource implements FluidSource {
 
     /**
      * Restores a saved judgment (N20-7). The cells are watched from the next use on, as they are
-     * then; {@code null} (a pump saved before the judgment was stored) leaves it to be judged at the
-     * first use.
+     * then; {@code null} leaves it to be judged at the first use.
      */
     public void setJudgment(Boolean judgment) {
         infinite = judgment;

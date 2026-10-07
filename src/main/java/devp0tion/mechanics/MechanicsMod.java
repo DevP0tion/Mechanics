@@ -10,7 +10,6 @@ import devp0tion.mechanics.registry.MechanicsPackets;
 import devp0tion.mechanics.registry.MechanicsRecipes;
 import devp0tion.mechanics.registry.MechanicsTech;
 import devp0tion.mechanics.tank.TankInteriorPlacement;
-import devp0tion.mechanics.tank.TankRegionsLevelData;
 import necesse.engine.modLoader.annotations.ModEntry;
 
 /**
@@ -30,9 +29,6 @@ public class MechanicsMod {
         MechanicsItems.load();
         MechanicsContainers.load();
         MechanicsPackets.load();
-        // Old tank region data (N15-6, replaced by N20-8): registered only so that levels saved with it
-        // still load; it is read, discarded and not saved again.
-        TankRegionsLevelData.register();
         // The level's pipe grid and the underground pipes' state (N7-1, N14-4).
         PipeSystem.register();
         // Placement rejection inside recognized tanks (N16-2); objects also go through
