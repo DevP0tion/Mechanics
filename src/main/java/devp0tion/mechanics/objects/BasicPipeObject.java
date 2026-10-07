@@ -1,8 +1,10 @@
 package devp0tion.mechanics.objects;
 
 import devp0tion.mechanics.client.PipeRendering;
+import devp0tion.mechanics.core.Direction;
 import devp0tion.mechanics.core.LinkFlags;
 import devp0tion.mechanics.core.MineralTier;
+import devp0tion.mechanics.core.PipeShape;
 import devp0tion.mechanics.pipe.BasicPipeObjectEntity;
 import devp0tion.mechanics.registry.MechanicsIngredients;
 import devp0tion.mechanics.tank.TankInteriorPlacement;
@@ -23,6 +25,7 @@ import necesse.level.maps.Level;
 
 import java.awt.Color;
 import java.awt.Rectangle;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 
@@ -39,9 +42,10 @@ import java.util.Locale;
  *     <li>Belongs to the "any pipe" ingredient group (N10-3).</li>
  *     <li>Drawn flat on the ground with arms toward its links and marks on cut faces
  *     ({@link PipeRendering}).</li>
- *     <li>Blocks movement with a full-tile collision, like the pump and the glass block (N31-1);
- *     still placeable on liquid (N17-4). TODO(confirm): a thinner shape along its links might fit
- *     a pipe better; the full tile is used as decided.</li>
+ *     <li>Blocks movement (N31-1) with a collision that follows its shape: a center square plus an
+ *     arm toward each linked side ({@link PipeShape}, N31-10), read from the link flags whenever the
+ *     game asks, so it changes with the links (the wrench, a neighbour placed or removed). Still
+ *     placeable on liquid (N17-4).</li>
  *     <li>Mined with any pickaxe, tier 0, the engine default (N31-2).</li>
  * </ul>
  */
@@ -54,8 +58,9 @@ public class BasicPipeObject extends GameObject {
     protected GameTexture texture;
 
     public BasicPipeObject(MineralTier tier, String stringID, Color mapColor) {
-        // Full-tile collision: blocks movement (N31-1).
-        super(new Rectangle(32, 32));
+        // Solid (N31-1); the collision is the center square plus arms toward the links (N31-10,
+        // getCollisions).
+        super(new Rectangle(PipeShape.HUB));
         this.tier = tier;
         this.textureName = stringID;
         this.mapColor = mapColor;
@@ -89,6 +94,30 @@ public class BasicPipeObject extends GameObject {
     @Override
     public ObjectEntity getNewObjectEntity(Level level, int x, int y) {
         return new BasicPipeObjectEntity(level, x, y);
+    }
+
+    /**
+     * The center square plus an arm toward each linked side (N31-10, {@link PipeShape}), from the
+     * link flags on both sides (the object entities', synced to clients). A pipe not placed yet (the
+     * placement check) counts every own flag as open, as it links on placement (9-4).
+     */
+    @Override
+    public List<Rectangle> getCollisions(Level level, int x, int y, int rotation) {
+        int linked = 0;
+        if (level != null) {
+            int own = PipeRendering.baseLinks(level, x, y);
+            int[] neighbours = new int[Direction.values().length];
+            for (Direction d : Direction.values()) {
+                neighbours[d.ordinal()] = PipeRendering.baseLinks(level, x + d.dx, y + d.dy);
+            }
+            linked = PipeShape.linkedSides(own < 0 ? LinkFlags.ALL_OPEN : own, neighbours);
+        }
+        List<Rectangle> collisions = new LinkedList<>();
+        for (Rectangle part : PipeShape.collision(linked)) {
+            part.translate(x * 32, y * 32);
+            collisions.add(part);
+        }
+        return collisions;
     }
 
     @Override

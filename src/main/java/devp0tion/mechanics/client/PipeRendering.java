@@ -70,7 +70,11 @@ public final class PipeRendering {
         return held.item instanceof ObjectItem && ((ObjectItem) held.item).getObject() instanceof UndergroundPipeObject;
     }
 
-    /** The link flags of the base layer part at a tile as the client knows them, or -1 when it is no part. */
+    /**
+     * The link flags of the base layer part at a tile as the client knows them, or -1 when it is no
+     * part. Also read on the server, for the basic pipe's collision (N31-10): the object entities
+     * keep the flags on both sides.
+     */
     public static int baseLinks(Level level, int tileX, int tileY) {
         GameObject object = level.getObject(tileX, tileY);
         if (!(object instanceof BasicPipeObject || object instanceof TankValveObject || object instanceof PumpObject)) {
