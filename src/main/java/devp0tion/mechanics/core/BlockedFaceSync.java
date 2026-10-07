@@ -12,12 +12,21 @@ import java.util.Map;
  */
 public final class BlockedFaceSync {
 
-    private final PipeGrid grid;
+    /** Where the faces come from ({@link PipeGrid#getFluidBlockedSides}). */
+    interface Faces {
+        int getFluidBlockedSides(int x, int y, PipeLayer layer);
+    }
+
+    private final Faces grid;
     private final PipeLayer layer;
     private final Map<Long, Integer> sent = new HashMap<>();
 
     public BlockedFaceSync(PipeGrid grid, PipeLayer layer) {
-        this.grid = grid;
+        this(grid::getFluidBlockedSides, layer);
+    }
+
+    BlockedFaceSync(Faces faces, PipeLayer layer) {
+        this.grid = faces;
         this.layer = layer;
     }
 

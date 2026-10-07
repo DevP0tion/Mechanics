@@ -17,23 +17,23 @@ import necesse.level.maps.Level;
 import necesse.level.maps.regionSystem.Region;
 
 /**
- * A basic pipe's state (N19-6): its cell in the level's pipe grid ({@link PipeNode}: fluid amount,
- * link flags; reached = holds fluid).
+ * A basic pipe's state (N19-6, N22-2): its component in the level's pipe engine ({@link PipeNode}:
+ * fluid amount, link flags, hints; reached = holds fluid). It holds data only; nothing runs in it
+ * (N22-5).
  *
  * <ul>
- *     <li>Server: registers the pipe in the level's grid when created; a new pipe starts empty with
- *     its sides open and its vertical link cut over an underground pipe (N16-4), a loaded one with
- *     its saved state. When its region unloads the grid keeps a read-only mirror (N14-3), also when
- *     the engine only replaces this entity with another one of the same pipe (region loading,
- *     placement, {@link PipeSystem#isReplacedEntity}): the next entity takes the cell over. When the
+ *     <li>Server: registers the pipe in the engine when created; a new pipe starts empty with its
+ *     sides open and its vertical link cut over an underground pipe (N16-4), a loaded one with its
+ *     saved state and hints (N25-6). While its region loads, the engine's fresh entity registers
+ *     nothing: the saved entity replaces it, or the region's loaded event registers it (A1). When its
+ *     region unloads, or the engine only replaces this entity with another one of the same pipe
+ *     ({@link PipeSystem#isReplacedEntity}), the pipe leaves the engine (no mirror, N23-2). When the
  *     pipe is removed its fluid is lost (N12-1).</li>
- *     <li>Saved: link flags, fluid and amount.</li>
+ *     <li>Saved: link flags, fluid and amount, hints (per destination valve, its direction, N24-2).</li>
  *     <li>Clients get the link flags, which they draw (connections and cut faces, N16-4), and the
  *     faces where a pipe holding another fluid meets it ({@link PipeGrid#getFluidBlockedSides}: the
  *     neighbouring basic pipes, and the underground pipe on its tile through the vertical link),
- *     drawn like cut faces since they are dead ends (N13-2). Those change only when a pipe here,
- *     next to it or under it starts or stops holding fluid. The fluid stays on the server (no pipe fluid display
- *     is decided).</li>
+ *     drawn like cut faces since they are dead ends (N13-2). The fluid stays on the server.</li>
  * </ul>
  */
 public class BasicPipeObjectEntity extends ObjectEntity {
@@ -43,6 +43,7 @@ public class BasicPipeObjectEntity extends ObjectEntity {
 
     private PipeNode node;
     private boolean loadedFromSave;
+    private boolean deferred;
     private boolean unloading;
     /** The object this entity was created for ({@link PipeSystem#isReplacedEntity}). */
     private int objectID = -1;
@@ -51,6 +52,8 @@ public class BasicPipeObjectEntity extends ObjectEntity {
     private int blockedSides;
     private FluidType savedFluid;
     private int savedAmount;
+    private long[] savedHintDests;
+    private byte[] savedHintCodes;
 
     public BasicPipeObjectEntity(Level level, int tileX, int tileY) {
         super(level, TYPE, tileX, tileY);
@@ -65,20 +68,43 @@ public class BasicPipeObjectEntity extends ObjectEntity {
     public void init() {
         super.init();
         objectID = getLevel().getObjectID(tileX, tileY);
+        if (!getLevel().isServer()) {
+            return;
+        }
+        if (!loadedFromSave && PipeSystem.isRegionLoading(this)) {
+            // A fresh entity of a loading region (A1): the saved one replaces it, or the region's
+            // loaded event registers it.
+            deferred = true;
+            return;
+        }
+        register(!loadedFromSave);
+    }
+
+    /** Registers a pipe whose fresh entity no saved one replaced while its region loaded. */
+    void registerIfDeferred() {
+        if (deferred && !removed()) {
+            deferred = false;
+            register(false);
+        }
+    }
+
+    private void register(boolean placed) {
         PipeSystem system = PipeSystem.get(getLevel());
         if (system == null) {
             return;
         }
         PipeGrid grid = system.getGrid();
         try {
-            if (loadedFromSave || grid.getPipe(tileX, tileY, PipeLayer.BASE) != null) {
-                PipeNode mirror = grid.getPipe(tileX, tileY, PipeLayer.BASE);
-                int loadLinks = loadedFromSave ? links : mirror.getLinks();
-                FluidType fluid = loadedFromSave ? savedFluid : mirror.getFluid();
-                int amount = loadedFromSave ? savedAmount : mirror.getAmount();
-                node = grid.loadPipe(tileX, tileY, PipeLayer.BASE, tier(), loadLinks, fluid, amount, true);
-            } else {
+            if (placed) {
                 node = grid.placePipe(tileX, tileY, PipeLayer.BASE, tier());
+            } else if (loadedFromSave) {
+                node = grid.loadPipe(tileX, tileY, PipeLayer.BASE, tier(), links, savedFluid, savedAmount, true,
+                        savedHintDests, savedHintCodes);
+            } else {
+                // No saved state: as when it was placed, but loaded (not a structure change).
+                int startLinks = grid.getPipe(tileX, tileY, PipeLayer.UNDERGROUND) != null
+                        ? LinkFlags.withVertical(LinkFlags.ALL_OPEN, false) : LinkFlags.ALL_OPEN;
+                node = grid.loadPipe(tileX, tileY, PipeLayer.BASE, tier(), startLinks, null, 0, true);
             }
             links = node.getLinks();
             blockedSides = grid.getFluidBlockedSides(tileX, tileY, PipeLayer.BASE);
@@ -97,23 +123,30 @@ public class BasicPipeObjectEntity extends ObjectEntity {
     public void remove() {
         super.remove();
         PipeSystem system = PipeSystem.getIfExists(getLevel());
-        if (system != null && node != null) {
-            if (unloading) {
-                system.getGrid().unloadPipe(tileX, tileY, PipeLayer.BASE);
-            } else if (system.getGrid().getPipe(tileX, tileY, PipeLayer.BASE) == node) {
-                if (PipeSystem.isReplacedEntity(this, objectID)) {
-                    // Only this entity is replaced (same pipe): the next one takes the cell over, as
-                    // after an unload, with no network rebuild.
-                    system.getGrid().unloadPipe(tileX, tileY, PipeLayer.BASE);
-                } else {
-                    system.getGrid().removePipe(tileX, tileY, PipeLayer.BASE);
-                }
+        if (system != null && node != null && system.getGrid().getPipe(tileX, tileY, PipeLayer.BASE) == node) {
+            if (unloading || PipeSystem.isReplacedEntity(this, objectID)) {
+                // Its region unloaded, or only this entity is replaced (same pipe): it leaves the
+                // engine; the state stays here (saved) or goes to the next entity.
+                PipeNode left = system.getGrid().unloadPipe(tileX, tileY, PipeLayer.BASE);
+                keepState(left);
+            } else {
+                system.getGrid().removePipe(tileX, tileY, PipeLayer.BASE);
             }
         }
         node = null;
     }
 
-    /** The grid cell (server), or {@code null}. */
+    private void keepState(PipeNode left) {
+        if (left != null) {
+            links = left.getLinks();
+            savedFluid = left.getFluid();
+            savedAmount = left.getAmount();
+            savedHintDests = left.getHintDestinations();
+            savedHintCodes = left.getHintCodes();
+        }
+    }
+
+    /** The engine's component (server), or {@code null}. */
     public PipeNode getNode() {
         return node;
     }
@@ -123,7 +156,7 @@ public class BasicPipeObjectEntity extends ObjectEntity {
         return links;
     }
 
-    /** Called when the grid changed the flags: sync them to clients. */
+    /** Called when the engine changed the flags: sync them to clients. */
     void syncLinks() {
         if (node != null && node.getLinks() != links) {
             links = node.getLinks();
@@ -160,6 +193,12 @@ public class BasicPipeObjectEntity extends ObjectEntity {
             save.addEnum("fluid", fluid);
             save.addInt("amount", amount);
         }
+        long[] dests = node != null ? node.getHintDestinations() : savedHintDests;
+        byte[] codes = node != null ? node.getHintCodes() : savedHintCodes;
+        if (dests != null && dests.length > 0) {
+            save.addLongArray("hintDests", dests);
+            save.addByteArray("hintCodes", codes);
+        }
     }
 
     @Override
@@ -169,6 +208,11 @@ public class BasicPipeObjectEntity extends ObjectEntity {
         links = LinkFlags.sanitize(save.getInt("links", LinkFlags.ALL_OPEN, false));
         savedFluid = save.getEnum(FluidType.class, "fluid", null, false);
         savedAmount = savedFluid == null ? 0 : Math.max(0, save.getInt("amount", 0, false));
+        if (savedAmount == 0) {
+            savedFluid = null;
+        }
+        savedHintDests = save.getLongArray("hintDests", null, false);
+        savedHintCodes = save.getByteArray("hintCodes", null, false);
     }
 
     @Override

@@ -31,7 +31,7 @@ public final class PipeNetwork {
     final Set<Pump> pumps = new LinkedHashSet<>();
     FluidType fluid;
     MineralTier lowestTier;
-    final Map<Pump, PipeGrid.PumpRoutes> routeCache = new IdentityHashMap<>();
+    final Map<Pump, Object> routeCache = new IdentityHashMap<>();
 
     PipeNetwork() {
     }

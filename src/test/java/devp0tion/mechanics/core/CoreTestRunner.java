@@ -29,16 +29,53 @@ public final class CoreTestRunner {
             PumpPushTest.class,
             PumpSourceTest.class,
             PumpBaselineTest.class,
-            TileBucketsTest.class
+            TileBucketsTest.class,
+            ComparisonTest.class,
+            NewEngineTest.class
+    };
+
+    /**
+     * The semantic tests of the pipe engine: run on the engine before the ECS restructure and on the
+     * new one in its compatibility mode (N22-6, N26-1). Tests of what only one of them has check
+     * {@link Engines#current} themselves.
+     */
+    private static final Class<?>[] ENGINE_TEST_CLASSES = {
+            PipeLinkTest.class,
+            PipeNetworkTest.class,
+            PumpPushTest.class,
+            PumpSourceTest.class,
+            PumpBaselineTest.class
+    };
+
+    /** Tests of the new engine only. */
+    private static final Class<?>[] NEW_ENGINE_TEST_CLASSES = {
     };
 
     private CoreTestRunner() {
     }
 
     public static void main(String[] args) {
-        int passed = 0;
+        int[] passed = {0};
         List<String> failures = new ArrayList<>();
-        for (Class<?> testClass : TEST_CLASSES) {
+        Engines.current = Engines.Kind.LEGACY;
+        run(TEST_CLASSES, "", passed, failures);
+        Engines.current = Engines.Kind.NEW_COMPAT;
+        run(ENGINE_TEST_CLASSES, "[new engine, compat] ", passed, failures);
+        Engines.current = Engines.Kind.NEW;
+        run(NEW_ENGINE_TEST_CLASSES, "[new engine] ", passed, failures);
+        Engines.current = Engines.Kind.LEGACY;
+        System.out.println();
+        System.out.println(passed[0] + " passed, " + failures.size() + " failed");
+        if (!failures.isEmpty()) {
+            for (String failure : failures) {
+                System.out.println("  " + failure);
+            }
+            System.exit(1);
+        }
+    }
+
+    private static void run(Class<?>[] classes, String prefix, int[] passed, List<String> failures) {
+        for (Class<?> testClass : classes) {
             Method[] methods = testClass.getDeclaredMethods();
             Arrays.sort(methods, Comparator.comparing(Method::getName));
             for (Method method : methods) {
@@ -46,10 +83,10 @@ public final class CoreTestRunner {
                         || method.getParameterCount() != 0) {
                     continue;
                 }
-                String name = testClass.getSimpleName() + "." + method.getName();
+                String name = prefix + testClass.getSimpleName() + "." + method.getName();
                 try {
                     method.invoke(null);
-                    passed++;
+                    passed[0]++;
                     System.out.println("PASS " + name);
                 } catch (InvocationTargetException e) {
                     Throwable cause = e.getCause();
@@ -63,14 +100,6 @@ public final class CoreTestRunner {
                     System.out.println("FAIL " + name + ": " + e);
                 }
             }
-        }
-        System.out.println();
-        System.out.println(passed + " passed, " + failures.size() + " failed");
-        if (!failures.isEmpty()) {
-            for (String failure : failures) {
-                System.out.println("  " + failure);
-            }
-            System.exit(1);
         }
     }
 
