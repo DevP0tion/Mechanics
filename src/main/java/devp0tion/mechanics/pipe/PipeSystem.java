@@ -31,6 +31,7 @@ import necesse.level.maps.regionSystem.Region;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -39,11 +40,11 @@ import java.util.Map;
  * underground pipe holders, and the one place the engine's systems run.
  *
  * <ul>
- *     <li>Systems (N22-5): {@link #tick} (the level data tick, after the entity ticks) runs the
- *     engine's systems in their fixed order ({@link PipeGrid#runTick}). Object entities hold data
- *     only: basic pipes, pumps and valves register their components from their object entities,
- *     structure changes reach the engine at once (N22-4), a manual pump's click is queued for the
- *     next tick.</li>
+ *     <li>Systems (N22-5): {@link #tick} (the level data tick, after the entity ticks) reads the
+ *     valves' wire signals and tanks from the level, then runs the engine's systems in their fixed
+ *     order ({@link PipeGrid#runTick}). Object entities hold data only: basic pipes, pumps and valves
+ *     register their components from their object entities, structure changes reach the engine at
+ *     once (N22-4), a manual pump's click is queued for the next tick.</li>
  *     <li>Underground pipe holders (N22-2, N24-1): one {@link UndergroundPipeHolder} per underground
  *     pipe of a loaded region, in this system's own entity list, saved in the region's object entity
  *     section ({@link HolderSavePatches}). Placed and removed with the layer object; created from the
@@ -72,6 +73,8 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     private final Map<String, PipeRecord> legacyMirror = new HashMap<>();
     /** The underground pipes' faces blocked by another fluid as last sent to clients (N13-2). */
     private final BlockedFaceSync undergroundBlocked = new BlockedFaceSync(grid, PipeLayer.UNDERGROUND);
+    /** The registered valves' object entities, by tile: read every tick before the systems run (N22-5). */
+    private final Map<Long, TankValveObjectEntity> valveEntities = new LinkedHashMap<>();
     private boolean scanned;
 
     public PipeSystem() {
@@ -143,9 +146,11 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     }
 
     /**
-     * Creates the level's pipe system before its level data tick (server). Regions loaded during that
-     * tick (by other level data) may hold pipes, whose holders and object entities need the system:
-     * creating it then would change the level data map while the game iterates it
+     * Creates the level's pipe system before its level data tick (server). It was added for the tank
+     * region keeping, whose level data loaded regions during that tick; that keeping is gone (N20-8,
+     * {@code TankRegionsLevelData} only reads old data now). It stays as a guard: a region that any
+     * level data loads during the tick may hold pipes, whose holders and object entities need the
+     * system, and creating it then would change the level data map while the game iterates it
      * ({@code LevelDataManager.tick}).
      */
     public static void ensureBeforeLevelDataTick(Level level) {
@@ -185,7 +190,7 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
      * and replaces it with the saved one, if any (A1). Such an entity does not register its part yet;
      * the region's loaded event registers the parts no saved entity replaced ({@link #onRegionLoaded}).
      */
-    static boolean isRegionLoading(ObjectEntity entity) {
+    public static boolean isRegionLoading(ObjectEntity entity) {
         Level level = entity.getLevel();
         return level != null && level.isServer()
                 && !level.regionManager.isRegionLoadingCompleteByTile(entity.tileX, entity.tileY);
@@ -216,6 +221,16 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         return grid.toggleSide(tileX, tileY, part, direction);
     }
 
+    /** A valve entered the engine: its wire signal and tank are read every tick ({@link #tick}). */
+    public void addValveEntity(TankValveObjectEntity valve) {
+        valveEntities.put(PipeGrid.key(valve.tileX, valve.tileY), valve);
+    }
+
+    /** A valve's entity is removed (picked up, unloaded or replaced). */
+    public void removeValveEntity(TankValveObjectEntity valve) {
+        valveEntities.remove(PipeGrid.key(valve.tileX, valve.tileY), valve);
+    }
+
     /** Queues a manual pump's click for the next tick of the systems (N22-5). */
     public void queueClick(int tileX, int tileY) {
         grid.queueClick(tileX, tileY);
@@ -238,6 +253,13 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
             holderRemoved = false;
             holders.serverTick(holder -> {
             }, new ArrayList<DrawOnMapEntity>());
+        }
+        // Valves (N11-3, N27-4): the wire signal on each valve's tile and its tank, read from the level
+        // before the pumps use them (this was each valve entity's own tick before N22-5).
+        if (!valveEntities.isEmpty()) {
+            for (TankValveObjectEntity valve : new ArrayList<>(valveEntities.values())) {
+                valve.updateFromLevel();
+            }
         }
         // The systems, in their fixed order (N22-5).
         grid.runTick();
@@ -491,8 +513,8 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     /**
      * Registers the parts of a loaded region (idempotent): every underground pipe takes its holder's
      * saved state, else (older worlds, N24-1 migration) the region's old record, else the old level
-     * mirror, else starts new; holders without their pipe object are dropped. Basic pipes and pumps
-     * whose fresh entity no saved one replaced while the region loaded register now.
+     * mirror, else starts new; holders without their pipe object are dropped. Basic pipes, pumps and
+     * valves whose fresh entity no saved one replaced while the region loaded register now.
      */
     private void registerRegion(Region region) {
         List<PipeRecord> records = pendingRegions.remove(PipeGrid.key(region.regionX, region.regionY));
@@ -526,6 +548,8 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
                 ((BasicPipeObjectEntity) entity).registerIfDeferred();
             } else if (entity instanceof PumpObjectEntity) {
                 ((PumpObjectEntity) entity).registerIfDeferred();
+            } else if (entity instanceof TankValveObjectEntity) {
+                ((TankValveObjectEntity) entity).registerIfDeferred();
             }
         });
     }

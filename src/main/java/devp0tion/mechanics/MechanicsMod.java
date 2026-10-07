@@ -30,7 +30,8 @@ public class MechanicsMod {
         MechanicsItems.load();
         MechanicsContainers.load();
         MechanicsPackets.load();
-        // Keeps the regions of each recognized tank loaded together (N15-6).
+        // Old tank region data (N15-6, replaced by N20-8): registered only so that levels saved with it
+        // still load; it is read, discarded and not saved again.
         TankRegionsLevelData.register();
         // The level's pipe grid and the underground pipes' state (N7-1, N14-4).
         PipeSystem.register();

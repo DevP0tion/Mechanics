@@ -23,8 +23,10 @@ import java.util.Objects;
  * incoming fluid automatically into its tank (N7-3).
  *
  * <ul>
- *     <li>Normally on; off while any wire on its tile carries a signal (N11-3). Updated from
- *     {@code onWireUpdate} and every tick.</li>
+ *     <li>Normally on; off while any wire on its tile carries a signal (N11-3); a valve that is off
+ *     neither takes incoming fluid nor lets a linked pump pull through it (N27-4). Updated from
+ *     {@code onWireUpdate} and every tick by the pipe system's systems ({@link PipeSystem#tick},
+ *     N22-5).</li>
  *     <li>Its tier: the mineral wall it was crafted from (N13-5 ②), from the item it was placed
  *     with ({@link TankValveObjectItem#onPlaceObject}). Saved, synced to clients and dropped with the
  *     item again. An item without tier data counts as copper (N19-7 (a)).</li>
@@ -34,10 +36,13 @@ import java.util.Objects;
  *     tank completed around it later does not take it (N15-3). Saved and synced to clients.</li>
  *     <li>In the level's pipe grid (server): a new valve's link toward a pump already next to it
  *     starts cut (N13-3, N16-3); its link flags (sides and the underground pipe on its tile) are
- *     saved and synced to clients, which draw cut faces (N16-4). Its tank is looked up every tick.
- *     When its region unloads, or the engine only replaces this entity with another one of the same
- *     valve (region loading, placement, {@link PipeSystem#isReplacedEntity}), it leaves the grid
- *     but the pumps next to it keep it as a source; only a removed valve stops being one.</li>
+ *     saved and synced to clients, which draw cut faces (N16-4). Its tank is looked up every tick
+ *     by the pipe system's systems. While its region loads, the engine's fresh entity registers
+ *     nothing: the saved entity replaces it, or the region's loaded event registers it (A1, as basic
+ *     pipes and pumps). When its region unloads, or the engine only replaces this entity with
+ *     another one of the same valve (region loading, placement, {@link PipeSystem#isReplacedEntity}),
+ *     it leaves the grid but the pumps next to it keep it as a source; only a removed valve stops
+ *     being one.</li>
  * </ul>
  * TODO(design): automatic output from the valve is TODO (N7-3).
  */
@@ -50,6 +55,7 @@ public class TankValveObjectEntity extends ObjectEntity {
     private MineralTier tier = TankValveObjectItem.DEFAULT_TIER;
     private GridPos owner;
     private boolean loadedFromSave;
+    private boolean deferred;
     private boolean registered;
     private boolean unloading;
     /** The object this entity was created for ({@link PipeSystem#isReplacedEntity}). */
@@ -66,6 +72,27 @@ public class TankValveObjectEntity extends ObjectEntity {
         super.init();
         objectID = getLevel().getObjectID(tileX, tileY);
         updateWireSignal();
+        if (!getLevel().isServer()) {
+            return;
+        }
+        if (!loadedFromSave && PipeSystem.isRegionLoading(this)) {
+            // A fresh entity of a loading region (A1): the saved one replaces it, or the region's
+            // loaded event registers it.
+            deferred = true;
+            return;
+        }
+        register();
+    }
+
+    /** Registers a valve whose fresh entity no saved one replaced while its region loaded. */
+    public void registerIfDeferred() {
+        if (deferred && !removed()) {
+            deferred = false;
+            register();
+        }
+    }
+
+    private void register() {
         PipeSystem system = PipeSystem.get(getLevel());
         if (system == null) {
             return;
@@ -81,6 +108,7 @@ public class TankValveObjectEntity extends ObjectEntity {
             }
             registered = true;
             links = valve.getLinks();
+            system.addValveEntity(this);
         } catch (IllegalStateException e) {
             System.err.println("Mechanics: valve at " + tileX + "," + tileY + " not registered: " + e.getMessage());
         }
@@ -96,6 +124,9 @@ public class TankValveObjectEntity extends ObjectEntity {
     public void remove() {
         super.remove();
         PipeSystem system = PipeSystem.getIfExists(getLevel());
+        if (system != null) {
+            system.removeValveEntity(this);
+        }
         if (system != null && registered && system.getGrid().getValve(tileX, tileY) == valve) {
             if (unloading || PipeSystem.isReplacedEntity(this, objectID)) {
                 // Pumps next to it keep it as a source while its region is unloaded, and when the
@@ -110,7 +141,16 @@ public class TankValveObjectEntity extends ObjectEntity {
 
     @Override
     public void serverTick() {
+        // The entity's own tick only: the wire signal and the tank are read by the pipe system's
+        // systems (N22-5, {@link #updateFromLevel}).
         super.serverTick();
+    }
+
+    /**
+     * The valve step of the pipe system's systems (N22-5), every tick before the pumps run: the wire
+     * signal on its tile (N11-3, N27-4) and its tank, read from the level.
+     */
+    public void updateFromLevel() {
         if (registered) {
             updateWireSignal();
             refreshTank();

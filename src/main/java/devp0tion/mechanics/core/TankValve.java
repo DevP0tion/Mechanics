@@ -9,7 +9,9 @@ package devp0tion.mechanics.core;
  *     <li>Normally on: by default it accepts incoming fluid (N7-3). While it receives a wire
  *     signal it is off and accepts nothing (N11-3, {@link #applyWireSignal}).</li>
  *     <li>A pump linked directly to a valve pulls from its tank (11-1 ②, 11-5, N16-3); that is one
- *     of the pump's sources, not a destination.</li>
+ *     of the pump's sources, not a destination. A valve switched off by a wire signal blocks that
+ *     too: a linked pump does not pull from the tank through it while it is off (N27-4,
+ *     {@link PipeGrid#getSourceValves}).</li>
  *     <li>Link flags ({@link LinkFlags}): one per side (basic pipes and pumps next to it) and the
  *     vertical one (the underground pipe on its tile, 9-9, 13-5). Toggled by the wrench and kept
  *     when the other side is removed (N16-4).</li>
@@ -20,9 +22,6 @@ package devp0tion.mechanics.core;
  * </ul>
  *
  * <p>TODO(design): automatic output from the valve is TODO (N7-3).
- * <p>TODO(design): whether the wire signal also stops a linked pump from pulling through the valve
- * is not decided; the signal only switches the valve's automatic input (N7-3, N11-3), and a pump
- * pulls from the tank regardless.
  */
 public final class TankValve {
 
@@ -47,7 +46,7 @@ public final class TankValve {
         return enabled;
     }
 
-    /** Wire control (N7-3). A disabled valve accepts nothing. */
+    /** Wire control (N7-3, N11-3): a disabled valve accepts nothing, and no pump pulls through it (N27-4). */
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
     }

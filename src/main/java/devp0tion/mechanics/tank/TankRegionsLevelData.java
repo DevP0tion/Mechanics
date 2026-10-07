@@ -10,7 +10,7 @@ import necesse.level.maps.levelData.LevelData;
  *
  * <p>Kept registered so that levels saved with it (round 4a to N20) still load: the saved entries
  * are read and discarded, nothing is kept loaded, and it is not saved again (the way the game drops
- * its own deprecated level data). Its {@link #KEY} is still looked up elsewhere.
+ * its own deprecated level data).
  */
 @Deprecated
 public class TankRegionsLevelData extends LevelData {
