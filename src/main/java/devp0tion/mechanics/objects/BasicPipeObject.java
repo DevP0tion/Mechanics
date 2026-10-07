@@ -39,10 +39,11 @@ import java.util.Locale;
  *     <li>Belongs to the "any pipe" ingredient group (N10-3).</li>
  *     <li>Drawn flat on the ground with arms toward its links and marks on cut faces
  *     ({@link PipeRendering}).</li>
+ *     <li>Blocks movement with a full-tile collision, like the pump and the glass block (N31-1);
+ *     still placeable on liquid (N17-4). TODO(confirm): a thinner shape along its links might fit
+ *     a pipe better; the full tile is used as decided.</li>
+ *     <li>Mined with any pickaxe, tier 0, the engine default (N31-2).</li>
  * </ul>
- * TODO(design): whether a pipe blocks movement is undecided; it has no collision (like the vanilla
- * minecart track). The tool tier needed to mine it is undecided; the engine default is used
- * (pickaxe, tier 0).
  */
 public class BasicPipeObject extends GameObject {
 
@@ -53,7 +54,8 @@ public class BasicPipeObject extends GameObject {
     protected GameTexture texture;
 
     public BasicPipeObject(MineralTier tier, String stringID, Color mapColor) {
-        super(new Rectangle());
+        // Full-tile collision: blocks movement (N31-1).
+        super(new Rectangle(32, 32));
         this.tier = tier;
         this.textureName = stringID;
         this.mapColor = mapColor;

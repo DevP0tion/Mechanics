@@ -30,10 +30,8 @@ import java.util.List;
  * <p>Inside a recognized tank only glass blocks, the tank floor tile (once it exists) and underground
  * pipes may be placed (N16-1); the item description says so (N11-6).
  *
- * <p>TODO(design): whether a glass block blocks movement is undecided; it has a full-tile
- * collision like the other blocks.
- * <p>TODO(design): the tool and tier needed to mine it are undecided; the engine default is used
- * (pickaxe, tier 0).
+ * <p>It blocks movement with a full-tile collision like the other blocks (N31-1), and is mined
+ * with any pickaxe, tier 0, the engine default (N31-2).
  */
 public class GlassBlockObject extends GameObject {
 

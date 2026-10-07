@@ -23,8 +23,7 @@ import java.util.List;
  * and the upper 32 above it (the 1x1 tall-object layout of the ExampleMod's ExampleObject), drawn
  * by {@code tools/textures/draw_tank_parts.py}. Item icon {@code items/<stringID>.png}.
  *
- * <p>TODO(design): the tool and tier needed to mine the tank parts are undecided; the engine
- * default is used (pickaxe, tier 0).
+ * <p>The tank parts are mined with any pickaxe, tier 0, the engine default (N31-2).
  */
 public abstract class TankBorderBlockObject extends GameObject {
 

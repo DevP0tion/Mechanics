@@ -25,6 +25,7 @@ import necesse.gfx.drawables.OrderableDrawables;
 import necesse.gfx.gameTexture.GameTexture;
 import necesse.gfx.gameTooltips.ListGameTooltips;
 import necesse.inventory.InventoryItem;
+import necesse.inventory.PlayerInventorySlot;
 import necesse.inventory.container.object.OEInventoryContainer;
 import necesse.level.gameObject.GameObject;
 import necesse.level.maps.Level;
@@ -45,16 +46,17 @@ import java.util.List;
  *     N16-3); may be placed on liquid, also the deep sea (11-9).</li>
  *     <li>Placement is rejected when the sources it would connect hold different fluids (N17-1),
  *     and inside a recognized tank (N16-1); the item description says so (N11-6).</li>
- *     <li>The manual pump pumps once per click (interact, 11-3); the fire pumps open their fuel slot
- *     (TODO(confirm), see {@link PumpObjectEntity}) and are switched off by a wire signal (11-3,
- *     N11-3, in the item description).</li>
+ *     <li>The manual pump pumps once per click (interact, 11-3). The log-fuelled pumps take logs
+ *     both ways (N31-4): right clicked while the player holds logs, they take as many of them as
+ *     fit into their fuel slot from the held stack; otherwise the right click opens their fuel
+ *     slot window. They are switched off by a wire signal (11-3, N11-3, in the item description).</li>
  *     <li>Pushes only into adjacent basic pipes (9-3, 9-9). Cut links to valves are drawn on the
  *     pump (N16-4).</li>
  * </ul>
  * Texture {@code objects/<stringID>.png}: one 32x64 sprite like the tank parts; item icon
  * {@code items/<stringID>.png} (drawn by {@code tools/textures/draw_pipes_pumps.py}).
- * TODO(design): whether a pump blocks movement and the tool tier needed to mine it are undecided;
- * it is a full-tile block like the tank parts, mined with any pickaxe.
+ * A full-tile block like the tank parts: it blocks movement (N31-1) and is mined with any pickaxe,
+ * tier 0, the engine default (N31-2).
  */
 public class PumpObject extends GameObject {
 
@@ -147,6 +149,10 @@ public class PumpObject extends GameObject {
             return;
         }
         if (tier.usesLogFuel()) {
+            PumpObjectEntity pump = getCurrentObjectEntity(level, x, y, PumpObjectEntity.class);
+            if (pump != null && insertHeldLogs(level, player, pump)) {
+                return;
+            }
             OEInventoryContainer.openAndSendContainer(ContainerRegistry.OE_INVENTORY_CONTAINER, player.getServerClient(), level, x, y);
         } else {
             PumpObjectEntity pump = getCurrentObjectEntity(level, x, y, PumpObjectEntity.class);
@@ -154,6 +160,31 @@ public class PumpObject extends GameObject {
                 pump.click();
             }
         }
+    }
+
+    /**
+     * Log fuel by right click (N31-4, server): when the player holds logs, as many of them as fit go
+     * into the pump's fuel slot, taken from the held stack. Returns whether the player held logs
+     * (then the window does not open, also when none fit).
+     * TODO(confirm): with the fuel slot full (or holding another kind of log than the slot's), the
+     * click inserts nothing and does not open the window either.
+     * TODO(design): the interact tip still says "Open" while logs are held.
+     */
+    static boolean insertHeldLogs(Level level, PlayerMob player, PumpObjectEntity pump) {
+        if (player == null) {
+            return false;
+        }
+        PlayerInventorySlot slot = player.getSelectedItemSlot();
+        InventoryItem held = slot.getItem(player.getInv());
+        if (held == null || !pump.isItemValid(0, held)) {
+            return false;
+        }
+        pump.inventory.addItem(level, player, held, "pumpfuel");
+        if (held.getAmount() <= 0) {
+            slot.setItem(player.getInv(), null);
+        }
+        slot.markDirty(player.getInv());
+        return true;
     }
 
     @Override
