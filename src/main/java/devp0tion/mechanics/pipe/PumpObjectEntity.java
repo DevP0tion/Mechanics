@@ -40,11 +40,12 @@ import java.util.List;
  *     number given one then (N28-17).</li>
  *     <li>Wire (11-3, N11-3): from tier 2 up, a wire signal on its tile switches it off.</li>
  *     <li>Manual pump: a click is one cycle, applied only on the server in the next tick of the
- *     systems (N22-5), at most every 20 ticks per pump (N3-2, N3-3; see the per-player TODO(design) in
- *     {@link Pump}).</li>
+ *     systems (N22-5), at most every 20 ticks per pump however many players click (N3-2, N3-3,
+ *     N31-3).</li>
  *     <li>Fuel (11-7, 11-8): the log-fueled pumps burn any log from one slot. Logs get in both ways
  *     (N31-4): the vanilla object inventory window with the one fuel slot, and a right click on
- *     the pump while holding logs ({@code PumpObject.interact}).</li>
+ *     the pump while holding logs that can go in; otherwise the right click opens the window
+ *     ({@code PumpObject.interact}, N31-11).</li>
  *     <li>Clients get the link flags (drawn as cut faces, N16-4) and the slot (vanilla inventory
  *     sync); the fluid stays on the server.</li>
  * </ul>

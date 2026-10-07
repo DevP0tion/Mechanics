@@ -24,9 +24,10 @@ import java.util.function.Function;
  * </ol>
  * Then the reason the right click there would be refused, if it would be (N30-1), as a warning.
  *
- * <p>TODO(design): the layout is provisional: the labels, the order of the lines, the vertical link
- * listed as a direction, "None" for no linked direction and the blocked line left out when nothing
- * is blocked. A side linked by the wrench but blocked by another fluid is listed in both lines.
+ * <p>The layout is decided as implemented (N30-6): the labels, the order of the lines, the vertical
+ * link listed as a direction, "None" for no linked direction and the blocked line left out when
+ * nothing is blocked. A side linked by the wrench but blocked by another fluid is listed in both
+ * lines.
  */
 public final class WrenchInfoText {
 

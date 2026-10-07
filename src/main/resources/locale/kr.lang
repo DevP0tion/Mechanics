@@ -66,7 +66,7 @@ mechanicswrenchundergroundmode=지하 모드
 
 [ui]
 // The engineering wrench's tooltip (N30-1, N30-2). <fluid> is the fluid's name, <directions> a list of directions.
-// TODO(confirm): the direction names (북·동·남·서, 위아래 for the vertical link) and the labels.
+// The labels and the direction names (북·동·남·서, 위아래 for the vertical link) are decided as implemented (N30-6).
 mechanicswrenchfluid=유체: <fluid>
 mechanicswrenchempty=비어 있음
 mechanicswrenchlinked=연결된 방향: <directions>

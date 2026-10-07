@@ -71,7 +71,7 @@ mechanicswrenchundergroundmode=Underground mode
 
 [ui]
 // The engineering wrench's tooltip (N30-1, N30-2). <fluid> is the fluid's name, <directions> a list of directions.
-// TODO(confirm): plain translations of the Korean text, like the direction names.
+// The labels and the direction names are decided as implemented (N30-6).
 mechanicswrenchfluid=Fluid: <fluid>
 mechanicswrenchempty=Empty
 mechanicswrenchlinked=Linked: <directions>

@@ -20,9 +20,9 @@ import devp0tion.mechanics.core.PipeGrid;
  *     <li>{@link #DIFFERENT_SOURCE_FLUID}: linking a valve to a pump while the valve's tank holds
  *     another fluid than the pump's other sources (N16-3).</li>
  * </ul>
- * A tile with no part the wrench acts on shows no reason (the click there does nothing).
- * TODO(confirm): an empty tile is read as "nothing to refuse", so no tooltip appears there; the
- * protected and out-of-range reasons are shown only over a part the wrench acts on.
+ * A tile with no part the wrench acts on shows no reason (the click there does nothing): no tooltip
+ * appears there at all (N30-7), so the protected and out-of-range reasons are shown only over a part
+ * the wrench acts on.
  * Game independent, so it is tested by the plain test runner.
  */
 public enum WrenchRefusal {
