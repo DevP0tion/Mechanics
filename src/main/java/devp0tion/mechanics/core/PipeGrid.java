@@ -264,6 +264,20 @@ public final class PipeGrid {
         return result;
     }
 
+    /**
+     * The fluids in a pump's output cells, the basic pipes it pushes into ({@link #getPumpEntries}),
+     * in {@link Direction} order; empty pipes left out. Read per cell, never from the network (N20-5).
+     */
+    public Set<FluidType> getOutputFluids(Pump pump) {
+        Set<FluidType> result = new LinkedHashSet<>();
+        for (PipeNode entry : getPumpEntries(pump)) {
+            if (entry.getFluid() != null) {
+                result.add(entry.getFluid());
+            }
+        }
+        return result;
+    }
+
     /** The valves linked to a pump's sides: its tank sources (11-1 ②, N16-3), in pull order. */
     public List<TankValve> getSourceValves(Pump pump) {
         List<TankValve> result = new ArrayList<>();

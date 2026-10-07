@@ -166,10 +166,24 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
      * The wrench toward a side ({@link PipeGrid#toggleSide}). The part on the other side changes too,
      * so its region is loaded first, as the level's object setter does: a pipe there would otherwise
      * only be a read-only mirror (N14-3) whose region file undoes the change when it loads, and a pump
-     * or valve there would not be in the grid at all.
+     * or valve there would not be in the grid at all. The region is only loaded, never generated: when
+     * it was never generated (or does not load), nothing changes ({@link PipeGrid.Check#NOT_LOADED}).
      */
     public PipeGrid.Check toggleSide(int tileX, int tileY, PipeGrid.Part part, Direction direction) {
-        level.regionManager.getRegionByTile(tileX + direction.dx, tileY + direction.dy, true);
+        int x = tileX + direction.dx;
+        int y = tileY + direction.dy;
+        if (level.isTileWithinBounds(x, y) && !level.regionManager.isTileLoaded(x, y)) {
+            int regionX = level.regionManager.getRegionCoordByTile(x);
+            int regionY = level.regionManager.getRegionCoordByTile(y);
+            // Loading a region that was never generated would create it empty: check that it exists.
+            if (!level.regionManager.isRegionGenerated(regionX, regionY)) {
+                return PipeGrid.Check.NOT_LOADED;
+            }
+            level.regionManager.ensureRegionIsLoadedButDontGenerate(regionX, regionY);
+            if (!level.regionManager.isTileLoaded(x, y)) {
+                return PipeGrid.Check.NOT_LOADED;
+            }
+        }
         return grid.toggleSide(tileX, tileY, part, direction);
     }
 

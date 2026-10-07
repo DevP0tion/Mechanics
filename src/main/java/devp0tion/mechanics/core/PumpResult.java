@@ -16,9 +16,15 @@ public final class PumpResult {
         WAITING,
         /** Switched off by wire (11-3, N11-3). */
         DISABLED,
-        /** The pump has nothing to pull (no source, or every source is empty). No log is lit. */
+        /**
+         * The pump has nothing to pull (no source, every source is empty, or the only non-empty ones
+         * hold another fluid than the baseline and are dormant, N20-3). No log is lit.
+         */
         NO_SOURCE,
-        /** The pump's tier cannot move the source's fluid (12-1, 12-5, 12-6). No log is lit. */
+        /**
+         * The pump's tier cannot move the fluid: every non-empty source holds such a fluid (dormant,
+         * N20-4), or the output cells do (12-1, 12-5, 12-6). No log is lit.
+         */
         FLUID_NOT_ALLOWED,
         /** No destination, or every destination is full: the pump stops and lights no log (N7-4). */
         NO_DESTINATION,

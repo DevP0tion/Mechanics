@@ -69,6 +69,25 @@ public class TankRegionsLevelData extends LevelData {
         return created;
     }
 
+    /**
+     * Whether the tile is inside the interior of a tank registered here (server): the recognized
+     * tanks, also those whose controller has not searched its tank again since its region loaded.
+     * Natural generation inside tanks (N20-1) also runs while a region loads (the world time
+     * simulation of {@code Region.loadSaveData}), before the controllers there have ticked.
+     */
+    public static boolean isRegisteredInterior(Level level, int tileX, int tileY) {
+        TankRegionsLevelData data = get(level, false);
+        if (data == null) {
+            return false;
+        }
+        for (TankBounds bounds : data.tanks.values()) {
+            if (bounds.isInterior(tileX, tileY)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The recognized tank of the controller at the tile, or {@code null} when it has none. */
     void setTank(int controllerX, int controllerY, TankBounds bounds) {
         GridPos controller = new GridPos(controllerX, controllerY);

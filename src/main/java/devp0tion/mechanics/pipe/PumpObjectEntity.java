@@ -31,6 +31,9 @@ import java.util.List;
  *     own (N18-2); a loaded one restores its sources in their order (N19-1), link flags, burn time,
  *     the fluid in the pump and the liquid tile source's left-over units. It ticks the pump every
  *     game tick; pipes that break are removed without a drop (N12-5).</li>
+ *     <li>The liquid tile source's 5x5 judgment (N20-7) is made when a new pump registers, with the
+ *     cells loaded then, and is saved with the pump. TODO(confirm): a pump saved before the judgment
+ *     was stored is judged at its first tick after loading, with the cells loaded then (N20-7).</li>
  *     <li>Wire (11-3, N11-3): from tier 2 up, a wire signal on its tile switches it off.</li>
  *     <li>Manual pump: a click is one cycle, applied only on the server, at most every 20 ticks per
  *     pump (N3-2, N3-3; see the per-player TODO(design) in {@link Pump}).</li>
@@ -54,6 +57,8 @@ public class PumpObjectEntity extends InventoryObjectEntity {
     private boolean savedHasTile;
     private FluidType savedBufferFluid;
     private int savedBuffer;
+    /** The liquid tile source's saved 5x5 judgment (N20-7); {@code null} when none was saved. */
+    private Boolean savedJudgment;
 
     public PumpObjectEntity(Level level, int tileX, int tileY, PumpTier tier) {
         super(level, tileX, tileY, 1);
@@ -85,6 +90,7 @@ public class PumpObjectEntity extends InventoryObjectEntity {
                 if (savedHasTile) {
                     tileSource = new LiquidTileSource(lookup, tileX, tileY);
                     tileSource.setBuffered(savedBufferFluid, savedBufferFluid == null ? 0 : savedBuffer);
+                    tileSource.setJudgment(savedJudgment);
                     pump.setTileSource(tileSource);
                 }
                 pump.setLinks(links);
@@ -93,6 +99,8 @@ public class PumpObjectEntity extends InventoryObjectEntity {
             } else {
                 if (LevelLiquidTileLookup.fluidAt(getLevel(), tileX, tileY) != null) {
                     tileSource = new LiquidTileSource(lookup, tileX, tileY);
+                    // Judged when the pump is placed, with the cells loaded now (N20-7).
+                    tileSource.judgeArea();
                     pump.setTileSource(tileSource);
                 }
                 FluidType tileFluid = tileSource == null ? null : tileSource.getTileFluid();
@@ -139,6 +147,11 @@ public class PumpObjectEntity extends InventoryObjectEntity {
         super.serverTick();
         if (!registered) {
             return;
+        }
+        if (tileSource != null && tileSource.getJudgment() == null) {
+            // Not judged yet: a pump saved before the judgment was stored (TODO(confirm) in the class
+            // comment), or one whose tile was not loaded when it registered. Judged with the loaded cells.
+            tileSource.judgeArea();
         }
         PumpResult result = pump.tick();
         if (!result.getBroken().isEmpty()) {
@@ -262,6 +275,10 @@ public class PumpObjectEntity extends InventoryObjectEntity {
             save.addEnum("bufferFluid", bufferFluid);
             save.addInt("buffer", buffer);
         }
+        Boolean judgment = tileSource != null ? tileSource.getJudgment() : savedJudgment;
+        if (judgment != null) {
+            save.addBoolean("tileInfinite", judgment);
+        }
     }
 
     @Override
@@ -286,6 +303,7 @@ public class PumpObjectEntity extends InventoryObjectEntity {
         savedHasTile = save.getBoolean("tile", false, false);
         savedBufferFluid = save.getEnum(FluidType.class, "bufferFluid", null, false);
         savedBuffer = Math.max(0, save.getInt("buffer", 0, false));
+        savedJudgment = save.hasLoadDataByName("tileInfinite") ? save.getBoolean("tileInfinite", false, false) : null;
     }
 
     @Override

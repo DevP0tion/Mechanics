@@ -12,8 +12,9 @@ import java.util.Random;
 
 /**
  * Pump sources: placement by fluid (N17-1), pull order (N19-1), a source that fills with another
- * fluid later (N17-3), valves placed later (N13-3, N16-3), stale saved sources of cut links (N16-3),
- * and the liquid tile source (N19-3, N17-5), also at a level's edge and reused within a cycle.
+ * fluid later (N17-3, N20-3), valves placed later (N13-3, N16-3), stale saved sources of cut links
+ * (N16-3), and the liquid tile source (N19-3, N17-5, N20-7), also at a level's edge and reused within
+ * a cycle.
  */
 final class PumpSourceTest {
 
@@ -95,8 +96,9 @@ final class PumpSourceTest {
         empty.getTank().insert(FluidType.LAVA, 500);
         Check.equal(2, pump.getSourceSlots().size(), "still connected (N17-3)");
         PumpResult lava = Fluids.cycle(pump);
-        Check.equal(Status.NO_DESTINATION, lava.getStatus(),
-                "lava next: the only pipes hold water, a dead end (N17-3)");
+        Check.equal(Status.NO_SOURCE, lava.getStatus(),
+                "the output cell holds water: the lava source is dormant (N20-3, N20-5)");
+        Check.equal(500, empty.getTank().getAmount(), "nothing pulled from it");
         grid.removePipe(1, 0, PipeLayer.BASE);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placeValve(1, 1, Fluids.valve(1000));
@@ -156,7 +158,18 @@ final class PumpSourceTest {
         Check.equal(FluidType.FRESHWATER, mixed.getFluid(0, 0), "freshwater untouched");
     }
 
-    public static void testUnloadedAreaGivesNothing() {
+    // ---------- the 5x5 judgment (N20-7) ----------
+
+    private static Fluids.Liquids uniformLake() {
+        return new Fluids.Liquids(
+                "sssss",
+                "sssss",
+                "sssss",
+                "sssss",
+                "sssss");
+    }
+
+    public static void testFiveByFiveIsJudgedOnItsLoadedCells() {
         Fluids.Liquids edge = new Fluids.Liquids(
                 "ssssu",
                 "sssss",
@@ -164,9 +177,126 @@ final class PumpSourceTest {
                 "sssss",
                 "sssss");
         LiquidTileSource tile = new LiquidTileSource(edge, 2, 2);
-        Check.isNull(tile.getSourceFluid(), "waits while part of the 5x5 is not loaded");
-        Check.equal(0, tile.extract(FluidType.SEAWATER, 20));
-        Check.equal(0, edge.consumed.size(), "never eats tiles at a region edge");
+        tile.judgeArea();
+        Check.equal(Boolean.TRUE, tile.getJudgment(), "the unloaded cell is left out (N20-7)");
+        Check.equal(FluidType.SEAWATER, tile.getSourceFluid(), "no waiting for the unloaded cell");
+        Check.equal(20, tile.extract(FluidType.SEAWATER, 20));
+        Check.equal(0, edge.consumed.size(), "infinite: nothing used up");
+        Fluids.Liquids shore = new Fluids.Liquids(
+                "ssssu",
+                "sssss",
+                "sssss",
+                "sssss",
+                "ssss.");
+        LiquidTileSource finite = new LiquidTileSource(shore, 2, 2);
+        Check.isFalse(finite.isInfinite(), "a loaded land cell: finite");
+    }
+
+    public static void testInfiniteJudgmentIsKeptWhileTheAreaUnloads() {
+        Fluids.Liquids lake = uniformLake();
+        LiquidTileSource tile = new LiquidTileSource(lake, 2, 2);
+        tile.judgeArea();
+        lake.unload(3, 0, 4, 4);
+        Check.isTrue(tile.isInfinite(), "judged when placed; kept while cells are unloaded (N20-7)");
+        Check.equal(Integer.MAX_VALUE, tile.getAvailable(FluidType.SEAWATER));
+        Check.equal(40, tile.extract(FluidType.SEAWATER, 40));
+        Check.equal(0, lake.consumed.size());
+    }
+
+    public static void testFiniteJudgmentIsKeptWhileTheCellThatMadeItUnloads() {
+        Fluids.Liquids lake = uniformLake();
+        lake.set(4, 4, '.');
+        LiquidTileSource tile = new LiquidTileSource(lake, 2, 2);
+        tile.judgeArea();
+        Check.equal(Boolean.FALSE, tile.getJudgment());
+        lake.unload(4, 4, 4, 4);
+        Check.isFalse(tile.isInfinite(), "no change seen: the judgment stays");
+        tile.extract(FluidType.SEAWATER, 10);
+        Check.equal(1, lake.consumed.size(), "finite: a tile is used up");
+    }
+
+    public static void testChangeInTheLoadedAreaJudgesAgain() {
+        Fluids.Liquids lake = uniformLake();
+        LiquidTileSource tile = new LiquidTileSource(lake, 2, 2);
+        tile.judgeArea();
+        Check.isTrue(tile.isInfinite(), "uniform");
+        lake.set(0, 0, '.');
+        Check.isFalse(tile.isInfinite(), "a loaded cell changed: judged again (N20-7)");
+        Check.equal(10, tile.extract(FluidType.SEAWATER, 10));
+        Check.equal(1, lake.consumed.size(), "now tiles are used up");
+    }
+
+    public static void testReloadedCellsAreWatchedAgain() {
+        Fluids.Liquids lake = uniformLake();
+        LiquidTileSource tile = new LiquidTileSource(lake, 2, 2);
+        tile.judgeArea();
+        lake.unload(4, 0, 4, 4);
+        Check.isTrue(tile.isInfinite(), "unloaded: kept");
+        // A change no one could watch (the cell was not loaded) is not a change seen while loaded.
+        lake.set(4, 0, '.');
+        lake.load(4, 0, 4, 4);
+        Check.isTrue(tile.isInfinite(), "loaded again: watched from now on, not judged again");
+        lake.set(4, 4, '.');
+        Check.isFalse(tile.isInfinite(), "a change after loading again: judged again");
+    }
+
+    public static void testSavedJudgmentIsRestored() {
+        Fluids.Liquids lake = uniformLake();
+        lake.set(0, 0, '.');
+        LiquidTileSource restored = new LiquidTileSource(lake, 2, 2);
+        restored.setJudgment(Boolean.TRUE);
+        Check.isTrue(restored.isInfinite(), "the saved judgment, not judged again on loading");
+        lake.set(1, 1, '.');
+        Check.isFalse(restored.isInfinite(), "a change seen after loading: judged again");
+        LiquidTileSource old = new LiquidTileSource(uniformLake(), 2, 2);
+        old.setJudgment(null);
+        Check.isNull(old.getJudgment(), "saved before N20-7: not judged yet");
+        Check.isTrue(old.isInfinite(), "judged at the first use with the loaded cells");
+        Check.equal(Boolean.TRUE, old.getJudgment());
+    }
+
+    public static void testNothingIsJudgedWhileThePumpTileIsNotLoaded() {
+        Fluids.Liquids lake = uniformLake();
+        lake.unload(2, 2, 2, 2);
+        LiquidTileSource tile = new LiquidTileSource(lake, 2, 2);
+        tile.judgeArea();
+        Check.isNull(tile.getJudgment(), "no judgment without the pump's own tile");
+        Check.isNull(tile.getSourceFluid(), "no source while it is not loaded");
+        lake.load(2, 2, 2, 2);
+        tile.judgeArea();
+        Check.equal(Boolean.TRUE, tile.getJudgment());
+    }
+
+    public static void testFiniteSearchUsesLoadedTilesOnly() {
+        Fluids.Liquids strip = new Fluids.Liquids(
+                "fffuff",
+                "......");
+        LiquidTileSource tile = new LiquidTileSource(strip, 0, 0);
+        Check.isFalse(tile.isInfinite(), "land around the strip");
+        Check.equal(30, tile.getAvailable(FluidType.FRESHWATER), "the loaded connected tiles only (N20-7)");
+        Check.equal(30, tile.extract(FluidType.FRESHWATER, 100));
+        Check.equal(FluidType.FRESHWATER, strip.getFluid(4, 0), "beyond the unloaded tile: untouched");
+        Check.equal(0, tile.getAvailable(FluidType.FRESHWATER), "the pump's own tile is gone");
+    }
+
+    public static void testPumpKeepsItsInfiniteSourceWhileTheAreaUnloads() {
+        Fluids.Liquids lake = uniformLake();
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        Pump pump = new Pump(PumpTier.FIRE);
+        pump.setFuelSupply(new Fluids.Logs(10));
+        LiquidTileSource tile = new LiquidTileSource(lake, 2, 2);
+        tile.judgeArea();
+        pump.setTileSource(tile);
+        grid.placePump(2, 2, pump);
+        grid.placePipe(2, 3, PipeLayer.BASE, MineralTier.COPPER);
+        grid.placeValve(2, 4, Fluids.valve(1000));
+        lake.unload(0, 0, 4, 1);
+        lake.unload(0, 2, 1, 4);
+        for (int i = 0; i < 5; i++) {
+            Check.equal(Status.PUMPED, Fluids.cycle(pump).getStatus(), "cycle " + i);
+        }
+        Check.equal(0, lake.consumed.size(), "still infinite (N20-7)");
+        Check.equal(Boolean.TRUE, tile.getJudgment());
     }
 
     public static void testDeepSeaGivesCrudeOil() {

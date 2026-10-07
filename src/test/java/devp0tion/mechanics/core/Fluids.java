@@ -152,10 +152,12 @@ final class Fluids {
      * s  seawater      f  freshwater     l  lava      o  crude oil (deep seawater)
      * .  land          u  not loaded
      * </pre>
-     * {@link #consume} turns a tile into land and records it.
+     * {@link #consume} turns a tile into land and records it. {@link #unload} and {@link #load}
+     * unload a tile and load it again with what it held (or what {@link #set} put there meanwhile).
      */
     static final class Liquids implements LiquidTileLookup {
         private final Map<Long, Character> tiles = new HashMap<>();
+        private final Set<Long> unloaded = new HashSet<>();
         final Set<Long> consumed = new HashSet<>();
         final java.util.List<long[]> order = new java.util.ArrayList<>();
 
@@ -172,13 +174,39 @@ final class Fluids {
             return c == null ? '.' : c;
         }
 
+        /** Changes a tile (loaded or not). */
+        void set(int x, int y, char c) {
+            tiles.put(PipeGrid.key(x, y), c);
+        }
+
+        /** Unloads the tiles of a rectangle (inclusive). */
+        void unload(int x0, int y0, int x1, int y1) {
+            for (int y = y0; y <= y1; y++) {
+                for (int x = x0; x <= x1; x++) {
+                    unloaded.add(PipeGrid.key(x, y));
+                }
+            }
+        }
+
+        /** Loads the tiles of a rectangle (inclusive) again. */
+        void load(int x0, int y0, int x1, int y1) {
+            for (int y = y0; y <= y1; y++) {
+                for (int x = x0; x <= x1; x++) {
+                    unloaded.remove(PipeGrid.key(x, y));
+                }
+            }
+        }
+
         @Override
         public boolean isLoaded(int tileX, int tileY) {
-            return at(tileX, tileY) != 'u';
+            return at(tileX, tileY) != 'u' && !unloaded.contains(PipeGrid.key(tileX, tileY));
         }
 
         @Override
         public FluidType getFluid(int tileX, int tileY) {
+            if (!isLoaded(tileX, tileY)) {
+                return null;
+            }
             switch (at(tileX, tileY)) {
                 case 's':
                     return FluidType.SEAWATER;

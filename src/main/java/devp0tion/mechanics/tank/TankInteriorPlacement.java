@@ -45,6 +45,14 @@ import java.util.Iterator;
  * refused object placement hook, floor tiles right here.
  * TODO(design): wires and logic gates are placed on their own layers (not object layers, not floor
  * tiles) and are not rejected.
+ *
+ * <p>Natural generation (N20-1, the same scope): objects the game places by itself are not placed
+ * inside a recognized tank either ({@link #checkNaturalObject}, {@code TankInteriorPatches.NaturalCanPlace}):
+ * grass and the other plants growing on their tiles, also in the world time simulation when a region
+ * loads, plants spreading (reeds, flowers and the like), snow piles and cobwebs. They all check
+ * {@code GameObject.canPlace(level, x, y, rotation, byPlayer = false)} before placing.
+ * TODO(design): natural floor tile changes (grass and snow tiles spreading onto dirt) change the
+ * floor, not an object layer; N20-1 names objects, so they are not blocked.
  */
 public final class TankInteriorPlacement {
 
@@ -107,14 +115,33 @@ public final class TankInteriorPlacement {
      * is inside a recognized tank and the object is not allowed there, else {@code null}.
      */
     public static String checkObject(Level level, GameObject object, int tileX, int tileY, int rotation) {
-        if (level == null || object == null || TankRegistry.getControllers(level).isEmpty()) {
+        return checkObject(level, object, tileX, tileY, rotation, false);
+    }
+
+    /**
+     * {@link #checkObject} for an object the game places by itself (natural generation, N20-1). On
+     * the server it also covers the recognized tanks whose controllers have not searched again since
+     * their region loaded ({@link TankRegionsLevelData#isRegisteredInterior}): the world time
+     * simulation of a region grows plants while the region loads.
+     */
+    public static String checkNaturalObject(Level level, GameObject object, int tileX, int tileY, int rotation) {
+        return checkObject(level, object, tileX, tileY, rotation, true);
+    }
+
+    private static String checkObject(Level level, GameObject object, int tileX, int tileY, int rotation, boolean natural) {
+        if (level == null || object == null) {
+            return null;
+        }
+        boolean registered = natural && TankRegionsLevelData.get(level, false) != null;
+        if (!registered && TankRegistry.getControllers(level).isEmpty()) {
             return null;
         }
         MultiTile multiTile = object.getMultiTile(rotation);
         Iterator<MultiTile.CoordinateValue<GameObject>> tiles = multiTile.streamObjects(tileX, tileY).iterator();
         while (tiles.hasNext()) {
             MultiTile.CoordinateValue<GameObject> tile = tiles.next();
-            if (!TankInteriorRule.isAllowed(placementOf(tile.value)) && isRecognizedInterior(level, tile.tileX, tile.tileY)) {
+            if (!TankInteriorRule.isAllowed(placementOf(tile.value)) && (isRecognizedInterior(level, tile.tileX, tile.tileY)
+                    || registered && TankRegionsLevelData.isRegisteredInterior(level, tile.tileX, tile.tileY))) {
                 return ERROR;
             }
         }

@@ -2,13 +2,15 @@ package devp0tion.mechanics.core;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * The liquid tile under a pump (11-1 ①), with the N19-3 rules (11-2 partly replaced):
+ * The liquid tile under a pump (11-1 ①), with the N19-3 rules (11-2 partly replaced) and the N20-7
+ * judgment:
  * <ol>
  *     <li>When the 5x5 area centred on the pump ({@link #AREA_RADIUS}) is entirely one fluid, the
  *     source is infinite.</li>
@@ -19,24 +21,45 @@ import java.util.Set;
  * The fluid of a tile comes from {@link LiquidTileLookup#getFluid} (deep seawater gives crude oil,
  * N17-5), so "the same liquid" means the same {@link FluidType}.
  *
+ * <h2>The 5x5 judgment (N20-7)</h2>
+ * <ul>
+ *     <li>The 5x5 check uses loaded cells only: the source is judged infinite when the pump's own
+ *     tile is liquid and every loaded cell of the area holds its fluid. Cells that are not loaded
+ *     are left out.</li>
+ *     <li>It is judged when the pump is placed ({@link #judgeArea}, the first time the pump
+ *     registers) and kept ({@link #getJudgment}, saved with the pump): the pump keeps working on it
+ *     while cells of the area are unloaded.</li>
+ *     <li>The loaded cells are watched for changes, once per pump cycle: a cell whose fluid changed
+ *     since it was last seen loaded makes the area judged again, the same way. A cell that unloads is
+ *     no longer watched; when it loads again it is watched from then on.</li>
+ *     <li>A source without a judgment (restored from a pump saved before the judgment was stored)
+ *     is judged at its first use, or when the game calls {@link #judgeArea}, with the cells loaded
+ *     then.</li>
+ * </ul>
+ * The connected-tile search of a finite source also uses loaded tiles only (N20-7).
+ *
  * <p>A used-up tile gives 10 units at once; what the pump does not take this cycle stays in this
  * source ({@link #getBuffered()}, saved by the game) and is used first next time.
- *
- * <p>While any tile of the 5x5 area is not loaded, the source gives nothing (the pump waits): a
- * region boundary must not make an infinite source look finite and eat tiles.
  * <p>"Connected" is 4-neighbour adjacency, "farthest" the number of steps from the pump tile; equal
  * distances go by larger tile y, then larger x (a deterministic order, not a design value).
  * <p>TODO(design): the search for connected tiles is limited to {@link #MAX_CONNECTED_TILES} loaded
  * tiles (the nearest ones), a technical bound so that a pump at the edge of a large body of liquid
  * does not search all of it; "the farthest" is the farthest of those.
- * <p>Within one pump cycle ({@link #beginCycle}) the area checks and the connected-tile search run
- * once and are reused; only {@link #extract} changes tiles in a cycle and it keeps them up to date,
- * with the same results as searching again (a technical optimization, the rules above unchanged).
+ * <p>Within one pump cycle ({@link #beginCycle}) the watch of the area and the connected-tile search
+ * run once and are reused; only {@link #extract} changes tiles in a cycle and it keeps them up to
+ * date, with the same results as searching again (a technical optimization, the rules above
+ * unchanged).
  */
 public final class LiquidTileSource implements FluidSource {
 
     /** The 5x5 area: two tiles around the pump (N19-3). */
     public static final int AREA_RADIUS = 2;
+
+    private static final int AREA_SIDE = 2 * AREA_RADIUS + 1;
+    /** A watched cell not seen loaded since it was last unloaded (or since the pump was loaded). */
+    private static final int UNSEEN = -2;
+    /** A watched cell seen loaded without liquid. */
+    private static final int NO_FLUID = -1;
 
     /** TODO(design): technical bound of the connected-tile search (see the class comment). */
     public static final int MAX_CONNECTED_TILES = 1024;
@@ -46,13 +69,19 @@ public final class LiquidTileSource implements FluidSource {
     private final int pumpY;
     private FluidType bufferedFluid;
     private int buffered;
+    /** The 5x5 judgment (N20-7): whether the source is infinite; {@code null} until judged. */
+    private Boolean infinite;
+    /**
+     * The fluid of each cell of the area as last seen loaded, row by row: {@link #UNSEEN},
+     * {@link #NO_FLUID} or the fluid's ordinal (not saved).
+     */
+    private final int[] watched = new int[AREA_SIDE * AREA_SIDE];
     /** What one pump cycle has computed so far, or {@code null} outside a cycle. */
     private CycleMemo memo;
 
     /** Results reused within one pump cycle. */
     private static final class CycleMemo {
-        Boolean areaLoaded;
-        Boolean infinite;
+        boolean areaWatched;
         List<long[]> connected;
         /** The connected-tile search stopped at {@link #MAX_CONNECTED_TILES} with tiles left. */
         boolean truncated;
@@ -62,6 +91,7 @@ public final class LiquidTileSource implements FluidSource {
         this.lookup = Objects.requireNonNull(lookup, "lookup");
         this.pumpX = pumpX;
         this.pumpY = pumpY;
+        Arrays.fill(watched, UNSEEN);
     }
 
     /** An infinite source of one fluid everywhere (a pump in open water; mostly for tests). */
@@ -106,12 +136,14 @@ public final class LiquidTileSource implements FluidSource {
     }
 
     /**
-     * Start of a pump cycle ({@link Pump}): until {@link #endCycle}, the area checks and the
-     * connected-tile search are computed once and reused. Nothing but this source's
-     * {@link #extract} may change the tiles in between.
+     * Start of a pump cycle ({@link Pump}): the loaded cells of the area are watched (N20-7), and
+     * until {@link #endCycle} the connected-tile search is computed once and reused. Nothing but this
+     * source's {@link #extract} may change the tiles in between.
      */
     void beginCycle() {
         memo = new CycleMemo();
+        watchArea();
+        memo.areaWatched = true;
     }
 
     /** End of the pump cycle: the next reads see the level as it is then. */
@@ -119,18 +151,80 @@ public final class LiquidTileSource implements FluidSource {
         memo = null;
     }
 
-    /** Whether every tile of the 5x5 area is loaded and holds the pump tile's fluid (N19-3 ①). */
+    /**
+     * The 5x5 judgment (N19-3 ①, N20-7): whether the source is infinite. Watches the loaded cells of
+     * the area first (once per cycle, {@link #beginCycle}) and judges again when one changed.
+     */
     public boolean isInfinite() {
-        if (memo != null && memo.infinite != null) {
-            return memo.infinite;
+        if (memo == null || !memo.areaWatched) {
+            watchArea();
+            if (memo != null) {
+                memo.areaWatched = true;
+            }
         }
-        boolean infinite = computeInfinite();
-        if (memo != null) {
-            memo.infinite = infinite;
+        return infinite != null && infinite;
+    }
+
+    /**
+     * Judges the area now from its loaded cells (N20-7): the pump was just placed. Nothing is judged
+     * while the pump's own tile is not loaded.
+     */
+    public void judgeArea() {
+        if (!lookup.isLoaded(pumpX, pumpY)) {
+            return;
         }
+        for (int i = 0; i < watched.length; i++) {
+            int x = pumpX - AREA_RADIUS + i % AREA_SIDE;
+            int y = pumpY - AREA_RADIUS + i / AREA_SIDE;
+            watched[i] = lookup.isLoaded(x, y) ? cellCode(lookup.getFluid(x, y)) : UNSEEN;
+        }
+        infinite = computeInfinite();
+    }
+
+    /** The stored judgment, for saving: {@code null} while not judged yet. */
+    public Boolean getJudgment() {
         return infinite;
     }
 
+    /**
+     * Restores a saved judgment (N20-7). The cells are watched from the next use on, as they are
+     * then; {@code null} (a pump saved before the judgment was stored) leaves it to be judged at the
+     * first use.
+     */
+    public void setJudgment(Boolean judgment) {
+        infinite = judgment;
+        Arrays.fill(watched, UNSEEN);
+    }
+
+    /**
+     * Compares the loaded cells with how they were last seen: a change, or no judgment yet, judges
+     * the area again. Cells that are not loaded are not watched until they load again.
+     */
+    private void watchArea() {
+        boolean changed = false;
+        for (int i = 0; i < watched.length; i++) {
+            int x = pumpX - AREA_RADIUS + i % AREA_SIDE;
+            int y = pumpY - AREA_RADIUS + i / AREA_SIDE;
+            if (!lookup.isLoaded(x, y)) {
+                watched[i] = UNSEEN;
+                continue;
+            }
+            int code = cellCode(lookup.getFluid(x, y));
+            if (watched[i] != UNSEEN && watched[i] != code) {
+                changed = true;
+            }
+            watched[i] = code;
+        }
+        if ((infinite == null || changed) && lookup.isLoaded(pumpX, pumpY)) {
+            infinite = computeInfinite();
+        }
+    }
+
+    private static int cellCode(FluidType fluid) {
+        return fluid == null ? NO_FLUID : fluid.ordinal();
+    }
+
+    /** The pump tile is liquid and every loaded cell of the area holds its fluid (N19-3 ①, N20-7). */
     private boolean computeInfinite() {
         FluidType center = lookup.getFluid(pumpX, pumpY);
         if (center == null) {
@@ -138,29 +232,7 @@ public final class LiquidTileSource implements FluidSource {
         }
         for (int y = pumpY - AREA_RADIUS; y <= pumpY + AREA_RADIUS; y++) {
             for (int x = pumpX - AREA_RADIUS; x <= pumpX + AREA_RADIUS; x++) {
-                if (!lookup.isLoaded(x, y) || lookup.getFluid(x, y) != center) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    private boolean isAreaLoaded() {
-        if (memo != null && memo.areaLoaded != null) {
-            return memo.areaLoaded;
-        }
-        boolean loaded = computeAreaLoaded();
-        if (memo != null) {
-            memo.areaLoaded = loaded;
-        }
-        return loaded;
-    }
-
-    private boolean computeAreaLoaded() {
-        for (int y = pumpY - AREA_RADIUS; y <= pumpY + AREA_RADIUS; y++) {
-            for (int x = pumpX - AREA_RADIUS; x <= pumpX + AREA_RADIUS; x++) {
-                if (!lookup.isLoaded(x, y)) {
+                if (lookup.isLoaded(x, y) && lookup.getFluid(x, y) != center) {
                     return false;
                 }
             }
@@ -173,7 +245,7 @@ public final class LiquidTileSource implements FluidSource {
         if (buffered > 0) {
             return bufferedFluid;
         }
-        return isAreaLoaded() ? lookup.getFluid(pumpX, pumpY) : null;
+        return lookup.getFluid(pumpX, pumpY);
     }
 
     @Override
@@ -189,7 +261,7 @@ public final class LiquidTileSource implements FluidSource {
     }
 
     private int tilesAvailable(FluidType type) {
-        if (!isAreaLoaded() || lookup.getFluid(pumpX, pumpY) != type) {
+        if (lookup.getFluid(pumpX, pumpY) != type) {
             return 0;
         }
         if (isInfinite()) {
@@ -213,7 +285,7 @@ public final class LiquidTileSource implements FluidSource {
             taken = Math.min(buffered, maxAmount);
             setBuffered(bufferedFluid, buffered - taken);
         }
-        if (taken == maxAmount || !isAreaLoaded() || lookup.getFluid(pumpX, pumpY) != type) {
+        if (taken == maxAmount || lookup.getFluid(pumpX, pumpY) != type) {
             return taken;
         }
         if (isInfinite()) {
@@ -254,7 +326,7 @@ public final class LiquidTileSource implements FluidSource {
     }
 
     /**
-     * The farthest tile was used up within a cycle. The area stays loaded and not infinite. When the
+     * The farthest tile was used up within a cycle. The source stays finite. When the
      * search had found every connected tile, the others keep their steps (each is reached through
      * nearer tiles only), so dropping the tile gives what a new search would; when the search was cut
      * off at {@link #MAX_CONNECTED_TILES}, a new search may reach further, so it runs again.

@@ -28,6 +28,7 @@ public final class CoreTestRunner {
             PipeNetworkTest.class,
             PumpPushTest.class,
             PumpSourceTest.class,
+            PumpBaselineTest.class,
             TileBucketsTest.class
     };
 

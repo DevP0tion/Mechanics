@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * A pump: the only thing that moves fluid (N7-1). It pulls from its sources and pushes through the
@@ -14,21 +15,27 @@ import java.util.Objects;
  * one cycle's amount. It only pulls what its destinations can take, so the storage is normally
  * empty between cycles.
  *
- * <h2>Sources (11-1, N16-3, N17-1~N17-3, N19-1, N19-3)</h2>
+ * <h2>Sources (11-1, N16-3, N17-1~N17-3, N19-1, N19-3, N20-3~N20-5)</h2>
  * The pump keeps its connected sources in the order they were connected ({@link #getSourceSlots()}):
  * the liquid tile under it ({@link LiquidTileSource}, registered when it is placed on liquid) and the
  * tanks of tank valves linked to its sides. It pulls from the first one that is not empty and moves
  * on to the next when that one is empty (N19-1). The connected sources hold the same fluid or are
  * empty when they are connected ({@link #canConnectSources}); a source that was empty when connected
- * and fills with another fluid later stays connected (N17-3), and the pump then pushes the fluid of
- * the first non-empty source, which never enters pipes holding another fluid.
+ * and fills with another fluid later stays connected (N17-3).
+ * <p>The pump pulls only the baseline fluid and sums only the sources holding it (N17-2, N20-3). The
+ * baseline is the fluid in the pipe cell the pump pushes into, its output cell
+ * ({@link PipeGrid#getOutputFluids}), read per cell and never from the network (N20-5). When the
+ * output cells are empty, the pump takes the sources in pull order (N19-1) and the first fluid that
+ * enters becomes the baseline. A source holding another fluid, or a fluid the pump's tier cannot move
+ * (12-6, N20-4), is dormant: it stays connected, nothing is pulled from it, and it never stops the
+ * pump, which pulls from the sources it can use.
  * A valve placed next to a pump later starts with its link cut, so the pump keeps its sources
  * (N13-3, N16-3); the wrench links and cuts valves ({@link PipeGrid#toggleSide}).
  *
  * <h2>One cycle</h2>
  * <ol>
- *     <li>The fluid is the one left in the pump, else the first non-empty source's. The tier must
- *     be allowed to move it (12-1, 12-5, 12-6), else nothing happens.</li>
+ *     <li>The fluid is the one left in the pump, else the baseline (N20-5). The tier must be allowed
+ *     to move it (12-1, 12-5, 12-6), else nothing happens.</li>
  *     <li>No destination, or every destination full: the pump stops and pulls nothing (N7-4).</li>
  *     <li>A log-fueled pump needs a lit log: a lit log burns for its whole timer (100 ticks) whether
  *     or not the pump moves anything (N18-4); a new log is only lit by a cycle that can run (the
@@ -255,18 +262,49 @@ public class Pump extends LiquidStorage {
         return source.getSourceFluid();
     }
 
-    /** The fluid of the cycle: what is left in the pump, else the first non-empty source's (N19-1). */
+    /**
+     * The fluid of the cycle: what is left in the pump, else the baseline (N20-5): the fluid in the
+     * output cells, or, while they are empty, the first source in pull order (N19-1) that is not
+     * empty and holds a fluid the tier can move (N20-4). Sources of any other fluid are dormant
+     * (N20-3). {@code null} when no source can give anything.
+     * <p>TODO(design): fluid left in the pump goes first even when the output cells hold another
+     * fluid (it then has nowhere to go); N20-5 does not cover fluid left in the pump.
+     */
     private FluidType cycleFluid() {
         if (getFluid() != null) {
             return getFluid();
         }
+        Set<FluidType> outputs = grid.getOutputFluids(this);
+        if (outputs.size() == 1) {
+            return outputs.iterator().next();
+        }
+        // Empty output cells: the first fluid that enters becomes the baseline (N20-5).
+        // TODO(design): output cells holding different fluids (pipes on several sides of the pump):
+        // N20-5 does not say which is the baseline. The pump chooses as with empty output cells, and
+        // the fluid only enters the output cells that are empty or hold it (as before N20-5).
+        return firstMovableSourceFluid();
+    }
+
+    /** The fluid of the first non-empty source the tier can move, in pull order (N19-1, N20-4). */
+    private FluidType firstMovableSourceFluid() {
         for (FluidSource source : getSources()) {
             FluidType fluid = source.getSourceFluid();
-            if (fluid != null && source.getAvailable(fluid) > 0) {
+            if (fluid != null && tier.canPump(fluid) && source.getAvailable(fluid) > 0) {
                 return fluid;
             }
         }
         return null;
+    }
+
+    /** Whether any source has something to give, also a fluid the tier cannot move. */
+    private boolean anySourceHasFluid() {
+        for (FluidSource source : getSources()) {
+            FluidType fluid = source.getSourceFluid();
+            if (fluid != null && source.getAvailable(fluid) > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private long available(FluidType fluid) {
@@ -445,9 +483,11 @@ public class Pump extends LiquidStorage {
     private PumpResult runCycleSteps() {
         FluidType fluid = cycleFluid();
         if (fluid == null) {
-            return PumpResult.NO_SOURCE;
+            // Nothing to pull: every source is empty, or holds a fluid the tier cannot move (N20-4).
+            return anySourceHasFluid() ? PumpResult.FLUID_NOT_ALLOWED : PumpResult.NO_SOURCE;
         }
         if (!tier.canPump(fluid)) {
+            // The output cells hold a fluid the tier cannot move: every source is dormant (N20-4, N20-5).
             return PumpResult.FLUID_NOT_ALLOWED;
         }
         PipeGrid.PushPlan plan = grid.planPush(this, fluid);
