@@ -6,6 +6,8 @@ import necesse.entity.mobs.PlayerMob;
 import necesse.inventory.InventoryItem;
 import necesse.inventory.item.placeableItem.objectItem.ObjectItem;
 import necesse.level.gameObject.GameObject;
+import necesse.level.gameTile.DirtTile;
+import necesse.level.gameTile.GameTile;
 import necesse.level.gameObject.ObjectPlaceOption;
 import necesse.level.maps.Level;
 import net.bytebuddy.asm.Advice;
@@ -28,6 +30,13 @@ import java.awt.geom.Line2D;
  * {@code byPlayer = false} first; that check gets the interior check too, against the tanks of the
  * loaded controllers ({@link TankInteriorPlacement#checkNaturalObject}). What grows while no
  * controller of a tank is loaded is broken when the controller judges its tank (N23-4).
+ *
+ * <p>Natural floor changes (N29-4): a grass tile spreads onto dirt only when its
+ * {@code GameTile.canPlace(Level, int, int, boolean)} with {@code byPlayer = false} allows it, on a
+ * dirt tile's tick ({@code DirtTile.tick}) and in the world time simulation
+ * ({@code DirtTile.addSimulateLogic}); that check is refused inside a recognized tank
+ * ({@link FloorSpreadCanPlace}). The dirt tile's tick also turns it to snow without a check: the
+ * tick is skipped there ({@link DirtTileTick}).
  */
 public final class TankInteriorPatches {
 
@@ -68,6 +77,42 @@ public final class TankInteriorPatches {
             if (error == null && !byPlayer) {
                 error = TankInteriorPlacement.checkNaturalObject(level, object, tileX, tileY, rotation);
             }
+        }
+
+    }
+
+    /**
+     * {@code GameTile.canPlace(level, tileX, tileY, byPlayer)}: with {@code byPlayer} false, a floor
+     * tile the game places by itself. For the tiles that spread onto dirt (grass tiles,
+     * {@code spreadToDirtChance() > 0}) it is refused inside a recognized tank (N29-4).
+     */
+    @ModMethodPatch(target = GameTile.class, name = "canPlace",
+            arguments = {Level.class, int.class, int.class, boolean.class})
+    public static class FloorSpreadCanPlace {
+
+        @Advice.OnMethodExit
+        static void onExit(@Advice.This GameTile tile, @Advice.Argument(0) Level level,
+                           @Advice.Argument(1) int tileX, @Advice.Argument(2) int tileY,
+                           @Advice.Argument(3) boolean byPlayer, @Advice.Return(readOnly = false) String error) {
+            if (error == null && !byPlayer && tile.spreadToDirtChance() > 0
+                    && TankInteriorPlacement.blocksFloorSpread(level, tileX, tileY)) {
+                error = TankInteriorPlacement.ERROR;
+            }
+        }
+
+    }
+
+    /**
+     * {@code DirtTile.tick(level, x, y)}: a dirt tile turns to snow or takes grass from a neighbour.
+     * Skipped inside a recognized tank (N29-4).
+     */
+    @ModMethodPatch(target = DirtTile.class, name = "tick", arguments = {Level.class, int.class, int.class})
+    public static class DirtTileTick {
+
+        @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+        static boolean onEnter(@Advice.Argument(0) Level level, @Advice.Argument(1) int tileX,
+                               @Advice.Argument(2) int tileY) {
+            return level != null && level.isServer() && TankInteriorPlacement.blocksFloorSpread(level, tileX, tileY);
         }
 
     }

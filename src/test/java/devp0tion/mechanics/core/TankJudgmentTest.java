@@ -91,9 +91,9 @@ final class TankJudgmentTest {
         Check.equal(TankValidation.InteriorCondition.ALL_GLASS, glass.getInteriorCondition());
     }
 
-    public static void testLoadedOnlyLowestTierComesFromLoadedCells() {
-        // TODO(design) in TankStructure.validateLoaded: the unloaded copper wall does not lower the
-        // multiplier while it is not loaded.
+    public static void testUnloadedBorderCellsCountWithTheJudgedTier() {
+        // N29-1: the unloaded copper wall (x = 4) counts with the tier of the last judgment; the lower
+        // of it and the loaded cells' wins, so the capacity stays as judged with every cell loaded.
         Grid grid = Grid.of(
                 "55V55",
                 "C...#",
@@ -102,8 +102,18 @@ final class TankJudgmentTest {
                 .set(2, 0, TankCell.valve(MineralTier.values()[5], CONTROLLER))
                 .set(2, 2, TankCell.valve(MineralTier.values()[5], CONTROLLER));
         int multiplier = MineralTier.values()[5].getCapacityMultiplier();
-        Check.equal(3 * 40 * multiplier, TankStructure.validateLoaded(TANK, new Partial(grid, 4), CONTROLLER).getCapacity());
-        Check.equal(3 * 40 * MineralTier.COPPER.getCapacityMultiplier(), TankStructure.validate(TANK, grid, CONTROLLER).getCapacity());
+        int copper = 3 * 40 * MineralTier.COPPER.getCapacityMultiplier();
+        Check.equal(copper, TankStructure.validate(TANK, grid, CONTROLLER).getCapacity(), "every cell loaded");
+        Check.equal(3 * 40 * multiplier, TankStructure.validateLoaded(TANK, new Partial(grid, 4), CONTROLLER).getCapacity(),
+                "without a judged tier: loaded cells only");
+        Check.equal(copper, TankStructure.validateLoaded(TANK, new Partial(grid, 4), CONTROLLER, MineralTier.COPPER).getCapacity(),
+                "the judged tier for the unloaded wall: as with every cell loaded");
+        Check.equal(3 * 40 * multiplier, TankStructure.validateLoaded(TANK, new Partial(grid, 4), CONTROLLER,
+                MineralTier.highest()).getCapacity(), "a higher judged tier: the loaded cells' lower one wins");
+        TankJudgment.Result change = TankJudgment.judge(0, 1, new Partial(grid, 4), Mode.CHANGE, Prior.ACTIVE, MineralTier.COPPER);
+        Check.equal(Kind.KEPT_VALID, change.getKind());
+        Check.equal(copper, change.getTank().getCapacity(), "the judgment uses it (N29-1)");
+        Check.equal(MineralTier.COPPER, change.getTank().getLowestTier());
     }
 
     public static void testLoadedOnlyKeepsTheOtherRules() {
@@ -156,6 +166,84 @@ final class TankJudgmentTest {
         Check.equal(Kind.SEARCHED, result.getKind());
         Check.equal(TANK, result.getTank().getBounds());
         Check.isTrue(result.isSettled(), "settled");
+    }
+
+    // ---------- A search while cells are not loaded (N29-2) ----------
+
+    /** {@link #tank} with a controller that keeps no tank yet. */
+    private static Grid newTank() {
+        return tank("...").set(0, 1, TankCell.controller()).set(2, 0, TankCell.valve(MineralTier.COPPER))
+                .set(2, 2, TankCell.valve(MineralTier.COPPER));
+    }
+
+    public static void testAFullyLoadedRectangleIsRecognizedAtOnce() {
+        // The search area reaches x = 6, which is not loaded; the tank (x 0..4) is all loaded.
+        TankJudgment.Result result = TankJudgment.judge(0, 1, new Partial(newTank(), 6), Mode.CHANGE, Prior.INACTIVE);
+        Check.equal(Kind.FOUND_LOADED, result.getKind());
+        Check.equal(TANK, result.getTank().getBounds());
+        Check.isTrue(result.appliesJudgment(), "recognized now");
+    }
+
+    public static void testARectangleTouchingUnloadedCellsWaitsForThem() {
+        // x >= 4 not loaded: the tank's east wall is not loaded, so it is not recognized yet.
+        TankJudgment.Result waiting = TankJudgment.judge(0, 1, new Partial(newTank(), 4), Mode.CHANGE, Prior.INACTIVE);
+        Check.equal(Kind.WAITING, waiting.getKind());
+        Check.isFalse(waiting.isSettled(), "tried again when cells load");
+        TankJudgment.Result loaded = TankJudgment.judge(0, 1, new Partial(newTank(), 5), Mode.SEARCH, Prior.INACTIVE);
+        Check.equal(Kind.FOUND_LOADED, loaded.getKind(), "its cells loaded");
+    }
+
+    public static void testAnInvalidKeptTankLooksForAFullyLoadedOne() {
+        // The controller keeps a 7x3 rectangle that is no tank (its loaded cells at x = 5 are empty);
+        // the 5x3 tank (x 0..4) is all loaded: recognized now, though x >= 6 is not loaded.
+        Grid grid = tank("...").set(0, 1, TankCell.controller(new TankBounds(0, 0, 7, 3)));
+        TankJudgment.Result result = TankJudgment.judge(0, 1, new Partial(grid, 6), Mode.CHANGE, Prior.ACTIVE);
+        Check.equal(Kind.FOUND_LOADED, result.getKind());
+        Check.equal(TANK, result.getTank().getBounds());
+    }
+
+    // ---------- Two tanks at once (N29-8) ----------
+
+    /** Two 5x3 tanks sharing the wall x = 4 with a valve (4, 1) that belongs to no tank. */
+    private static Grid twoTanks() {
+        return Grid.of(
+                "#########",
+                "C...V...C",
+                "#########");
+    }
+
+    public static void testTwoTanksSharingAFreeValveAreNeitherRecognized() {
+        Grid grid = twoTanks();
+        TankJudgment.Result left = TankJudgment.judge(0, 1, grid, Mode.CHANGE, Prior.INACTIVE);
+        TankJudgment.Result right = TankJudgment.judge(8, 1, grid, Mode.CHANGE, Prior.INACTIVE);
+        Check.equal(Kind.CONTESTED, left.getKind(), "left");
+        Check.equal(Kind.CONTESTED, right.getKind(), "right: the same, whichever judges first");
+        Check.isNull(left.getTank(), "no tank");
+        Check.isTrue(left.isSettled() && right.isSettled(), "nothing waits: a player's change judges again");
+        // The valve moved off the shared wall (a change): both are tanks again (shared walls, N8-1).
+        Grid moved = twoTanks().set(4, 1, TankCell.mineralWall(MineralTier.COPPER)).set(2, 0, TankCell.valve(MineralTier.COPPER));
+        Check.isTrue(TankStructure.validate(new TankBounds(0, 0, 5, 3), moved).isValid(), "sanity");
+        Check.equal(Kind.SEARCHED, TankJudgment.judge(0, 1, moved, Mode.CHANGE, Prior.INACTIVE).getKind());
+        Check.isTrue(TankJudgment.judge(0, 1, moved, Mode.CHANGE, Prior.INACTIVE).getTank() != null, "left recognized");
+        Check.isTrue(TankJudgment.judge(8, 1, moved, Mode.CHANGE, Prior.INACTIVE).getTank() != null, "right recognized");
+    }
+
+    public static void testAnOwnedValveKeepsItsTank() {
+        // The valve already belongs to the left tank (N13-3): left keeps it, right has a foreign valve (N15-3).
+        Grid grid = twoTanks().set(0, 1, TankCell.controller(new TankBounds(0, 0, 5, 3)))
+                .set(4, 1, TankCell.valve(MineralTier.COPPER, new GridPos(0, 1)));
+        TankJudgment.Result left = TankJudgment.judge(0, 1, grid, Mode.CHANGE, Prior.ACTIVE);
+        Check.equal(Kind.SEARCHED, left.getKind());
+        Check.equal(new TankBounds(0, 0, 5, 3), left.getTank().getBounds());
+        Check.isNull(TankJudgment.judge(8, 1, grid, Mode.CHANGE, Prior.INACTIVE).getTank(), "right: foreign valve");
+    }
+
+    public static void testACompetitorTouchingUnloadedCellsDoesNotCount() {
+        // The right tank's east part (x >= 6) is not loaded: it cannot be judged valid, so the left
+        // tank is recognized (TODO(confirm) in TankJudgment for a dormant controller).
+        TankJudgment.Result left = TankJudgment.judge(0, 1, new Partial(twoTanks(), 6), Mode.CHANGE, Prior.INACTIVE);
+        Check.equal(Kind.FOUND_LOADED, left.getKind());
+        Check.equal(new TankBounds(0, 0, 5, 3), left.getTank().getBounds());
     }
 
     // ---------- Changes: loaded cells only (N20-7, N21-3) ----------

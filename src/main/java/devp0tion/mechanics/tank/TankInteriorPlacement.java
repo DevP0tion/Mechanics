@@ -45,8 +45,8 @@ import java.util.Iterator;
  * A placement the server refuses here but the client already made (its view of the recognized
  * tanks can lag) is corrected on that client ({@link PlacementCorrection}): objects through the
  * refused object placement hook, floor tiles right here.
- * TODO(design): wires and logic gates are placed on their own layers (not object layers, not floor
- * tiles) and are not rejected.
+ * Wires and logic gates are placed on their own layers (not object layers, not floor tiles) and are
+ * allowed inside a recognized tank (N29-7).
  *
  * <p>Natural generation (N20-1, the same scope): objects the game places by itself are not placed
  * inside a recognized tank either ({@link #checkNaturalObject}, {@code TankInteriorPatches.NaturalCanPlace}):
@@ -56,12 +56,18 @@ import java.util.Iterator;
  * those of the loaded controllers, as each judged it last (a loaded controller starts with its saved
  * judgment, N22-7); there is no index of tank ranges (N23-4). What grows while no controller of the
  * tank is loaded, for example in a region that loads before the controller's, is broken when the
- * controller judges its active tank ({@link #breakNaturalGrowth}, N23-4, N26-3).
- * TODO(design): natural floor tile changes (grass and snow tiles spreading onto dirt) change the
- * floor, not an object layer; N20-1 names objects, so they are not blocked.
- * TODO(design): while a tank is dormant (its controller not loaded, N21-2), nothing is rejected in
- * the loaded part of its interior, placements by players included; a player's object there makes
- * the tank invalid at its next judgment.
+ * controller judges its active tank ({@link #breakNaturalGrowth}, N23-4, N26-3, N29-5).
+ *
+ * <p>Natural floor tile changes (N29-4, the same scope as N20-1): grass tiles spreading onto dirt
+ * and dirt turning to snow do not happen inside a recognized tank's interior
+ * ({@link #blocksFloorSpread}, {@code TankInteriorPatches.FloorSpreadCanPlace} for the grass
+ * tiles' spread check, {@code TankInteriorPatches.DirtTileTick} for the dirt tile's tick, which
+ * also turns it to snow; the world time simulation of a loading region uses the same spread check).
+ * TODO(confirm): floor tiles that already spread there are left as they are, not reverted.
+ *
+ * <p>While a tank is dormant (its controller not loaded, N21-2), nothing is rejected or blocked in the
+ * loaded part of its interior, placements by players included; a player's object there makes the
+ * tank invalid at its next judgment (N29-3).
  */
 public final class TankInteriorPlacement {
 
@@ -149,19 +155,25 @@ public final class TankInteriorPlacement {
     }
 
     /**
-     * Whether the base layer object on the tile is natural growth the game placed by itself (N20-1,
-     * N23-4): an object of the grass kind (grass and the other plants that grow and spread on their
-     * own, reeds, cobwebs, snow piles; the game's own grass flag) not placed by a player.
-     * TODO(design): the game does not record how an object came there, so this is what the judgment
-     * breaks inside an active tank whether it grew in a region's world time simulation or on a tile
-     * tick while no controller of the tank was loaded. Flower patches spreading from planted ones
-     * are marked as placed by a player by the game, and objects of other mods that grow by
-     * themselves without the grass flag are not covered: they still make the tank invalid.
+     * Whether the base layer object on the tile is what the judgment of an active tank breaks
+     * (N20-1, N23-4, N29-5): every object of the grass kind (grass and the other plants that grow and
+     * spread on their own, reeds, flowers, cobwebs, snow piles; the game's own grass flag), placed by
+     * a player or not. So flowers spreading from planted flower patches and plants a player placed
+     * while the tank was dormant are broken too. Objects of other mods that grow by themselves
+     * without the grass flag are not covered: they still make the tank invalid.
      */
     public static boolean isNaturalGrowth(Level level, int tileX, int tileY) {
         GameObject object = level.getObject(ObjectLayerRegistry.BASE_LAYER, tileX, tileY);
-        return object != null && object.getID() != 0 && object.isGrass
-                && !level.objectLayer.isPlayerPlaced(ObjectLayerRegistry.BASE_LAYER, tileX, tileY);
+        return object != null && object.getID() != 0 && object.isGrass;
+    }
+
+    /**
+     * N29-4: whether a natural floor change (a grass tile spreading onto dirt, dirt turning to snow)
+     * is blocked on the tile: it is inside a recognized tank's interior, the tanks of the loaded
+     * controllers as each judged it last (the scope of N20-1). Not while a tank is dormant (N29-3).
+     */
+    public static boolean blocksFloorSpread(Level level, int tileX, int tileY) {
+        return level != null && !TankRegistry.getControllers(level).isEmpty() && isRecognizedInterior(level, tileX, tileY);
     }
 
     /**

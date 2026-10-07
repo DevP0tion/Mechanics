@@ -4,6 +4,7 @@ import devp0tion.mechanics.client.TankFluidRendering;
 import devp0tion.mechanics.core.FluidType;
 import devp0tion.mechanics.core.GridPos;
 import devp0tion.mechanics.core.TankBounds;
+import devp0tion.mechanics.core.MineralTier;
 import devp0tion.mechanics.core.TankJudgment;
 import devp0tion.mechanics.core.TankStatusText;
 import devp0tion.mechanics.core.TankStorage;
@@ -31,13 +32,16 @@ import java.util.Objects;
  *     while that rectangle is valid, even when a later change also puts it in another tank's border,
  *     and it remembers that tank while it is invalid. The valves of its tank become its own
  *     ({@link TankValveObjectEntity#getOwner()}). The kept tank is saved and synced to clients.</li>
- *     <li>Its judgment is saved: the kept tank (the range), whether it is active and its capacity
- *     (N20-7, N22-7). A controller loaded while part of its tank is not loaded keeps the saved
- *     judgment, so an active tank works from the moment the controller loads; a change in a loaded
- *     cell judges the tank again with the loaded cells only (N21-3). The regions a tank spans are not
- *     kept loaded together (N20-8).</li>
+ *     <li>Its judgment is saved: the kept tank (the range), whether it is active, its capacity and
+ *     its lowest tier (N20-7, N22-7, N29-1). A controller loaded while part of its tank is not loaded
+ *     keeps the saved judgment, so an active tank works from the moment the controller loads; a
+ *     change in a loaded cell judges the tank again with the loaded cells only (N21-3), the unloaded
+ *     border cells counting with the saved lowest tier (N29-1). The regions a tank spans are not kept
+ *     loaded together (N20-8). With no valid kept tank, a rectangle with all its cells loaded is
+ *     recognized at once; one touching unloaded cells is tried again when cells of the search area
+ *     load (N29-2).</li>
  *     <li>Natural growth found inside its active tank when it judges the tank is broken without
- *     drops ({@link TankInteriorPlacement#breakNaturalGrowth}, N23-4, N26-3).</li>
+ *     drops ({@link TankInteriorPlacement#breakNaturalGrowth}, N23-4, N26-3, N29-5).</li>
  *     <li>One fluid type and amount, saved with the world ({@link TankStorage}, 12-7). A broken
  *     wall deactivates the tank and keeps the fluid (5-9); a rebuilt tank smaller than the stored
  *     amount loses the excess (N11-2); breaking the controller loses the fluid with this entity
@@ -71,8 +75,14 @@ public class TankControllerObjectEntity extends ObjectEntity {
     private boolean structureChanged = true;
     /** The next judgment is the first one after loading with a saved judgment (N22-7). */
     private boolean justLoaded;
-    /** A search waits for the whole search area to load (tried every tick). */
+    /** A search waits for cells to load (tried again when cells of the search area load, N29-2). */
     private boolean searchWaiting;
+    /** The search area's loaded tiles at the last judgment (technical, {@link TankStructure#loadedSignature}). */
+    private long searchSignature;
+    /** The lowest tier of the last valid judgment (N29-1): saved, and used while border cells are unloaded. */
+    private MineralTier judgedTier;
+    /** The last judgment found its tank contested by another controller's (N29-8, {@link #isContested}). */
+    private boolean contested;
     /** The region is unloading: nothing about the tank changes for the others (N21-2). */
     private boolean unloading;
     private int ticksSinceViewSync = AMOUNT_SYNC_TICKS;
@@ -147,17 +157,28 @@ public class TankControllerObjectEntity extends ObjectEntity {
         super.serverTick();
         if (structureChanged) {
             judge(justLoaded ? TankJudgment.Mode.LOAD : TankJudgment.Mode.CHANGE);
-        } else if (searchWaiting) {
+        } else if (searchWaiting
+                && TankStructure.loadedSignature(tileX, tileY, new LevelTankCellLookup(getLevel())) != searchSignature) {
             judge(TankJudgment.Mode.SEARCH);
         }
         updateView();
+    }
+
+    /**
+     * Whether the last judgment left the controller without a tank because another controller's
+     * tank contests a valve (N29-8): it judges again after a change within reach of that tank too
+     * ({@link TankRegistry#onTileChanged}).
+     */
+    boolean isContested() {
+        return contested;
     }
 
     /** Judges the tank ({@link TankJudgment}) and applies the result. */
     private void judge(TankJudgment.Mode mode) {
         Level level = getLevel();
         TankJudgment.Prior prior = storage.isActive() ? TankJudgment.Prior.ACTIVE : TankJudgment.Prior.INACTIVE;
-        TankJudgment.Result result = TankJudgment.judge(tileX, tileY, new LevelTankCellLookup(level), mode, prior);
+        LevelTankCellLookup lookup = new LevelTankCellLookup(level);
+        TankJudgment.Result result = TankJudgment.judge(tileX, tileY, lookup, mode, prior, judgedTier);
         // The judgment sees the natural growth as broken already (N23-4). Breaking it is a change
         // within reach: the controllers nearby judge again.
         for (GridPos cell : result.getNaturalGrowth()) {
@@ -165,7 +186,11 @@ public class TankControllerObjectEntity extends ObjectEntity {
         }
         structureChanged = false;
         justLoaded = false;
+        contested = result.getKind() == TankJudgment.Kind.CONTESTED;
         searchWaiting = !result.isSettled();
+        if (searchWaiting) {
+            searchSignature = TankStructure.loadedSignature(tileX, tileY, lookup);
+        }
         if (!result.appliesJudgment()) {
             return;
         }
@@ -173,6 +198,7 @@ public class TankControllerObjectEntity extends ObjectEntity {
         // A valid smaller tank loses the excess at once, an invalid one keeps everything (N13-4).
         storage.applyStructure(tank);
         if (tank != null) {
+            judgedTier = tank.getLowestTier();
             setKeptTank(tank.getBounds());
             claimValves(tank);
         }
@@ -249,6 +275,9 @@ public class TankControllerObjectEntity extends ObjectEntity {
         // The judgment (N20-7, N22-7): the range above, the active state and the capacity.
         save.addBoolean("active", storage.isActive());
         save.addInt("capacity", storage.getCapacity());
+        if (judgedTier != null) {
+            save.addEnum("tier", judgedTier);
+        }
     }
 
     @Override
@@ -267,6 +296,7 @@ public class TankControllerObjectEntity extends ObjectEntity {
         // save without one (older formats are not read, N28-19) starts as a new controller: inactive,
         // judged as after a change.
         boolean judged = save.hasLoadDataByName("active");
+        judgedTier = save.getEnum(MineralTier.class, "tier", null, false);
         if (judged) {
             storage.restoreJudgment(kept != null && save.getBoolean("active", false, false),
                     Math.max(0, save.getInt("capacity", 0, false)));

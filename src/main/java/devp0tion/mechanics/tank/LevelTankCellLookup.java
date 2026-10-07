@@ -32,8 +32,8 @@ import necesse.level.maps.Level;
  *     <li>For the interior checks (N15-4): whether any other object layer holds something (wall and
  *     table decorations, carpets, every other registered layer) except the underground pipe layer
  *     ({@link #countsForInterior}), and whether the floor is a liquid tile.</li>
- *     <li>Natural growth (N20-1, N23-4): whether the base layer object is natural growth the game
- *     placed by itself ({@link TankInteriorPlacement#isNaturalGrowth}).</li>
+ *     <li>Natural growth (N20-1, N23-4, N29-5): whether the base layer object is of the game's grass
+ *     kind, placed by a player or not ({@link TankInteriorPlacement#isNaturalGrowth}).</li>
  *     <li>Tiles outside the level or in a region that is not loaded read as {@code null} (something
  *     else). {@link #isLoaded} tells the tiles that are not loaded apart, for the judgments that
  *     leave them out (N20-7, {@code TankJudgment}); tiles outside the level count as loaded.</li>

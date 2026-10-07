@@ -127,18 +127,31 @@ public final class TankStructure {
      * pump's 5x5 judgment leaves them out. A border cell left out breaks no border rule and adds no
      * tier, controller or valve; an interior cell left out breaks no interior rule, and the interior
      * conditions (5-5) hold when every loaded interior cell meets them. The capacity counts every
-     * interior cell of the rectangle.
-     * <p>TODO(design): while border cells are not loaded, the lowest tier (the capacity multiplier,
-     * N13-5) is taken from the loaded border cells only, so the capacity can differ from the whole
-     * tank's until it is judged with every cell loaded; a lower capacity then loses the excess
-     * (N11-2).
+     * interior cell of the rectangle. The lowest tier (the capacity multiplier, N13-5) comes from the
+     * loaded border cells only; see the overload with the judged tier (N29-1).
      */
     public static TankValidation validateLoaded(TankBounds bounds, TankCellLookup lookup, GridPos controller) {
-        return validate(bounds, lookup, controller, true);
+        return validateLoaded(bounds, lookup, controller, null);
+    }
+
+    /**
+     * {@link #validateLoaded(TankBounds, TankCellLookup, GridPos)} for a tank judged before (N29-1):
+     * while border cells are not loaded, they count with {@code judgedTier}, the lowest tier of the
+     * controller's last judgment, and the lower of it and the loaded cells' tiers wins. So the
+     * capacity does not change just because more cells load later. {@code null}: loaded cells only.
+     */
+    public static TankValidation validateLoaded(TankBounds bounds, TankCellLookup lookup, GridPos controller,
+                                                MineralTier judgedTier) {
+        return validate(bounds, lookup, controller, true, judgedTier);
     }
 
     private static TankValidation validate(TankBounds bounds, TankCellLookup lookup, GridPos controller,
                                            boolean loadedOnly) {
+        return validate(bounds, lookup, controller, loadedOnly, null);
+    }
+
+    private static TankValidation validate(TankBounds bounds, TankCellLookup lookup, GridPos controller,
+                                           boolean loadedOnly, MineralTier judgedTier) {
         int interiorWidth = bounds.getInteriorWidth();
         int interiorHeight = bounds.getInteriorHeight();
         if (interiorWidth < MIN_INTERIOR_SIZE || interiorHeight < MIN_INTERIOR_SIZE) {
@@ -158,7 +171,14 @@ public final class TankStructure {
         MineralTier lowest = null;
         for (int tileY = bounds.y; tileY <= bounds.getMaxY(); tileY++) {
             for (int tileX = bounds.x; tileX <= bounds.getMaxX(); tileX++) {
-                if (!bounds.isOnBorder(tileX, tileY) || loadedOnly && !lookup.isLoaded(tileX, tileY)) {
+                if (!bounds.isOnBorder(tileX, tileY)) {
+                    continue;
+                }
+                if (loadedOnly && !lookup.isLoaded(tileX, tileY)) {
+                    // N29-1: an unloaded border cell counts with the judged tier.
+                    if (judgedTier != null) {
+                        lowest = lowerOf(lowest, judgedTier);
+                    }
                     continue;
                 }
                 TankCell cell = lookup.getCell(tileX, tileY);
@@ -292,6 +312,20 @@ public final class TankStructure {
     }
 
     /**
+     * A value that changes when a tile of the search area around ({@code tileX}, {@code tileY}) loads
+     * or unloads (technical: a waiting search is tried again only then, N29-2).
+     */
+    public static long loadedSignature(int tileX, int tileY, TankCellLookup lookup) {
+        long signature = 1;
+        for (int y = tileY - REACH; y <= tileY + REACH; y++) {
+            for (int x = tileX - REACH; x <= tileX + REACH; x++) {
+                signature = signature * 31 + (lookup.isLoaded(x, y) ? 1 : 0);
+            }
+        }
+        return signature;
+    }
+
+    /**
      * Whether every tile a tank search around ({@code tileX}, {@code tileY}) can read is loaded: the
      * square of {@link #REACH} tiles around it ({@link #findTank}).
      */
@@ -350,6 +384,20 @@ public final class TankStructure {
      * </ol>
      */
     public static TankSearchResult findTank(int controllerX, int controllerY, TankCellLookup lookup) {
+        return findTank(controllerX, controllerY, lookup, false);
+    }
+
+    /**
+     * {@link #findTank} over the rectangles whose border and interior are all loaded (N29-2): one of
+     * them is recognized at once, while the search area is not all loaded. The rectangles touching a
+     * cell that is not loaded are left out until it loads
+     * ({@link TankSearchResult#hasUnloadedCandidates}); so is the kept tank.
+     */
+    public static TankSearchResult findLoadedTank(int controllerX, int controllerY, TankCellLookup lookup) {
+        return findTank(controllerX, controllerY, lookup, true);
+    }
+
+    private static TankSearchResult findTank(int controllerX, int controllerY, TankCellLookup lookup, boolean loadedOnly) {
         CachedLookup cached = new CachedLookup(controllerX, controllerY, REACH, lookup);
         TankCell start = cached.getCell(controllerX, controllerY);
         if (start == null || start.getKind() != CellKind.CONTROLLER) {
@@ -357,7 +405,7 @@ public final class TankStructure {
         }
         GridPos controller = new GridPos(controllerX, controllerY);
         TankBounds kept = start.getKeptTank();
-        if (kept != null && kept.isOnBorder(controllerX, controllerY)) {
+        if (kept != null && kept.isOnBorder(controllerX, controllerY) && (!loadedOnly || isLoaded(kept, cached))) {
             TankValidation keptTank = validate(kept, cached, controller);
             if (keptTank.isValid()) {
                 List<TankValidation> found = new ArrayList<>();
@@ -365,7 +413,8 @@ public final class TankStructure {
                 return new TankSearchResult(TankSearchResult.Status.FOUND, found);
             }
         }
-        List<TankValidation> found = search(controllerX, controllerY, cached, controller);
+        int[] unloaded = new int[1];
+        List<TankValidation> found = search(controllerX, controllerY, cached, controller, loadedOnly, unloaded);
         TankSearchResult.Status status;
         if (found.isEmpty()) {
             status = TankSearchResult.Status.NOT_FOUND;
@@ -374,7 +423,7 @@ public final class TankStructure {
         } else {
             status = TankSearchResult.Status.CONTROLLER_IN_SHARED_WALL;
         }
-        return new TankSearchResult(status, found);
+        return new TankSearchResult(status, found, unloaded[0] > 0);
     }
 
     /**
@@ -402,8 +451,12 @@ public final class TankStructure {
         return found;
     }
 
-    /** Every rectangle with the tile on its border that is valid for {@code controller}. */
-    private static List<TankValidation> search(int tileX, int tileY, TankCellLookup lookup, GridPos controller) {
+    /**
+     * Every rectangle with the tile on its border that is valid for {@code controller}; with
+     * {@code loadedOnly}, the rectangles that are all loaded, counting the others in {@code unloaded[0]}.
+     */
+    private static List<TankValidation> search(int tileX, int tileY, TankCellLookup lookup, GridPos controller,
+                                               boolean loadedOnly, int[] unloaded) {
         List<TankValidation> found = new ArrayList<>();
         for (int outerHeight = MIN_OUTER_SIZE; outerHeight <= MAX_OUTER_SIZE; outerHeight++) {
             for (int outerWidth = MIN_OUTER_SIZE; outerWidth <= MAX_OUTER_SIZE; outerWidth++) {
@@ -411,6 +464,10 @@ public final class TankStructure {
                     for (int x = tileX - outerWidth + 1; x <= tileX; x++) {
                         TankBounds bounds = new TankBounds(x, y, outerWidth, outerHeight);
                         if (!bounds.isOnBorder(tileX, tileY)) {
+                            continue;
+                        }
+                        if (loadedOnly && !isLoaded(bounds, lookup)) {
+                            unloaded[0]++;
                             continue;
                         }
                         TankValidation validation = validate(bounds, lookup, controller);
@@ -444,10 +501,9 @@ public final class TankStructure {
      *     <li>the rectangles that would be valid for the new controller
      *     ({@link #findTankIfControllerPlaced}).</li>
      * </ul>
-     * Every other placement is allowed, including one that forms no tank yet.
-     * <p>TODO(design): a controller placed in the border of one existing tank (not a shared wall) is
-     * allowed and leaves that tank with two controllers of its own, so it stops being valid (review
-     * #15④, behaviour unchanged since round 3).
+     * Every other placement is allowed, including one that forms no tank yet. A controller placed in
+     * the border of one existing tank (not a shared wall) is allowed: that tank then has two
+     * controllers of its own and stops being valid (N29-6, review #15④).
      */
     public static boolean canPlaceController(int tileX, int tileY, TankCellLookup lookup) {
         CachedLookup cached = new CachedLookup(tileX, tileY, REACH * 2, lookup);

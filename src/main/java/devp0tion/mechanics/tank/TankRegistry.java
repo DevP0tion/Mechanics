@@ -126,6 +126,9 @@ public final class TankRegistry {
     /**
      * An object or the floor tile at ({@code tileX}, {@code tileY}) changed (5-1). On the server,
      * every controller within {@link TankStructure#REACH} searches its tank again on its next tick.
+     * A controller whose tank another controller's contests (N29-8,
+     * {@link TankControllerObjectEntity#isContested}) also does for a change within twice the reach,
+     * where the other tank's cells are: the tank still valid is recognized once the other one is not.
      */
     public static void onTileChanged(Level level, int tileX, int tileY) {
         if (level == null || !level.isServer()) {
@@ -136,8 +139,12 @@ public final class TankRegistry {
             return;
         }
         int reach = TankStructure.REACH;
-        for (TankControllerObjectEntity controller : controllers.near(tileX - reach, tileY - reach, tileX + reach, tileY + reach)) {
-            if (Math.abs(controller.tileX - tileX) <= reach && Math.abs(controller.tileY - tileY) <= reach) {
+        int contestReach = reach * 2;
+        for (TankControllerObjectEntity controller : controllers.near(tileX - contestReach, tileY - contestReach,
+                tileX + contestReach, tileY + contestReach)) {
+            int dx = Math.abs(controller.tileX - tileX);
+            int dy = Math.abs(controller.tileY - tileY);
+            if (dx <= reach && dy <= reach || controller.isContested() && dx <= contestReach && dy <= contestReach) {
                 controller.markStructureChanged();
             }
         }

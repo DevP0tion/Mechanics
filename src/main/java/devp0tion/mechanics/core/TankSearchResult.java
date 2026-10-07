@@ -26,22 +26,35 @@ public final class TankSearchResult {
          *
          * <p>Placing a controller that would end up like this is rejected beforehand
          * ({@link TankStructure#canPlaceController}). A controller that already keeps a valid tank
-         * never ends up here: it keeps its tank (N13-3).
-         * TODO(design): this remains possible when one change (a wall, valve, glass block or floor
-         * tile) completes two tanks around a controller that keeps no valid tank, so neither came
-         * first; no tank is recognized for it (round 3 behaviour). The same change can complete two
-         * tanks around a valve that belongs to no tank yet: the controller that searches first (server
-         * tick order) takes the valve, and the other rectangle then has a valve of another tank (N15-3).
+         * never ends up here: it keeps its tank (N13-3). One change (a wall, valve, glass block or
+         * floor tile) can still complete two tanks around a controller that keeps no valid tank, so
+         * neither came first: no tank is recognized for it. When one change completes two tanks of
+         * two controllers around a valve that belongs to no tank yet, neither is recognized either
+         * ({@code TankJudgment}, N29-8).
          */
         CONTROLLER_IN_SHARED_WALL
     }
 
     private final Status status;
     private final List<TankValidation> candidates;
+    private final boolean unloadedCandidates;
 
     TankSearchResult(Status status, List<TankValidation> candidates) {
+        this(status, candidates, false);
+    }
+
+    TankSearchResult(Status status, List<TankValidation> candidates, boolean unloadedCandidates) {
         this.status = status;
         this.candidates = Collections.unmodifiableList(candidates);
+        this.unloadedCandidates = unloadedCandidates;
+    }
+
+    /**
+     * Whether rectangles touching cells that are not loaded were left out
+     * ({@link TankStructure#findLoadedTank}, N29-2): they may be recognized once those cells load.
+     */
+    public boolean hasUnloadedCandidates() {
+        return unloadedCandidates;
     }
 
     public Status getStatus() {

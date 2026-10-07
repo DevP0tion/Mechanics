@@ -15,9 +15,9 @@ import java.util.Objects;
  *     ({@link #hasOtherLayerObject()}), whether the floor is a liquid tile ({@link #isLiquidFloor()})
  *     and whether it is the tank floor tile ({@link #isTankFloor()}). Only interior cells look at
  *     these; the border only looks at the base layer object.</li>
- *     <li>Natural growth (N20-1, N23-4): whether the base layer object is natural growth the game
- *     placed by itself ({@link #isNaturalGrowth()}), which the judgment of an active tank breaks
- *     instead of letting it invalidate the tank ({@link TankJudgment}).</li>
+ *     <li>Natural growth (N20-1, N23-4, N29-5): whether the base layer object is of the game's grass
+ *     kind, placed by a player or not ({@link #isNaturalGrowth()}), which the judgment of an active
+ *     tank breaks instead of letting it invalidate the tank ({@link TankJudgment}).</li>
  * </ul>
  *
  * <p>TODO(design): the tank floor tile element itself (name and special function) is undecided
@@ -116,7 +116,7 @@ public final class TankCell {
 
     /**
      * A copy of this cell with the given natural growth state (N20-1, N23-4): whether the base
-     * layer object is natural growth the game placed by itself. Only meaningful for
+     * layer object is natural growth (N29-5: of the grass kind). Only meaningful for
      * {@link CellKind#OTHER}: any other kind is never natural growth, and the flag is ignored there.
      */
     public TankCell withNaturalGrowth(boolean naturalGrowth) {
@@ -179,8 +179,8 @@ public final class TankCell {
     }
 
     /**
-     * Whether the base layer object is natural growth the game placed by itself (N20-1: grass and
-     * the like, snow piles, cobwebs; never one a player placed). The game adapter decides what counts.
+     * Whether the base layer object is natural growth (N20-1, N29-5: grass and the like, flowers,
+     * snow piles, cobwebs, placed by a player or not). The game adapter decides what counts.
      */
     public boolean isNaturalGrowth() {
         return naturalGrowth;
