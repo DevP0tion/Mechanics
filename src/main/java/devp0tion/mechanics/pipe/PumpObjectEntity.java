@@ -287,6 +287,10 @@ public class PumpObjectEntity extends InventoryObjectEntity {
         }
         save.addIntArray("sources", codes);
         save.addInt("burn", pump.getBurnTicksLeft());
+        if (pump.getInstallNumber() >= 0) {
+            // N28-17: the level-wide placement order.
+            save.addLong("install", pump.getInstallNumber());
+        }
         if (pump.getLastPushedFluid() != null) {
             save.addEnum("pushed", pump.getLastPushedFluid());
         }
@@ -321,6 +325,8 @@ public class PumpObjectEntity extends InventoryObjectEntity {
             }
         }
         pump.setBurnTicksLeft(Math.max(0, save.getInt("burn", 0, false)));
+        // Pumps saved before install numbers (N28-17) get one from the engine when they load.
+        pump.setInstallNumber(save.getLong("install", -1L, false));
         pump.setLastPushedFluid(save.getEnum(FluidType.class, "pushed", null, false));
         FluidType fluid = save.getEnum(FluidType.class, "fluid", null, false);
         int amount = save.getInt("amount", 0, false);

@@ -127,8 +127,9 @@ import java.util.Set;
  *     {@link #CYCLE_TICKS} ticks, counted while stepping each share from the output cell to its end
  *     (N14-2, N23-1). Pumps pushing through the same pipe add up and share it (N18-1): among pumps
  *     whose cycles run in the same tick, the pump nearer to the shared pipe (fewer steps) goes
- *     first, equal ones by connection order (N26-4). TODO(confirm): pumps whose cycles run at
- *     different ticks of a window take the cap in time order.</li>
+ *     first, equal ones by connection order: the pumps' placement order (N26-4, N28-17). The
+ *     log-fueled pumps' cycles are aligned to the same ticks (N28-16, {@link #runTick}).
+ *     TODO(confirm): a manual pump's click runs in its own tick and takes the cap in time order.</li>
  *     <li>When the fluid reaches a new pipe, the tier conditions are judged against the lowest tier
  *     of the network it comes from and that pipe (N12-4, N14-1); if they fail, only that pipe breaks
  *     and only the share headed into it is lost.</li>
@@ -247,10 +248,12 @@ public final class PipeGrid implements PumpHost {
     private final Map<Long, PipeNode> undergroundPipes = new HashMap<>();
     private final Map<Long, TankValve> valves = new HashMap<>();
     private final Map<TankValve, Long> valvePositions = new IdentityHashMap<>();
-    /** Pumps in connection order (N26-4). */
+    /** Pumps by tile; the cap order goes by their install numbers (N26-4, N28-17). */
     private final Map<Long, Pump> pumps = new LinkedHashMap<>();
-    private final Map<Pump, Long> connectionIndex = new IdentityHashMap<>();
-    private long nextConnection;
+    /** The next install number (N28-17): level-wide placement order, saved with the level. */
+    private long nextInstall;
+    /** Loaded pumps saved before install numbers, numbered at the next tick by tile, y then x. */
+    private final List<Pump> unnumbered = new ArrayList<>();
     private final Set<PipeNetwork> networks = new LinkedHashSet<>();
     /** Tiles of parts that left because their region unloaded, while no {@link #loadedLookup} is set. */
     private final Set<Long> unloadedTiles = new HashSet<>();
@@ -386,7 +389,13 @@ public final class PipeGrid implements PumpHost {
      *     <li>Clock (cycle windows, N14-2).</li>
      *     <li>Sources: a liquid tile source not judged yet is judged with the loaded cells (N20-7).</li>
      *     <li>Timers: lit logs burn down (N18-4), cycle counters advance (N6-1, N3-3), wire state is
-     *     the pump's {@code enabled} (N11-3).</li>
+     *     the pump's {@code enabled} (N11-3). The log-fueled pumps' cycles are aligned (N28-16): due
+     *     on the engine's cycle ticks only (the first tick and every cycle after), so the pumps of a
+     *     network push in the same tick. TODO(confirm) G13 phase: one phase for every pump of the
+     *     level is the simplest reading of "the same tick" (nothing to settle when networks merge or
+     *     a pump joins); which tick a network uses is being asked. TODO(confirm): manual pumps keep
+     *     their click timing (a click runs in the next tick, N22-5), not aligned. The compatibility
+     *     mode keeps each pump's own phase (TODO(confirm) G17).</li>
      *     <li>Clicks queued since the last tick (manual pumps).</li>
      *     <li>Push: the pumps due now, ordered for the shared caps (N26-4; connection order in the
      *     compatibility mode). Hints are repaired as the pumps use them (N25-4).</li>
@@ -396,6 +405,7 @@ public final class PipeGrid implements PumpHost {
      */
     public Map<Long, PumpResult> runTick() {
         tick();
+        numberOldPumps();
         List<Pump> due = new ArrayList<>();
         Set<Pump> clicked = Collections.newSetFromMap(new IdentityHashMap<Pump, Boolean>());
         for (Pump pump : new ArrayList<>(pumps.values())) {
@@ -403,7 +413,9 @@ public final class PipeGrid implements PumpHost {
             if (tile instanceof LiquidTileSource && ((LiquidTileSource) tile).getJudgment() == null) {
                 ((LiquidTileSource) tile).judgeArea();
             }
-            if (pump.advanceTimers() == null) {
+            PumpResult timers = compatMode ? pump.advanceTimers()
+                    : pump.advanceTimersAligned(Math.floorMod(tick - 1, pump.getTier().getCycleTicks()) == 0);
+            if (timers == null) {
                 due.add(pump);
             }
         }
@@ -577,9 +589,10 @@ public final class PipeGrid implements PumpHost {
     /** The stamps of the cap orders (technical, {@link #orderForCaps}). */
     private long capStamps;
 
+    /** The connection order tie-break: the install number, the placement order (N28-17). */
     private long connectionOf(Pump pump) {
-        Long index = connectionIndex.get(pump);
-        return index == null ? Long.MAX_VALUE : index;
+        long number = pump.getInstallNumber();
+        return number < 0 ? Long.MAX_VALUE : number;
     }
 
     // ---------------------------------------------------------------- queries
@@ -1030,6 +1043,8 @@ public final class PipeGrid implements PumpHost {
         pump.setSourceSlots(slots);
         // A new pump: an old summary at its tile belonged to another pump.
         dropSummariesOf(key(x, y));
+        // N28-17: the placement order, kept for good (wrench, merges, saves).
+        pump.setInstallNumber(nextInstall++);
         addPump(x, y, pump);
         structureChanged(x, y);
     }
@@ -1043,6 +1058,42 @@ public final class PipeGrid implements PumpHost {
         Objects.requireNonNull(pump, "pump");
         pump.dropCutSourceSlots();
         addPump(x, y, pump);
+        if (pump.getInstallNumber() >= 0) {
+            nextInstall = Math.max(nextInstall, pump.getInstallNumber() + 1);
+        } else {
+            // Saved before install numbers (N28-17): numbered at the next tick, by tile y then x.
+            unnumbered.add(pump);
+        }
+    }
+
+    /** The next install number (N28-17), saved with the level. */
+    public long getNextInstallNumber() {
+        return nextInstall;
+    }
+
+    /** Restores the saved next install number (level load, N28-17). */
+    public void setNextInstallNumber(long next) {
+        nextInstall = Math.max(nextInstall, next);
+    }
+
+    /**
+     * Numbers the loaded pumps that were saved before install numbers existed (N28-17): in tile
+     * order, y then x, after every number already given, so the order is the same on every load.
+     */
+    private void numberOldPumps() {
+        if (unnumbered.isEmpty()) {
+            return;
+        }
+        List<Pump> old = new ArrayList<>(unnumbered);
+        unnumbered.clear();
+        old.sort((a, b) -> a.getTileY() != b.getTileY() ? Integer.compare(a.getTileY(), b.getTileY())
+                : Integer.compare(a.getTileX(), b.getTileX()));
+        for (Pump pump : old) {
+            if (pump.host == this && pump.getInstallNumber() < 0) {
+                pump.setInstallNumber(nextInstall++);
+            }
+        }
+        changed();
     }
 
     private void addPump(int x, int y, Pump pump) {
@@ -1053,7 +1104,6 @@ public final class PipeGrid implements PumpHost {
         unloadedTiles.remove(key);
         changed();
         pumps.put(key, pump);
-        connectionIndex.put(pump, nextConnection++);
         pump.place(this, x, y);
         PipeNetwork own = new PipeNetwork();
         networks.add(own);
@@ -1092,7 +1142,7 @@ public final class PipeGrid implements PumpHost {
             routeMemo.remove(pump);
             summaryRecordedAt.remove(pump);
             pump.host = null;
-            connectionIndex.remove(pump);
+            unnumbered.remove(pump);
             PipeNetwork network = pump.network;
             if (network != null) {
                 network.pumps.remove(pump);

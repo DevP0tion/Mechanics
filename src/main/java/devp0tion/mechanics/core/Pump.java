@@ -111,6 +111,8 @@ public class Pump extends LiquidStorage {
     private int ticksSinceCycle;
     private int links = LinkFlags.ALL_OPEN;
     private FluidType lastPushedFluid;
+    /** The level-wide install number (N28-17): the placement order; -1 until the engine gives one. */
+    private long installNumber = -1;
     private int x;
     private int y;
     PumpHost host;
@@ -480,6 +482,44 @@ public class Pump extends LiquidStorage {
         }
         ticksSinceCycle = 0;
         return null;
+    }
+
+    /**
+     * The timer part with the cycles aligned (N28-16): as {@link #advanceTimers}, but a log-fueled
+     * pump's cycle is due only when {@code cycleTick} (the engine's shared cycle tick), so the pumps
+     * of a network push in the same tick.
+     */
+    PumpResult advanceTimersAligned(boolean cycleTick) {
+        if (burnTicksLeft > 0) {
+            burnTicksLeft--;
+        }
+        if (ticksSinceCycle < tier.getCycleTicks()) {
+            ticksSinceCycle++;
+        }
+        if (tier.getPower() == PumpTier.Power.HAND_CLICK) {
+            return PumpResult.WAITING;
+        }
+        if (!enabled) {
+            return PumpResult.DISABLED;
+        }
+        if (!cycleTick) {
+            return PumpResult.WAITING;
+        }
+        ticksSinceCycle = 0;
+        return null;
+    }
+
+    /**
+     * The install number (N28-17): the level-wide placement order, the tie-break of the cap order
+     * (N26-4). It stays when links change or networks merge; saved with the pump. -1: none yet.
+     */
+    public long getInstallNumber() {
+        return installNumber;
+    }
+
+    /** Restores a saved install number (before the pump is added to a grid), or the engine gives one. */
+    public void setInstallNumber(long installNumber) {
+        this.installNumber = installNumber;
     }
 
     /**

@@ -175,7 +175,9 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
 
     /**
      * Whether an object entity that is being removed is only replaced by another entity of the same
-     * object, its tile still holding the object ({@code objectID}) it was created for. The engine
+     * object, its tile still holding the object ({@code objectID}) it was created for (N28-18: the
+     * entities the engine creates while a region loads apply at once, the replaced ones are masked
+     * here, and a region load is no structure change: no destination is marked for it). The engine
      * does that when a region loads (a fresh entity for every object, then the saved one replaces it:
      * {@code ObjectRegionLayer.loadSaveData}, {@code TileEntityList.addHidden}) and when an object is
      * placed (two entities in a row). When the object itself is removed, the tile holds another one
@@ -656,7 +658,7 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
 
     @Override
     public boolean shouldSave() {
-        return !grid.getSummaries().isEmpty() || !legacyMirror.isEmpty();
+        return !grid.getSummaries().isEmpty() || !legacyMirror.isEmpty() || grid.getNextInstallNumber() > 0;
     }
 
     @Override
@@ -665,6 +667,8 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         for (PipeGrid.RouteSummary summary : grid.getSummaries()) {
             save.addSaveData(saveSummary(summary));
         }
+        // N28-17: the next install number of the level's pumps.
+        save.addLong("NEXTINSTALL", grid.getNextInstallNumber());
         Map<Long, Integer> regionChanges = grid.getSavedRegionChanges();
         if (!regionChanges.isEmpty()) {
             // N28-1: region x, region y, number, for every region a summary passes.
@@ -690,6 +694,7 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     @Override
     public void applyLoadData(LoadData save) {
         super.applyLoadData(save);
+        grid.setNextInstallNumber(save.getLong("NEXTINSTALL", 0L, false));
         int[] regionChanges = save.getIntArray("REGIONCHANGES", new int[0], false);
         for (int i = 0; i + 2 < regionChanges.length; i += 3) {
             grid.loadRegionChange(PipeGrid.key(regionChanges[i], regionChanges[i + 1]), regionChanges[i + 2]);

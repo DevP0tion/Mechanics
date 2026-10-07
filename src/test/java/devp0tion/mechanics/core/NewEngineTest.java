@@ -330,6 +330,77 @@ final class NewEngineTest {
         Check.equal(Status.NO_DESTINATION, results.get(PipeGrid.key(3, -3)).getStatus());
     }
 
+    public static void testPumpsPushInTheSameTick() {
+        // N28-16: pumps placed at different ticks push in the same tick (the cycles are aligned);
+        // the compatibility mode keeps each pump's own phase.
+        for (boolean compatMode : new boolean[]{false, true}) {
+            PipeGrid grid = compatMode ? compat(Fluids.uniform(20)) : grid(Fluids.uniform(20));
+            TankValve[] valve = new TankValve[1];
+            line(grid, 1, 0, 9, 0);
+            valve[0] = Fluids.valve(100000);
+            grid.placeValve(10, 0, valve[0]);
+            grid.placePipe(3, -1, PipeLayer.BASE, MineralTier.IRON);
+            fillAll(grid);
+            Pump a = pump(grid, 0, 0, PumpTier.FIRE);
+            for (int i = 0; i < 7; i++) {
+                grid.runTick();
+            }
+            Pump b = pump(grid, 3, -2, PumpTier.FIRE);
+            java.util.List<Long> ticksA = new java.util.ArrayList<>();
+            java.util.List<Long> ticksB = new java.util.ArrayList<>();
+            for (int i = 0; i < 60; i++) {
+                Map<Long, PumpResult> results = grid.runTick();
+                if (results.containsKey(PipeGrid.key(0, 0))) {
+                    ticksA.add(grid.getTick());
+                }
+                if (results.containsKey(PipeGrid.key(3, -2))) {
+                    ticksB.add(grid.getTick());
+                }
+            }
+            if (compatMode) {
+                Check.isFalse(ticksA.equals(ticksB), "compat: each pump's own phase");
+            } else {
+                Check.equal(ticksA, ticksB, "the same ticks (N28-16)");
+                Check.equal(3, ticksA.size(), "every 20 ticks");
+            }
+        }
+    }
+
+    public static void testInstallNumbersAreThePlacementOrder() {
+        // N28-17: the tie-break of the cap order is the placement order, kept when the pumps' region
+        // reloads (whatever order they load in) and when links change.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        TankValve[] valve = new TankValve[1];
+        Pump[] pumps = sharedTrunk(grid, 2, valve);
+        Check.equal(0L, pumps[0].getInstallNumber(), "A placed first");
+        Check.equal(1L, pumps[1].getInstallNumber());
+        grid.unloadPump(0, 0);
+        grid.unloadPump(3, -3);
+        grid.loadPump(3, -3, pumps[1]);
+        grid.loadPump(0, 0, pumps[0]);
+        grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST);
+        grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST);
+        Map<Long, PumpResult> results = grid.runTick();
+        Check.equal(Status.PUMPED, results.get(PipeGrid.key(0, 0)).getStatus(), "A: placed first, loaded last");
+        Check.equal(Status.NO_DESTINATION, results.get(PipeGrid.key(3, -3)).getStatus());
+        Check.equal(0L, pumps[0].getInstallNumber(), "unchanged");
+
+        // Pumps saved before install numbers get them at the next tick, by tile y then x.
+        PipeGrid old = grid(Fluids.uniform(20));
+        Pump p1 = new Pump(PumpTier.FIRE);
+        Pump p2 = new Pump(PumpTier.FIRE);
+        Pump p3 = new Pump(PumpTier.FIRE);
+        old.loadPump(5, 2, p1);
+        old.loadPump(1, 3, p2);
+        old.loadPump(3, 2, p3);
+        Check.equal(-1L, p1.getInstallNumber(), "none yet");
+        old.runTick();
+        Check.equal(0L, p3.getInstallNumber(), "(3,2)");
+        Check.equal(1L, p1.getInstallNumber(), "(5,2)");
+        Check.equal(2L, p2.getInstallNumber(), "(1,3)");
+        Check.equal(3L, old.getNextInstallNumber());
+    }
+
     // ---------------------------------------------------------------- N23-2
 
     /** Pump (0,0), line (1..40, 0) over regions 0, 1 and 2, valve (41, 0), all full. */
