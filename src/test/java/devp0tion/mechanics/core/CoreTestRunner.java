@@ -29,7 +29,9 @@ public final class CoreTestRunner {
             PumpPushTest.class,
             PumpSourceTest.class,
             PumpBaselineTest.class,
-            TileBucketsTest.class
+            TileBucketsTest.class,
+            ComparisonTest.class,
+            NewEngineTest.class
     };
 
     /**

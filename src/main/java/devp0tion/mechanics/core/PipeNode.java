@@ -33,6 +33,35 @@ public final class PipeNode extends LiquidStorage {
 
     PipeNetwork network;
     private int writeCount;
+    /** The pipes around it in the engine: N, E, S, W on its layer, then the other layer (technical). */
+    final PipeNode[] around = new PipeNode[5];
+
+    // Scratch fields of the engine's dry runs and cap order, valid for one stamp (technical).
+    long dryStamp;
+    int dryAdded;
+    int dryFlow;
+    boolean dryFilled;
+    long capStamp;
+    int capCount;
+    int[] capPumps = new int[2];
+    int[] capSteps = new int[2];
+
+    /** The pumps of one cap order crossing this pipe, with the fewest steps of each. */
+    void addCapEntry(int pump, int steps) {
+        for (int i = 0; i < capCount; i++) {
+            if (capPumps[i] == pump) {
+                capSteps[i] = Math.min(capSteps[i], steps);
+                return;
+            }
+        }
+        if (capCount == capPumps.length) {
+            capPumps = java.util.Arrays.copyOf(capPumps, capCount * 2);
+            capSteps = java.util.Arrays.copyOf(capSteps, capCount * 2);
+        }
+        capPumps[capCount] = pump;
+        capSteps[capCount] = steps;
+        capCount++;
+    }
 
     // Flow used in the current cycle window (N14-2), transient.
     long flowWindow = -1;

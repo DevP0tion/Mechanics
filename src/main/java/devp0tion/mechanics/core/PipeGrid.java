@@ -65,11 +65,13 @@ import java.util.Set;
  *     <li>A destination's hints come from a search back from its valve over the pipes the fluid can
  *     pass (empty, or holding one fluid along the way), loaded ones only. Ties of equal length go
  *     by the search order (north, east, south, west, then the other layer).</li>
- *     <li>A structure change marks only the destinations whose hints are at the changed cell or
- *     next to it (and a valve there); they are searched again when they are used next: at the next
- *     pump cycle, before the pump reads its destinations (N25-4). A new valve is searched at the
- *     next pump cycle; a loaded valve whose pipes already hold its saved hints is not (no full
- *     recompute on the first cycle, N25-1).
+ *     <li>A structure change marks only the destinations it affects (N25-4): a removed pipe or a cut
+ *     link, those whose hints step across it; a new link, or a new pipe linking two or more pipes,
+ *     those with hints on the pipes it links (it may join or shorten paths); a valve's link or a new
+ *     valve, that valve. A new pipe linked to one pipe only is a dead-end leaf and takes that pipe's
+ *     hints, marking nothing. Marked destinations are searched again when they are used next: at the
+ *     next pump cycle, before the pump reads its destinations. A loaded valve whose pipes already
+ *     hold its saved hints is not searched (no full recompute on the first cycle, N25-1).
  *     TODO(confirm): a stale destination is searched at the next pump cycle of any pump, since a
  *     pump cannot step toward a destination it does not know yet (a new valve, a new connection).</li>
  *     <li>Hints are repaired when used: stepping reads every cell, so a missing pipe, a cut link or a
@@ -183,6 +185,9 @@ public final class PipeGrid implements PumpHost {
     /** The cycle window of the transport cap: one pump cycle, 20 ticks (N6-1, N14-2). */
     public static final int CYCLE_TICKS = 20;
 
+    /** {@link Direction#values()} without a copy per call (technical). */
+    private static final Direction[] DIRS = Direction.values();
+
     private static final Listener NO_LISTENER = new Listener() {
         @Override
         public void onLinksChanged(int tileX, int tileY, Part part) {
@@ -213,11 +218,41 @@ public final class PipeGrid implements PumpHost {
     private final Set<Long> staleDestinations = new LinkedHashSet<>();
     private final Set<Long> checkDestinations = new LinkedHashSet<>();
     private final Map<Long, Long> searchedAt = new HashMap<>();
+    /** Number of searches back from a valve so far (tests, benchmarks). */
+    int searches;
 
     // Network summaries (N23-2): pump tile -> destination -> summary.
     private final Map<Long, Map<Long, RouteSummary>> summaries = new LinkedHashMap<>();
     private final Map<Long, Set<Long>> summaryPumpsByDestination = new HashMap<>();
     private final Map<RunKey, long[]> runFlow = new HashMap<>();
+
+    // The routes each pump stepped, reused while nothing in the world changed (technical: any change
+    // of cells, links, hints, contents, valves or pumps counts, see changed()).
+    private long changes;
+    private final Map<Pump, RouteMemo> routeMemo = new IdentityHashMap<>();
+
+    /** The routes a pump stepped for one fluid, valid while {@link #changes} is unchanged. */
+    private static final class RouteMemo {
+        final FluidType fluid;
+        final long changes;
+        final List<Route> routes;
+
+        RouteMemo(FluidType fluid, long changes, List<Route> routes) {
+            this.fluid = fluid;
+            this.changes = changes;
+            this.routes = routes;
+        }
+    }
+
+    // The last cap order (N26-4), reused for the same due pumps while nothing changed (technical).
+    private List<Pump> lastDue = Collections.emptyList();
+    private List<Pump> lastOrder = Collections.emptyList();
+    private long lastOrderChanges = -1;
+
+    /** The stamps of the dry runs (technical, {@code DryLedger}). */
+    private long dryStamps;
+    /** The {@link #changes} at each pump's last recorded summary (technical). */
+    private final Map<Pump, Long> summaryRecordedAt = new IdentityHashMap<>();
 
     // Manual pump clicks waiting for the next tick (N22-5).
     private final List<Long> clickQueue = new ArrayList<>();
@@ -343,11 +378,76 @@ public final class PipeGrid implements PumpHost {
         if (compatMode || byConnection.size() < 2) {
             return byConnection;
         }
-        List<Map<Object, Integer>> footprints = new ArrayList<>();
-        for (Pump pump : byConnection) {
-            footprints.add(footprint(pump));
+        if (byConnection.equals(lastDue) && lastOrderChanges == changes) {
+            return new ArrayList<>(lastOrder);
         }
         int n = byConnection.size();
+        // Every cell the due pumps' paths cross, with the fewest steps of each pump to it: marked
+        // on the pipes themselves (runs of unloaded stretches in a map).
+        long stamp = ++capStamps;
+        List<PipeNode> touched = new ArrayList<>();
+        Map<Object, List<int[]>> crossing = new HashMap<>();
+        for (int i = 0; i < n; i++) {
+            Pump pump = byConnection.get(i);
+            FluidType fluid = pump.cycleFluid();
+            if (fluid == null) {
+                continue;
+            }
+            for (Route route : routesFor(pump, fluid)) {
+                for (int e = 0; e < route.path.length; e++) {
+                    int steps = route.stepsTo[e];
+                    if (route.path[e] instanceof PipeNode) {
+                        PipeNode node = (PipeNode) route.path[e];
+                        if (node.capStamp != stamp) {
+                            node.capStamp = stamp;
+                            node.capCount = 0;
+                            touched.add(node);
+                        }
+                        node.addCapEntry(i, steps);
+                    } else {
+                        Object key = route.element(e);
+                        List<int[]> pumpsHere = crossing.get(key);
+                        if (pumpsHere == null) {
+                            pumpsHere = new ArrayList<>(2);
+                            crossing.put(key, pumpsHere);
+                        }
+                        addMin(pumpsHere, i, steps);
+                    }
+                }
+            }
+        }
+        for (PipeNode node : touched) {
+            if (node.capCount > 1) {
+                List<int[]> pumpsHere = new ArrayList<>(node.capCount);
+                for (int k = 0; k < node.capCount; k++) {
+                    pumpsHere.add(new int[]{node.capPumps[k], node.capSteps[k]});
+                }
+                crossing.put(node, pumpsHere);
+            }
+        }
+        // Per pair: the shared cell nearest to both (smallest sum of steps), and their steps there.
+        int[][] bestSum = new int[n][n];
+        int[][] stepsI = new int[n][n];
+        int[][] stepsJ = new int[n][n];
+        for (int[] row : bestSum) {
+            java.util.Arrays.fill(row, Integer.MAX_VALUE);
+        }
+        for (List<int[]> pumpsHere : crossing.values()) {
+            for (int a = 0; a < pumpsHere.size(); a++) {
+                for (int b = a + 1; b < pumpsHere.size(); b++) {
+                    int[] first = pumpsHere.get(a)[0] < pumpsHere.get(b)[0] ? pumpsHere.get(a) : pumpsHere.get(b);
+                    int[] second = first == pumpsHere.get(a) ? pumpsHere.get(b) : pumpsHere.get(a);
+                    int i = first[0];
+                    int j = second[0];
+                    int sum = first[1] + second[1];
+                    if (sum < bestSum[i][j]) {
+                        bestSum[i][j] = sum;
+                        stepsI[i][j] = first[1];
+                        stepsJ[i][j] = second[1];
+                    }
+                }
+            }
+        }
         List<List<Integer>> after = new ArrayList<>();
         int[] before = new int[n];
         for (int i = 0; i < n; i++) {
@@ -355,24 +455,11 @@ public final class PipeGrid implements PumpHost {
         }
         for (int i = 0; i < n; i++) {
             for (int j = i + 1; j < n; j++) {
-                Map<Object, Integer> a = footprints.get(i);
-                Map<Object, Integer> b = footprints.get(j);
-                int bestSum = Integer.MAX_VALUE;
-                int da = 0;
-                int db = 0;
-                for (Map.Entry<Object, Integer> entry : a.entrySet()) {
-                    Integer other = b.get(entry.getKey());
-                    if (other != null && entry.getValue() + other < bestSum) {
-                        bestSum = entry.getValue() + other;
-                        da = entry.getValue();
-                        db = other;
-                    }
-                }
-                if (bestSum == Integer.MAX_VALUE) {
+                if (bestSum[i][j] == Integer.MAX_VALUE) {
                     continue;
                 }
                 // i is connected first: it goes first unless j is nearer to the shared pipe.
-                if (db < da) {
+                if (stepsJ[i][j] < stepsI[i][j]) {
                     after.get(j).add(i);
                     before[i]++;
                 } else {
@@ -411,28 +498,24 @@ public final class PipeGrid implements PumpHost {
                 }
             }
         }
+        lastDue = byConnection;
+        lastOrder = new ArrayList<>(result);
+        lastOrderChanges = changes;
         return result;
     }
 
-    /** The cells a pump's paths would cross now, with the fewest steps to each (N26-4). */
-    private Map<Object, Integer> footprint(Pump pump) {
-        Map<Object, Integer> result = new HashMap<>();
-        FluidType fluid = pump.cycleFluid();
-        if (fluid == null) {
-            return result;
-        }
-        for (Route route : routesFor(pump, fluid)) {
-            for (int i = 0; i < route.path.length; i++) {
-                Object id = route.element(i);
-                Integer steps = result.get(id);
-                int here = route.stepsTo[i];
-                if (steps == null || here < steps) {
-                    result.put(id, here);
-                }
+    private static void addMin(List<int[]> pumpsHere, int pump, int steps) {
+        for (int[] entry : pumpsHere) {
+            if (entry[0] == pump) {
+                entry[1] = Math.min(entry[1], steps);
+                return;
             }
         }
-        return result;
+        pumpsHere.add(new int[]{pump, steps});
     }
+
+    /** The stamps of the cap orders (technical, {@link #orderForCaps}). */
+    private long capStamps;
 
     private long connectionOf(Pump pump) {
         Long index = connectionIndex.get(pump);
@@ -490,7 +573,7 @@ public final class PipeGrid implements PumpHost {
             return 0;
         }
         int sides = 0;
-        for (Direction d : Direction.values()) {
+        for (Direction d : DIRS) {
             if (holdsOtherFluid(getPipe(x + d.dx, y + d.dy, layer), fluid)) {
                 sides |= LinkFlags.bit(d);
             }
@@ -514,7 +597,7 @@ public final class PipeGrid implements PumpHost {
     public List<TankValve> getLinkedValves(PipeNode node) {
         List<TankValve> result = new ArrayList<>();
         if (node.getLayer() == PipeLayer.BASE) {
-            for (Direction d : Direction.values()) {
+            for (Direction d : DIRS) {
                 TankValve valve = valves.get(key(node.getTileX() + d.dx, node.getTileY() + d.dy));
                 if (valve != null && node.isSideOpen(d) && valve.isSideOpen(d.opposite())) {
                     result.add(valve);
@@ -532,7 +615,7 @@ public final class PipeGrid implements PumpHost {
     /** The basic pipes a pump pushes into (9-3, 9-9, 13-4), in {@link Direction} order. */
     public List<PipeNode> getPumpEntries(Pump pump) {
         List<PipeNode> result = new ArrayList<>();
-        for (Direction d : Direction.values()) {
+        for (Direction d : DIRS) {
             PipeNode node = basePipes.get(key(pump.getTileX() + d.dx, pump.getTileY() + d.dy));
             if (node != null && pump.isSideOpen(d) && node.isSideOpen(d.opposite())) {
                 result.add(node);
@@ -607,8 +690,8 @@ public final class PipeGrid implements PumpHost {
             node.setVerticalOpen(false);
         }
         unloadedTiles.remove(key(x, y));
-        pipes(layer).put(key(x, y), node);
-        onStructureChanged(x, y);
+        putCell(node);
+        onPipePlaced(node);
         return node;
     }
 
@@ -643,12 +726,14 @@ public final class PipeGrid implements PumpHost {
                 unindexHints(existing);
                 existing.setHints(hintDests, hintCodes);
                 indexHints(existing);
+                changed();
             }
             if (existing.getLinks() == LinkFlags.sanitize(links) && existing.getFluid() == contents
                     && existing.getAmount() == contentsAmount) {
                 return existing;
             }
             // The same pipe with other saved state: update it in place and regroup its network.
+            changed();
             boolean emptied = existing.getFluid() != null && contents == null;
             PipeNetwork network = existing.network;
             if (network != null) {
@@ -681,7 +766,7 @@ public final class PipeGrid implements PumpHost {
         }
         node.setHints(hintDests, hintCodes);
         unloadedTiles.remove(key);
-        pipes(layer).put(key, node);
+        putCell(node);
         indexHints(node);
         if (node.isReached()) {
             attachReached(node);
@@ -697,7 +782,7 @@ public final class PipeGrid implements PumpHost {
      * @return the pipe that left, or {@code null}
      */
     public PipeNode unloadPipe(int x, int y, PipeLayer layer) {
-        PipeNode node = pipes(layer).remove(key(x, y));
+        PipeNode node = takeCell(x, y, layer);
         if (node == null) {
             return null;
         }
@@ -720,10 +805,12 @@ public final class PipeGrid implements PumpHost {
      * @return the removed pipe, or {@code null} if there was none
      */
     public PipeNode removePipe(int x, int y, PipeLayer layer) {
-        PipeNode node = pipes(layer).remove(key(x, y));
-        if (node == null) {
+        PipeNode existing = getPipe(x, y, layer);
+        if (existing == null) {
             return null;
         }
+        Set<Long> affected = destinationsThrough(existing);
+        PipeNode node = takeCell(x, y, layer);
         node.removed = true;
         unindexHints(node);
         PipeNetwork network = node.network;
@@ -732,9 +819,7 @@ public final class PipeGrid implements PumpHost {
             node.network = null;
             rebuild(Collections.singletonList(network));
         }
-        onStructureChanged(x, y);
-        // The removed pipe's own hints mark their destinations too.
-        markDestinations(node, true);
+        markStale(affected, true);
         if (node.getFluid() != null) {
             listener.onPipeFluidChanged(x, y, layer);
         }
@@ -759,13 +844,14 @@ public final class PipeGrid implements PumpHost {
     public void placeValve(int x, int y, TankValve valve) {
         addValve(x, y, valve);
         boolean changed = false;
-        for (Direction d : Direction.values()) {
+        for (Direction d : DIRS) {
             if (pumps.containsKey(key(x + d.dx, y + d.dy)) && valve.isSideOpen(d)) {
                 valve.setSideOpen(d, false);
                 changed = true;
             }
         }
-        onStructureChanged(x, y);
+        // A new destination; a valve is never passed through, so no other destination changes.
+        staleDestinations.add(key(x, y));
         if (changed) {
             listener.onLinksChanged(x, y, Part.VALVE);
         }
@@ -789,21 +875,22 @@ public final class PipeGrid implements PumpHost {
         unloadedTiles.remove(key);
         valves.put(key, valve);
         valvePositions.put(valve, key);
+        changed();
     }
 
     /** The valve was removed: pumps next to it lose it as a source, and it is no destination any more. */
     public TankValve removeValve(int x, int y) {
         TankValve valve = valves.remove(key(x, y));
         if (valve != null) {
+            changed();
             valvePositions.remove(valve);
-            for (Direction d : Direction.values()) {
+            for (Direction d : DIRS) {
                 Pump pump = pumps.get(key(x + d.dx, y + d.dy));
                 if (pump != null) {
                     pump.removeSourceSlot(Pump.SourceSlot.valve(d.opposite()));
                 }
             }
             long dest = key(x, y);
-            onStructureChanged(x, y);
             dropHints(dest);
             staleDestinations.remove(dest);
             checkDestinations.remove(dest);
@@ -815,6 +902,7 @@ public final class PipeGrid implements PumpHost {
     public TankValve unloadValve(int x, int y) {
         TankValve valve = valves.remove(key(x, y));
         if (valve != null) {
+            changed();
             valvePositions.remove(valve);
             if (loadedLookup == null) {
                 unloadedTiles.add(key(x, y));
@@ -839,7 +927,7 @@ public final class PipeGrid implements PumpHost {
         }
         List<FluidType> fluids = new ArrayList<>();
         fluids.add(tileFluid);
-        for (Direction d : Direction.values()) {
+        for (Direction d : DIRS) {
             TankValve valve = valves.get(key(x + d.dx, y + d.dy));
             if (valve != null && valve.isSideOpen(d.opposite())) {
                 fluids.add(valve.getStoredFluid());
@@ -866,7 +954,7 @@ public final class PipeGrid implements PumpHost {
         if (pump.getTileSource() != null) {
             slots.add(Pump.SourceSlot.TILE);
         }
-        for (Direction d : Direction.values()) {
+        for (Direction d : DIRS) {
             TankValve valve = valves.get(key(x + d.dx, y + d.dy));
             if (valve != null && pump.isSideOpen(d) && valve.isSideOpen(d.opposite())) {
                 slots.add(Pump.SourceSlot.valve(d));
@@ -895,6 +983,7 @@ public final class PipeGrid implements PumpHost {
             throw new IllegalStateException("Cannot place pump at " + x + "," + y);
         }
         unloadedTiles.remove(key);
+        changed();
         pumps.put(key, pump);
         connectionIndex.put(pump, nextConnection++);
         pump.place(this, x, y);
@@ -912,6 +1001,9 @@ public final class PipeGrid implements PumpHost {
     public Pump removePump(int x, int y) {
         Pump pump = pumps.remove(key(x, y));
         if (pump != null) {
+            changed();
+            routeMemo.remove(pump);
+            summaryRecordedAt.remove(pump);
             pump.host = null;
             connectionIndex.remove(pump);
             PipeNetwork network = pump.network;
@@ -947,6 +1039,7 @@ public final class PipeGrid implements PumpHost {
             return Check.NOTHING_THERE;
         }
         End other = neighbourEnd(part, nx, ny, direction.opposite());
+        boolean wasLinked = other != null && own.isOpen() && other.isOpen();
         Pump pump = part == Part.PUMP ? pumps.get(key(x, y)) : other != null && other.part == Part.PUMP ? pumps.get(key(nx, ny)) : null;
         boolean pumpValve = other != null && (part == Part.PUMP && other.part == Part.VALVE
                 || part == Part.VALVE && other.part == Part.PUMP);
@@ -975,6 +1068,9 @@ public final class PipeGrid implements PumpHost {
             }
         }
         afterLinkChange(x, y, nx, ny);
+        if (other != null) {
+            linkChanged(x, y, own.part, nx, ny, other.part, wasLinked);
+        }
         listener.onLinksChanged(x, y, own.part);
         if (other != null) {
             listener.onLinksChanged(nx, ny, other.part);
@@ -1001,6 +1097,7 @@ public final class PipeGrid implements PumpHost {
         if (top == null && bottom == null) {
             return Check.NOTHING_THERE;
         }
+        boolean wasLinked = top != null && bottom != null && top.isOpen() && bottom.isOpen();
         if (top == null || bottom == null) {
             End only = top != null ? top : bottom;
             only.set(!only.isOpen());
@@ -1010,6 +1107,9 @@ public final class PipeGrid implements PumpHost {
             bottom.set(open);
         }
         afterLinkChange(x, y, x, y);
+        if (top != null && bottom != null) {
+            linkChanged(x, y, top.part, x, y, bottom.part, wasLinked);
+        }
         if (top != null) {
             listener.onLinksChanged(x, y, top.part);
         }
@@ -1080,15 +1180,12 @@ public final class PipeGrid implements PumpHost {
     }
 
     private void afterLinkChange(int x1, int y1, int x2, int y2) {
+        changed();
         Set<PipeNetwork> affected = new LinkedHashSet<>();
         collectNetworks(x1, y1, affected);
         collectNetworks(x2, y2, affected);
         if (!affected.isEmpty()) {
             rebuild(affected);
-        }
-        onStructureChanged(x1, y1);
-        if (x1 != x2 || y1 != y2) {
-            onStructureChanged(x2, y2);
         }
     }
 
@@ -1125,7 +1222,7 @@ public final class PipeGrid implements PumpHost {
                 }
             }
             if (node.getLayer() == PipeLayer.BASE) {
-                for (Direction d : Direction.values()) {
+                for (Direction d : DIRS) {
                     Pump pump = pumps.get(key(node.getTileX() + d.dx, node.getTileY() + d.dy));
                     if (pump != null && node.isSideOpen(d) && pump.isSideOpen(d.opposite())
                             && pump.getLastPushedFluid() == fluid) {
@@ -1162,6 +1259,7 @@ public final class PipeGrid implements PumpHost {
 
     /** A pipe was just reached (or loaded holding fluid): it joins the networks it is linked to. */
     private void attachReached(PipeNode node) {
+        changed();
         Set<PipeNetwork> adjacent = new LinkedHashSet<>();
         for (Object next : edges(node)) {
             PipeNetwork network = networkOf(next);
@@ -1269,28 +1367,116 @@ public final class PipeGrid implements PumpHost {
 
     // ---------------------------------------------------------------- hints
 
-    /** A structure change at the tile (N22-4): marks the destinations it affects (N25-4) and drops their summaries. */
-    private void onStructureChanged(int x, int y) {
-        markAffected(x, y, true);
-    }
-
     /**
-     * Marks the destinations whose hints are at the tile (both layers) or next to it, and the
-     * valves there, for a new search when used (N25-4). A structure change also drops the summaries
-     * of the paths to them: the network is no longer the one last seen running normally (N23-2).
+     * Marks destinations for a new search when used (N25-4). A structure change also drops the
+     * summaries of the paths to them: the network is no longer the one last seen running normally
+     * (N23-2).
      */
-    private void markAffected(int x, int y, boolean structure) {
-        Set<Long> dests = new LinkedHashSet<>();
-        collectAt(x, y, dests);
-        for (Direction d : Direction.values()) {
-            collectAt(x + d.dx, y + d.dy, dests);
-        }
+    private void markStale(Set<Long> dests, boolean structure) {
         staleDestinations.addAll(dests);
         if (structure) {
             for (long dest : dests) {
                 dropSummariesTo(dest);
             }
         }
+    }
+
+    /**
+     * A new, empty pipe (N25-4: only the destinations it affects). Linked to one pipe and no valve,
+     * it is a dead-end leaf: no path changes, and it takes that pipe's hints with the step toward it.
+     * Linked to more, it may join paths or shorten them: the destinations with hints on the pipes it
+     * links to are searched again, and so are the valves it links to (a new way to them).
+     */
+    private void onPipePlaced(PipeNode node) {
+        List<PipeNode> linked = linkedPipes(node);
+        Set<Long> valvesLinked = new LinkedHashSet<>();
+        for (TankValve valve : getLinkedValves(node)) {
+            valvesLinked.add(valvePositions.get(valve));
+        }
+        Set<Long> stale = new LinkedHashSet<>(valvesLinked);
+        if (linked.size() == 1) {
+            PipeNode only = linked.get(0);
+            int code = codeToward(node, only);
+            for (int i = 0; i < only.getHintCount(); i++) {
+                long dest = only.getHintDestination(i);
+                if (!valvesLinked.contains(dest)) {
+                    setHint(node, dest, code);
+                }
+            }
+        } else {
+            for (PipeNode next : linked) {
+                for (int i = 0; i < next.getHintCount(); i++) {
+                    stale.add(next.getHintDestination(i));
+                }
+            }
+        }
+        markStale(stale, true);
+    }
+
+    /**
+     * The destinations whose paths pass a pipe being removed: the pipes linked to it whose hint
+     * steps into it, and the valves it links to (N25-4).
+     */
+    private Set<Long> destinationsThrough(PipeNode node) {
+        Set<Long> result = new LinkedHashSet<>();
+        for (PipeNode next : linkedPipes(node)) {
+            addCrossing(next, node, result);
+        }
+        for (TankValve valve : getLinkedValves(node)) {
+            result.add(valvePositions.get(valve));
+        }
+        return result;
+    }
+
+    /**
+     * A link between two parts was cut or made by the wrench (N25-4). Pipe to pipe: a cut affects
+     * the destinations whose hints step across it; a new link may join or shorten paths, so it
+     * affects every destination with a hint on either pipe. Pipe to valve: that valve's destination.
+     * Links of pumps change no path.
+     */
+    private void linkChanged(int x1, int y1, Part part1, int x2, int y2, Part part2, boolean wasLinked) {
+        Set<Long> stale = new LinkedHashSet<>();
+        boolean pipe1 = part1 == Part.BASIC_PIPE || part1 == Part.UNDERGROUND_PIPE;
+        boolean pipe2 = part2 == Part.BASIC_PIPE || part2 == Part.UNDERGROUND_PIPE;
+        if (pipe1 && pipe2) {
+            PipeNode a = getPipe(x1, y1, part1 == Part.BASIC_PIPE ? PipeLayer.BASE : PipeLayer.UNDERGROUND);
+            PipeNode b = getPipe(x2, y2, part2 == Part.BASIC_PIPE ? PipeLayer.BASE : PipeLayer.UNDERGROUND);
+            if (wasLinked) {
+                addCrossing(a, b, stale);
+                addCrossing(b, a, stale);
+            } else {
+                for (PipeNode node : new PipeNode[]{a, b}) {
+                    for (int i = 0; i < node.getHintCount(); i++) {
+                        stale.add(node.getHintDestination(i));
+                    }
+                }
+            }
+        } else if (pipe1 && part2 == Part.VALVE) {
+            stale.add(key(x2, y2));
+        } else if (pipe2 && part1 == Part.VALVE) {
+            stale.add(key(x1, y1));
+        }
+        markStale(stale, true);
+    }
+
+    /** The destinations whose hint at {@code from} steps into {@code to}. */
+    private static void addCrossing(PipeNode from, PipeNode to, Set<Long> out) {
+        int code = codeToward(from, to);
+        for (int i = 0; i < from.getHintCount(); i++) {
+            if (from.getHintCode(i) == code) {
+                out.add(from.getHintDestination(i));
+            }
+        }
+    }
+
+    /** The contents of a loaded pipe changed (saved state): the fluid met on the way may differ (N13-2). */
+    private void markAffected(int x, int y, boolean structure) {
+        Set<Long> dests = new LinkedHashSet<>();
+        collectAt(x, y, dests);
+        for (Direction d : DIRS) {
+            collectAt(x + d.dx, y + d.dy, dests);
+        }
+        markStale(dests, structure);
     }
 
     private void collectAt(int x, int y, Set<Long> out) {
@@ -1305,19 +1491,6 @@ public final class PipeGrid implements PumpHost {
         if (under != null) {
             for (int i = 0; i < under.getHintCount(); i++) {
                 out.add(under.getHintDestination(i));
-            }
-        }
-        if (valves.containsKey(key)) {
-            out.add(key);
-        }
-    }
-
-    private void markDestinations(PipeNode node, boolean structure) {
-        for (int i = 0; i < node.getHintCount(); i++) {
-            long dest = node.getHintDestination(i);
-            staleDestinations.add(dest);
-            if (structure) {
-                dropSummariesTo(dest);
             }
         }
     }
@@ -1373,6 +1546,10 @@ public final class PipeGrid implements PumpHost {
     }
 
     private void setHint(PipeNode node, long dest, int code) {
+        if (node.getHint(dest) == code) {
+            return;
+        }
+        changed();
         if (node.setHint(dest, code)) {
             cellsOf(dest).add(node);
         }
@@ -1380,6 +1557,7 @@ public final class PipeGrid implements PumpHost {
 
     /** Drops every loaded pipe's hint toward a destination that is gone. */
     private void dropHints(long dest) {
+        changed();
         Set<PipeNode> cells = hintCells.remove(dest);
         if (cells != null) {
             for (PipeNode node : cells) {
@@ -1426,7 +1604,7 @@ public final class PipeGrid implements PumpHost {
     private boolean hasAttachedHint(long dest) {
         int vx = keyX(dest);
         int vy = keyY(dest);
-        for (Direction d : Direction.values()) {
+        for (Direction d : DIRS) {
             PipeNode node = basePipes.get(key(vx + d.dx, vy + d.dy));
             if (node != null && node.getHint(dest) == d.opposite().ordinal()) {
                 return true;
@@ -1444,6 +1622,7 @@ public final class PipeGrid implements PumpHost {
      * the underground one, and each pipe's neighbours in the same order, then the other layer.
      */
     private void search(long dest) {
+        searches++;
         searchedAt.put(dest, tick);
         TankValve valve = valves.get(dest);
         if (valve == null) {
@@ -1453,7 +1632,7 @@ public final class PipeGrid implements PumpHost {
         int vy = keyY(dest);
         Map<PipeNode, FluidType> seen = new IdentityHashMap<>();
         ArrayDeque<PipeNode> queue = new ArrayDeque<>();
-        for (Direction d : Direction.values()) {
+        for (Direction d : DIRS) {
             PipeNode node = basePipes.get(key(vx + d.dx, vy + d.dy));
             if (node != null && valve.isSideOpen(d) && node.isSideOpen(d.opposite()) && !seen.containsKey(node)) {
                 seen.put(node, node.getFluid());
@@ -1495,7 +1674,7 @@ public final class PipeGrid implements PumpHost {
 
     /** The face code from one position to an adjacent one (or the same tile: vertical). */
     private static int faceBetween(int x0, int y0, int x1, int y1) {
-        for (Direction d : Direction.values()) {
+        for (Direction d : DIRS) {
             if (x0 + d.dx == x1 && y0 + d.dy == y1) {
                 return d.ordinal();
             }
@@ -1577,11 +1756,15 @@ public final class PipeGrid implements PumpHost {
      */
     List<Route> routesFor(Pump pump, FluidType fluid) {
         refreshHints();
+        RouteMemo memo = routeMemo.get(pump);
+        if (memo != null && memo.fluid == fluid && memo.changes == changes) {
+            return memo.routes;
+        }
         Map<Long, Route> best = new LinkedHashMap<>();
         Set<Long> dests = new LinkedHashSet<>();
         List<PipeNode> outputs = new ArrayList<>();
         List<Direction> sides = new ArrayList<>();
-        for (Direction d : Direction.values()) {
+        for (Direction d : DIRS) {
             PipeNode node = basePipes.get(key(pump.getTileX() + d.dx, pump.getTileY() + d.dy));
             if (node != null && pump.isSideOpen(d) && node.isSideOpen(d.opposite())) {
                 outputs.add(node);
@@ -1614,6 +1797,7 @@ public final class PipeGrid implements PumpHost {
                     if (walk.status == WALK_REPAIR) {
                         // Searched this tick and still broken: a hint left where the search no
                         // longer reaches. It leaves this output cell.
+                        changed();
                         if (output.removeHint(dest)) {
                             Set<PipeNode> cells = hintCells.get(dest);
                             if (cells != null) {
@@ -1634,6 +1818,7 @@ public final class PipeGrid implements PumpHost {
         }
         List<Route> routes = new ArrayList<>(best.values());
         routes.sort(Route.ORDER);
+        routeMemo.put(pump, new RouteMemo(fluid, changes, routes));
         return routes;
     }
 
@@ -1649,15 +1834,14 @@ public final class PipeGrid implements PumpHost {
      * or an unloaded stretch the summary cannot skip is a dead end.
      */
     private Walk walk(Pump pump, Direction side, PipeNode output, long dest, TankValve valve, FluidType fluid) {
-        List<Object> path = new ArrayList<>();
-        List<Integer> faces = new ArrayList<>();
-        List<Integer> steps = new ArrayList<>();
+        PathBuilder path = new PathBuilder();
+        PathBuilder faces = path;
+        PathBuilder steps = path;
         int limit = basePipes.size() + undergroundPipes.size() + 1;
+        int loadedSteps = 1;
         PipeNode cell = output;
-        path.add(cell);
-        faces.add(side.ordinal());
         int count = 1;
-        steps.add(count);
+        path.add(cell, side.ordinal(), count);
         RouteSummary summary = null;
         while (true) {
             int code = cell.getHint(dest);
@@ -1671,29 +1855,29 @@ public final class PipeGrid implements PumpHost {
                     if (!(cell.isVerticalOpen() && valve.isVerticalOpen())) {
                         return new Walk(WALK_REPAIR);
                     }
-                    faces.add(PipeNode.HINT_VERTICAL);
+                    path.end(PipeNode.HINT_VERTICAL);
                     break;
                 }
             } else {
-                Direction d = Direction.values()[code];
+                Direction d = DIRS[code];
                 if (cell.getLayer() == PipeLayer.BASE && key(x + d.dx, y + d.dy) == dest) {
                     if (!(cell.isSideOpen(d) && valve.isSideOpen(d.opposite()))) {
                         return new Walk(WALK_REPAIR);
                     }
-                    faces.add(code);
+                    path.end(code);
                     break;
                 }
             }
             PipeLayer layer = code == PipeNode.HINT_VERTICAL ? cell.getLayer().other() : cell.getLayer();
-            int nx = code == PipeNode.HINT_VERTICAL ? x : x + Direction.values()[code].dx;
-            int ny = code == PipeNode.HINT_VERTICAL ? y : y + Direction.values()[code].dy;
-            PipeNode next = getPipe(nx, ny, layer);
+            int nx = code == PipeNode.HINT_VERTICAL ? x : x + DIRS[code].dx;
+            int ny = code == PipeNode.HINT_VERTICAL ? y : y + DIRS[code].dy;
+            PipeNode next = cell.around[code];
             if (next == null) {
                 if (isTileLoaded(nx, ny)) {
                     return new Walk(WALK_REPAIR);
                 }
                 // An unloaded stretch: only the summary of the last normal cycle can skip it (N23-2).
-                if (code != PipeNode.HINT_VERTICAL && !cell.isSideOpen(Direction.values()[code])) {
+                if (code != PipeNode.HINT_VERTICAL && !cell.isSideOpen(DIRS[code])) {
                     return new Walk(WALK_REPAIR);
                 }
                 if (summary == null) {
@@ -1710,10 +1894,9 @@ public final class PipeGrid implements PumpHost {
                         // Not full of this fluid when last seen: a dead end (N14-3).
                         return new Walk(WALK_DEAD_END);
                     }
-                    path.add(skipped);
-                    faces.add(last == null ? code : faceBetween(last.lastX, last.lastY, skipped.firstX, skipped.firstY));
                     count += skipped.count;
-                    steps.add(count);
+                    path.add(skipped, last == null ? code : faceBetween(last.lastX, last.lastY, skipped.firstX, skipped.firstY),
+                            count);
                     last = skipped;
                     run++;
                 }
@@ -1725,8 +1908,8 @@ public final class PipeGrid implements PumpHost {
                 if (next == null || !traversable(next, fluid)) {
                     return new Walk(WALK_DEAD_END);
                 }
-                faces.add(last.lastLayer != next.getLayer() && last.lastX == next.getTileX() && last.lastY == next.getTileY()
-                        ? PipeNode.HINT_VERTICAL : faceBetween(last.lastX, last.lastY, next.getTileX(), next.getTileY()));
+                code = last.lastLayer != next.getLayer() && last.lastX == next.getTileX() && last.lastY == next.getTileY()
+                        ? PipeNode.HINT_VERTICAL : faceBetween(last.lastX, last.lastY, next.getTileX(), next.getTileY());
             } else {
                 if (!linked(cell, next, code)) {
                     return new Walk(WALK_REPAIR);
@@ -1734,34 +1917,63 @@ public final class PipeGrid implements PumpHost {
                 if (!traversable(next, fluid)) {
                     return new Walk(WALK_DEAD_END);
                 }
-                faces.add(code);
             }
-            path.add(next);
             count++;
-            steps.add(count);
+            path.add(next, code, count);
             cell = next;
-            if (path.size() > limit) {
+            if (++loadedSteps > limit) {
                 return new Walk(WALK_REPAIR);
             }
         }
-        int[] faceArray = new int[faces.size()];
-        for (int i = 0; i < faceArray.length; i++) {
-            faceArray[i] = faces.get(i);
-        }
-        int[] stepArray = new int[steps.size()];
-        for (int i = 0; i < stepArray.length; i++) {
-            stepArray[i] = steps.get(i);
-        }
         Walk result = new Walk(WALK_OK);
-        result.route = new Route(valve, dest, path.toArray(), faceArray, stepArray, count);
+        result.route = new Route(valve, dest, path.elements(), path.faces(), path.steps(), count);
         return result;
+    }
+
+    /** A path being stepped: its elements, the face into each (and last into the valve), the steps to each. */
+    private static final class PathBuilder {
+        private Object[] elements = new Object[32];
+        private int[] faces = new int[33];
+        private int[] steps = new int[32];
+        private int size;
+        private int endFace = -1;
+
+        void add(Object element, int face, int stepsTo) {
+            if (size == elements.length) {
+                elements = java.util.Arrays.copyOf(elements, size * 2);
+                faces = java.util.Arrays.copyOf(faces, size * 2 + 1);
+                steps = java.util.Arrays.copyOf(steps, size * 2);
+            }
+            elements[size] = element;
+            faces[size] = face;
+            steps[size] = stepsTo;
+            size++;
+        }
+
+        void end(int face) {
+            endFace = face;
+        }
+
+        Object[] elements() {
+            return java.util.Arrays.copyOf(elements, size);
+        }
+
+        int[] faces() {
+            int[] result = java.util.Arrays.copyOf(faces, size + 1);
+            result[size] = endFace;
+            return result;
+        }
+
+        int[] steps() {
+            return java.util.Arrays.copyOf(steps, size);
+        }
     }
 
     private static boolean linked(PipeNode from, PipeNode to, int code) {
         if (code == PipeNode.HINT_VERTICAL) {
             return from.isVerticalOpen() && to.isVerticalOpen();
         }
-        Direction d = Direction.values()[code];
+        Direction d = DIRS[code];
         return from.isSideOpen(d) && to.isSideOpen(d.opposite());
     }
 
@@ -1904,6 +2116,7 @@ public final class PipeGrid implements PumpHost {
 
     /** Restores a saved summary (level load). */
     public void loadSummary(RouteSummary summary) {
+        changed();
         putSummary(key(summary.pumpX, summary.pumpY), key(summary.valveX, summary.valveY), summary);
     }
 
@@ -1927,6 +2140,7 @@ public final class PipeGrid implements PumpHost {
         if (pumpsTo == null) {
             return;
         }
+        changed();
         for (long pump : pumpsTo) {
             Map<Long, RouteSummary> byDest = summaries.get(pump);
             if (byDest != null) {
@@ -1941,6 +2155,7 @@ public final class PipeGrid implements PumpHost {
     private void dropSummariesOf(long pump) {
         Map<Long, RouteSummary> byDest = summaries.remove(pump);
         if (byDest != null) {
+            changed();
             for (long dest : byDest.keySet()) {
                 Set<Long> pumpsTo = summaryPumpsByDestination.get(dest);
                 if (pumpsTo != null) {
@@ -2053,7 +2268,9 @@ public final class PipeGrid implements PumpHost {
         @Override
         public PumpResult run(int amount) {
             Stats stats = distribute(amount, new RealLedger());
-            for (Route route : destinations) {
+            Long recorded = summaryRecordedAt.get(pump);
+            boolean record = recorded == null || recorded != changes;
+            for (Route route : record ? destinations : Collections.<Route>emptyList()) {
                 if (valves.get(route.dest) != route.valve) {
                     continue;
                 }
@@ -2067,6 +2284,9 @@ public final class PipeGrid implements PumpHost {
                 if (intact) {
                     recordSummary(pump, route, fluid);
                 }
+            }
+            if (record) {
+                summaryRecordedAt.put(pump, changes);
             }
             return new PumpResult(PumpResult.Status.PUMPED, fluid, stats.pipeFill + stats.deliveredTotal, stats.pipeFill,
                     stats.updated.size(), stats.lost, stats.delivered, stats.broken);
@@ -2414,6 +2634,9 @@ public final class PipeGrid implements PumpHost {
                     node.reachedTick = tick;
                     attachReached(node);
                 }
+                if (node.isFull()) {
+                    changed();
+                }
             }
 
             @Override
@@ -2447,38 +2670,47 @@ public final class PipeGrid implements PumpHost {
         }
 
         private final class DryLedger extends Ledger {
-            private final Map<PipeNode, Integer> added = new IdentityHashMap<>();
-            private final Map<PipeNode, Integer> flow = new IdentityHashMap<>();
+            /** Marks the pipes this dry run wrote to (their dry fields), instead of maps (technical). */
+            private final long stamp = ++dryStamps;
             private final Map<RunKey, Integer> runs = new HashMap<>();
             private final Map<TankStorage, Integer> tanks = new IdentityHashMap<>();
             private final Set<PipeNode> broken = Collections.newSetFromMap(new IdentityHashMap<PipeNode, Boolean>());
             private final Map<Route, Integer> frontiers = new IdentityHashMap<>();
 
+            private void touch(PipeNode node) {
+                if (node.dryStamp != stamp) {
+                    node.dryStamp = stamp;
+                    node.dryAdded = 0;
+                    node.dryFlow = 0;
+                    node.dryFilled = false;
+                }
+            }
+
             @Override
             int amount(PipeNode node) {
-                Integer extra = added.get(node);
-                return node.getAmount() + (extra == null ? 0 : extra);
+                return node.getAmount() + (node.dryStamp == stamp ? node.dryAdded : 0);
             }
 
             @Override
             FluidType fluid(PipeNode node) {
-                return node.getFluid() != null ? node.getFluid() : added.containsKey(node) ? fluid : null;
+                return node.getFluid() != null ? node.getFluid() : node.dryStamp == stamp && node.dryFilled ? fluid : null;
             }
 
             @Override
             boolean removed(PipeNode node) {
-                return node.removed || broken.contains(node);
+                return node.removed || !broken.isEmpty() && broken.contains(node);
             }
 
             @Override
             int flowLeft(PipeNode node) {
-                Integer used = flow.get(node);
-                return Math.max(0, node.flowLeft(window) - (used == null ? 0 : used));
+                int used = node.dryStamp == stamp ? node.dryFlow : 0;
+                return Math.max(0, node.flowLeft(window) - used);
             }
 
             @Override
             void useFlow(PipeNode node, int amount) {
-                flow.merge(node, amount, Integer::sum);
+                touch(node);
+                node.dryFlow += amount;
             }
 
             @Override
@@ -2494,12 +2726,14 @@ public final class PipeGrid implements PumpHost {
 
             @Override
             long reachedTick(PipeNode node) {
-                return node.getAmount() == 0 && added.containsKey(node) ? tick : node.reachedTick;
+                return node.getAmount() == 0 && node.dryStamp == stamp && node.dryFilled ? tick : node.reachedTick;
             }
 
             @Override
             void fill(PipeNode node, int amount, Stats stats) {
-                added.merge(node, amount, Integer::sum);
+                touch(node);
+                node.dryAdded += amount;
+                node.dryFilled = true;
             }
 
             @Override
@@ -2555,17 +2789,63 @@ public final class PipeGrid implements PumpHost {
     /** Pipes linked to {@code node}: same layer sides (9-4) and the other layer on the tile (N16-4). */
     private List<PipeNode> linkedPipes(PipeNode node) {
         List<PipeNode> result = new ArrayList<>(5);
-        for (Direction d : Direction.values()) {
-            PipeNode neighbour = getPipe(node.getTileX() + d.dx, node.getTileY() + d.dy, node.getLayer());
-            if (neighbour != null && node.isSideOpen(d) && neighbour.isSideOpen(d.opposite())) {
-                result.add(neighbour);
+        for (int code = 0; code <= PipeNode.HINT_VERTICAL; code++) {
+            PipeNode next = node.around[code];
+            if (next != null && linked(node, next, code)) {
+                result.add(next);
             }
         }
-        PipeNode other = getPipe(node.getTileX(), node.getTileY(), node.getLayer().other());
-        if (other != null && node.isVerticalOpen() && other.isVerticalOpen()) {
-            result.add(other);
-        }
         return result;
+    }
+
+    /**
+     * Adds a pipe to the cell index and links it with the pipes around it (its neighbours on its
+     * layer and the other layer's pipe on its tile), so stepping never looks a cell up (technical).
+     */
+    private void putCell(PipeNode node) {
+        int x = node.getTileX();
+        int y = node.getTileY();
+        pipes(node.getLayer()).put(key(x, y), node);
+        for (Direction d : DIRS) {
+            PipeNode next = getPipe(x + d.dx, y + d.dy, node.getLayer());
+            node.around[d.ordinal()] = next;
+            if (next != null) {
+                next.around[d.opposite().ordinal()] = node;
+            }
+        }
+        PipeNode other = getPipe(x, y, node.getLayer().other());
+        node.around[PipeNode.HINT_VERTICAL] = other;
+        if (other != null) {
+            other.around[PipeNode.HINT_VERTICAL] = node;
+        }
+        changed();
+    }
+
+    /** Takes a pipe out of the cell index and unlinks it from the pipes around it. */
+    private PipeNode takeCell(int x, int y, PipeLayer layer) {
+        PipeNode node = pipes(layer).remove(key(x, y));
+        if (node == null) {
+            return null;
+        }
+        for (int code = 0; code < DIRS.length; code++) {
+            PipeNode next = node.around[code];
+            if (next != null && next.around[DIRS[code].opposite().ordinal()] == node) {
+                next.around[DIRS[code].opposite().ordinal()] = null;
+            }
+            node.around[code] = null;
+        }
+        PipeNode other = node.around[PipeNode.HINT_VERTICAL];
+        if (other != null && other.around[PipeNode.HINT_VERTICAL] == node) {
+            other.around[PipeNode.HINT_VERTICAL] = null;
+        }
+        node.around[PipeNode.HINT_VERTICAL] = null;
+        changed();
+        return node;
+    }
+
+    /** Something the routes depend on changed: the routes stepped so far are stepped again (technical). */
+    private void changed() {
+        changes++;
     }
 
     public static long key(int x, int y) {
