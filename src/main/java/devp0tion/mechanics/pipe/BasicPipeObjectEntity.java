@@ -35,6 +35,11 @@ import necesse.level.maps.regionSystem.Region;
  *     faces where a pipe holding another fluid meets it ({@link PipeGrid#getFluidBlockedSides}: the
  *     neighbouring basic pipes, and the underground pipe on its tile through the vertical link),
  *     drawn like cut faces since they are dead ends (N13-2). The fluid stays on the server.</li>
+ *     <li>The link flags and the blocked faces kept here also give the pipe's collision, on the
+ *     server and the clients alike: a blocked face has no connection part (N31-10, N31-13,
+ *     {@link BasicPipeObject#getCollisions}). The server updates the faces whenever the engine says a
+ *     pipe started or stopped holding fluid ({@link #syncBlockedSides}); the game reads the
+ *     collision on every check, so nothing else needs to be told.</li>
  * </ul>
  */
 public class BasicPipeObjectEntity extends ObjectEntity {

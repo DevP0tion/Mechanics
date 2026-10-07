@@ -40,12 +40,13 @@ import java.util.Locale;
  *     <li>Removed with a pickaxe (10-2) or the wrench's left click (12-8); its fluid is lost (N12-1).</li>
  *     <li>Cannot be placed inside a recognized tank (N16-1); the item description says so (N11-6).</li>
  *     <li>Belongs to the "any pipe" ingredient group (N10-3).</li>
- *     <li>Drawn flat on the ground with arms toward its links and marks on cut faces
+ *     <li>Drawn flat on the ground with connection parts toward its links and marks on cut faces
  *     ({@link PipeRendering}).</li>
- *     <li>Blocks movement (N31-1) with a collision that follows its shape: a center square plus an
- *     arm toward each linked side ({@link PipeShape}, N31-10), read from the link flags whenever the
- *     game asks, so it changes with the links (the wrench, a neighbour placed or removed). Still
- *     placeable on liquid (N17-4).</li>
+ *     <li>Blocks movement (N31-1) with a collision that follows its shape: a center square plus a
+ *     connection part toward each side that is linked and not blocked by another fluid
+ *     ({@link PipeShape}, N31-10, N31-13), read from the link flags and the blocked faces whenever
+ *     the game asks, so it changes with the links (the wrench, a neighbour placed or removed) and the
+ *     fluids (fluid arriving, a pipe holding fluid removed). Still placeable on liquid (N17-4).</li>
  *     <li>Mined with any pickaxe, tier 0, the engine default (N31-2).</li>
  * </ul>
  */
@@ -58,8 +59,8 @@ public class BasicPipeObject extends GameObject {
     protected GameTexture texture;
 
     public BasicPipeObject(MineralTier tier, String stringID, Color mapColor) {
-        // Solid (N31-1); the collision is the center square plus arms toward the links (N31-10,
-        // getCollisions).
+        // Solid (N31-1); the collision is the center square plus connection parts toward the open
+        // links (N31-10, N31-13, getCollisions).
         super(new Rectangle(PipeShape.HUB));
         this.tier = tier;
         this.textureName = stringID;
@@ -97,23 +98,27 @@ public class BasicPipeObject extends GameObject {
     }
 
     /**
-     * The center square plus an arm toward each linked side (N31-10, {@link PipeShape}), from the
-     * link flags on both sides (the object entities', synced to clients). A pipe not placed yet (the
-     * placement check) counts every own flag as open, as it links on placement (9-4).
+     * The center square plus a connection part toward each side that is linked and not blocked by
+     * another fluid (N31-10, N31-13, {@link PipeShape}), as the pipe is drawn: from the link flags on
+     * both sides and the pipe's blocked faces, all kept in the object entities and synced to clients,
+     * so the server and the clients compute the same shape. Nothing caches it: the game asks on every
+     * collision check. A pipe not placed yet (the placement check) counts every own flag as open, as
+     * it links on placement (9-4), and has no blocked face.
      */
     @Override
     public List<Rectangle> getCollisions(Level level, int x, int y, int rotation) {
-        int linked = 0;
+        int open = 0;
         if (level != null) {
             int own = PipeRendering.baseLinks(level, x, y);
             int[] neighbours = new int[Direction.values().length];
             for (Direction d : Direction.values()) {
                 neighbours[d.ordinal()] = PipeRendering.baseLinks(level, x + d.dx, y + d.dy);
             }
-            linked = PipeShape.linkedSides(own < 0 ? LinkFlags.ALL_OPEN : own, neighbours);
+            int linked = PipeShape.linkedSides(own < 0 ? LinkFlags.ALL_OPEN : own, neighbours);
+            open = PipeShape.openSides(linked, PipeRendering.baseBlockedSides(level, x, y));
         }
         List<Rectangle> collisions = new LinkedList<>();
-        for (Rectangle part : PipeShape.collision(linked)) {
+        for (Rectangle part : PipeShape.collision(open)) {
             part.translate(x * 32, y * 32);
             collisions.add(part);
         }

@@ -93,7 +93,11 @@ public final class PipeRendering {
         return LinkFlags.ALL_OPEN;
     }
 
-    /** The faces of the basic pipe at a tile blocked by another fluid (N13-2; sides and vertical), or 0. */
+    /**
+     * The faces of the basic pipe at a tile blocked by another fluid (N13-2; sides and vertical), or 0.
+     * Also read on the server, for the basic pipe's collision (N31-13): its object entity keeps the
+     * faces on both sides (synced to clients).
+     */
     public static int baseBlockedSides(Level level, int tileX, int tileY) {
         ObjectEntity entity = level.entityManager.getObjectEntity(tileX, tileY);
         return entity instanceof BasicPipeObjectEntity ? ((BasicPipeObjectEntity) entity).getBlockedSides() : 0;
