@@ -60,6 +60,8 @@ engineering=Engineering Workbench
 // The engineering wrench's mode key (N30-5), default the middle mouse button.
 mechanicswrenchmode=Engineering Wrench: switch mode
 mechanicswrenchmodetip=Switches the held Engineering Wrench between basic and underground mode. The pipette does nothing while the wrench is held.
+// The log-fuelled pumps' interaction hint while the held logs can go into the fuel slot (N31-12).
+mechanicsaddfueltip=Add fuel
 
 [misc]
 // The notice at the moment the wrench's mode switches (N30-5).

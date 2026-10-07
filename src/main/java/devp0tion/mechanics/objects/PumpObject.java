@@ -47,9 +47,12 @@ import java.util.List;
  *     <li>Placement is rejected when the sources it would connect hold different fluids (N17-1),
  *     and inside a recognized tank (N16-1); the item description says so (N11-6).</li>
  *     <li>The manual pump pumps once per click (interact, 11-3). The log-fuelled pumps take logs
- *     both ways (N31-4): right clicked while the player holds logs, they take as many of them as
- *     fit into their fuel slot from the held stack; otherwise the right click opens their fuel
- *     slot window. They are switched off by a wire signal (11-3, N11-3, in the item description).</li>
+ *     both ways (N31-4): right clicked while the player holds logs that can go into their fuel
+ *     slot, they take as many of them as fit from the held stack; otherwise, also while holding
+ *     logs that cannot go in (the slot is full or holds another kind of log), the right click opens
+ *     their fuel slot window (N31-11). The interaction hint reads "연료 넣기" / "Add fuel" while
+ *     the held logs can go in, else the vanilla "Open" (N31-12). They are switched off by a wire
+ *     signal (11-3, N11-3, in the item description).</li>
  *     <li>Pushes only into adjacent basic pipes (9-3, 9-9). Cut links to valves are drawn on the
  *     pump (N16-4).</li>
  * </ul>
@@ -59,6 +62,9 @@ import java.util.List;
  * tier 0, the engine default (N31-2).
  */
 public class PumpObject extends GameObject {
+
+    /** The interaction hint while held logs can go into the fuel slot, {@code [controls]} (N31-12). */
+    public static final String ADD_FUEL_TIP = "mechanicsaddfueltip";
 
     /** canPlace error when the sources would hold different fluids (N17-1). */
     public static final String MIXED_SOURCES_ERROR = "pumpmixedsources";
@@ -136,9 +142,15 @@ public class PumpObject extends GameObject {
         return true;
     }
 
+    /** Both sides: the slot's contents are synced to clients (vanilla inventory sync). */
     @Override
     public String getInteractTip(Level level, int x, int y, PlayerMob perspective, boolean debug) {
-        return Localization.translate("controls", tier.usesLogFuel() ? "opentip" : "usetip");
+        if (!tier.usesLogFuel()) {
+            return Localization.translate("controls", "usetip");
+        }
+        // N31-12: "Add fuel" while the held logs can go in, else the vanilla "Open".
+        PumpObjectEntity pump = getCurrentObjectEntity(level, x, y, PumpObjectEntity.class);
+        return Localization.translate("controls", canInsertHeldLogs(level, perspective, pump) ? ADD_FUEL_TIP : "opentip");
     }
 
     @Override
@@ -150,9 +162,11 @@ public class PumpObject extends GameObject {
         }
         if (tier.usesLogFuel()) {
             PumpObjectEntity pump = getCurrentObjectEntity(level, x, y, PumpObjectEntity.class);
-            if (pump != null && insertHeldLogs(level, player, pump)) {
+            if (canInsertHeldLogs(level, player, pump)) {
+                insertHeldLogs(level, player, pump);
                 return;
             }
+            // Nothing held that can go in (no logs, the slot full, another kind of log): the window (N31-11).
             OEInventoryContainer.openAndSendContainer(ContainerRegistry.OE_INVENTORY_CONTAINER, player.getServerClient(), level, x, y);
         } else {
             PumpObjectEntity pump = getCurrentObjectEntity(level, x, y, PumpObjectEntity.class);
@@ -163,29 +177,34 @@ public class PumpObject extends GameObject {
     }
 
     /**
-     * Log fuel by right click (N31-4, server): when the player holds logs, as many of them as fit go
-     * into the pump's fuel slot, taken from the held stack. Returns whether the player held logs
-     * (then the window does not open, also when none fit).
-     * TODO(confirm): with the fuel slot full (or holding another kind of log than the slot's), the
-     * click inserts nothing and does not open the window either.
-     * TODO(design): the interact tip still says "Open" while logs are held.
+     * Whether the player holds logs of which at least one can go into the pump's fuel slot (N31-4,
+     * N31-11, N31-12): not when the slot is full or holds another kind of log. Both sides.
      */
-    static boolean insertHeldLogs(Level level, PlayerMob player, PumpObjectEntity pump) {
-        if (player == null) {
+    static boolean canInsertHeldLogs(Level level, PlayerMob player, PumpObjectEntity pump) {
+        if (player == null || pump == null || !pump.getTier().usesLogFuel()) {
             return false;
         }
+        InventoryItem held = player.getSelectedItemSlot().getItem(player.getInv());
+        return held != null && pump.isItemValid(0, held) && pump.inventory.canAddItem(level, player, held, FUEL_PURPOSE) > 0;
+    }
+
+    /**
+     * Log fuel by right click (N31-4, server): as many of the held logs as fit go into the pump's
+     * fuel slot, taken from the held stack. Called when {@link #canInsertHeldLogs}; the window does
+     * not open then.
+     */
+    static void insertHeldLogs(Level level, PlayerMob player, PumpObjectEntity pump) {
         PlayerInventorySlot slot = player.getSelectedItemSlot();
         InventoryItem held = slot.getItem(player.getInv());
-        if (held == null || !pump.isItemValid(0, held)) {
-            return false;
-        }
-        pump.inventory.addItem(level, player, held, "pumpfuel");
+        pump.inventory.addItem(level, player, held, FUEL_PURPOSE);
         if (held.getAmount() <= 0) {
             slot.setItem(player.getInv(), null);
         }
         slot.markDirty(player.getInv());
-        return true;
     }
+
+    /** The inventory purpose of logs put in by right click. */
+    private static final String FUEL_PURPOSE = "pumpfuel";
 
     @Override
     public void onWireUpdate(Level level, int layerID, int tileX, int tileY, int wireID, boolean active) {

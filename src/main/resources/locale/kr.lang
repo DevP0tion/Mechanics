@@ -54,6 +54,8 @@ engineering=공학 작업대
 // The engineering wrench's mode key (N30-5), default the middle mouse button.
 mechanicswrenchmode=공학 렌치 모드 전환
 mechanicswrenchmodetip=들고 있는 공학 렌치를 기본 모드와 지하 모드로 전환합니다. 공학 렌치를 들고 있는 동안에는 피펫이 작동하지 않습니다.
+// The log-fuelled pumps' interaction hint while the held logs can go into the fuel slot (N31-12).
+mechanicsaddfueltip=연료 넣기
 
 [misc]
 // The notice at the moment the wrench's mode switches (N30-5).
