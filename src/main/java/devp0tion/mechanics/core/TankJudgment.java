@@ -49,6 +49,9 @@ import java.util.Set;
  *     the world time simulation of a region that loaded before the controller's. The judgment sees
  *     those cells as broken ({@link Result#getNaturalGrowth}: the game breaks them). Inside an
  *     inactive tank natural growth is not blocked (N20-1) and still makes the tank invalid.</li>
+ *     <li>Floors (N29-9): the floors grass or snow spread onto are not part of the judgment; the
+ *     controller compares the interior with the floors it recorded after each judgment
+ *     ({@link TankFloorRecord#afterJudgment}).</li>
  * </ul>
  */
 public final class TankJudgment {

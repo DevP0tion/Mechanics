@@ -63,7 +63,11 @@ import java.util.Iterator;
  * ({@link #blocksFloorSpread}, {@code TankInteriorPatches.FloorSpreadCanPlace} for the grass
  * tiles' spread check, {@code TankInteriorPatches.DirtTileTick} for the dirt tile's tick, which
  * also turns it to snow; the world time simulation of a loading region uses the same spread check).
- * TODO(confirm): floor tiles that already spread there are left as they are, not reverted.
+ * What spread while the tank was dormant is set back when the controller judges its active tank:
+ * the controller records the interior floors when it recognizes the tank, and only the cells that
+ * grass or snow spread onto since, different from the record, go back to the recorded floor;
+ * natural grass or snow floors there before the recognition stay ({@link #revertFloor},
+ * {@code TankFloorRecord}, N29-9, replacing N29-4's "not reverted").
  *
  * <p>While a tank is dormant (its controller not loaded, N21-2), nothing is rejected or blocked in the
  * loaded part of its interior, placements by players included; a player's object there makes the
@@ -193,6 +197,20 @@ public final class TankInteriorPlacement {
             level.getServer().network.sendToClientsWithTile(new PacketChangeObject(level, layer, tileX, tileY, 0, 0),
                     level, tileX, tileY);
         }
+    }
+
+    /**
+     * Sets a floor that grass or snow spread onto back to the floor the controller recorded (N29-9),
+     * and tells the clients that have the tile. Server only. The change is reported like any other
+     * ({@link TankChangePatches}).
+     */
+    static void revertFloor(Level level, int tileX, int tileY, int floor) {
+        if (level == null || !level.isServer() || floor < 0 || !level.isTileWithinBounds(tileX, tileY)
+                || !level.regionManager.isTileLoaded(tileX, tileY) || level.getTileID(tileX, tileY) == floor) {
+            return;
+        }
+        level.setTile(tileX, tileY, floor);
+        level.sendTileUpdatePacket(tileX, tileY);
     }
 
     /** Whether an item placement event puts something not allowed into a recognized tank. */

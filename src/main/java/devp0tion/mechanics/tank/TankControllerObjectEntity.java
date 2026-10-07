@@ -5,6 +5,7 @@ import devp0tion.mechanics.core.FluidType;
 import devp0tion.mechanics.core.GridPos;
 import devp0tion.mechanics.core.TankBounds;
 import devp0tion.mechanics.core.MineralTier;
+import devp0tion.mechanics.core.TankFloorRecord;
 import devp0tion.mechanics.core.TankJudgment;
 import devp0tion.mechanics.core.TankStatusText;
 import devp0tion.mechanics.core.TankStorage;
@@ -13,11 +14,14 @@ import devp0tion.mechanics.core.TankValidation;
 import necesse.engine.network.PacketReader;
 import necesse.engine.network.PacketWriter;
 import necesse.engine.save.LoadData;
+import necesse.engine.registries.TileRegistry;
 import necesse.engine.save.SaveData;
 import necesse.entity.objectEntity.ObjectEntity;
 import necesse.level.maps.Level;
 import necesse.level.maps.regionSystem.Region;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -42,6 +46,10 @@ import java.util.Objects;
  *     load (N29-2).</li>
  *     <li>Natural growth found inside its active tank when it judges the tank is broken without
  *     drops ({@link TankInteriorPlacement#breakNaturalGrowth}, N23-4, N26-3, N29-5).</li>
+ *     <li>It records the interior floor tiles when it recognizes its tank, and at a later judgment
+ *     of the active tank sets the floors that grass or snow spread onto back to the recorded ones
+ *     ({@link TankFloorRecord}, {@link TankInteriorPlacement#revertFloor}, N29-9). The record is
+ *     saved with the judgment.</li>
  *     <li>One fluid type and amount, saved with the world ({@link TankStorage}, 12-7). A broken
  *     wall deactivates the tank and keeps the fluid (5-9); a rebuilt tank smaller than the stored
  *     amount loses the excess (N11-2); breaking the controller loses the fluid with this entity
@@ -81,6 +89,8 @@ public class TankControllerObjectEntity extends ObjectEntity {
     private long searchSignature;
     /** The lowest tier of the last valid judgment (N29-1): saved, and used while border cells are unloaded. */
     private MineralTier judgedTier;
+    /** The interior floors of the active tank, recorded when it was recognized (N29-9); saved. */
+    private TankFloorRecord floorRecord;
     /** The last judgment found its tank contested by another controller's (N29-8, {@link #isContested}). */
     private boolean contested;
     /** The region is unloading: nothing about the tank changes for the others (N21-2). */
@@ -176,7 +186,8 @@ public class TankControllerObjectEntity extends ObjectEntity {
     /** Judges the tank ({@link TankJudgment}) and applies the result. */
     private void judge(TankJudgment.Mode mode) {
         Level level = getLevel();
-        TankJudgment.Prior prior = storage.isActive() ? TankJudgment.Prior.ACTIVE : TankJudgment.Prior.INACTIVE;
+        boolean wasActive = storage.isActive();
+        TankJudgment.Prior prior = wasActive ? TankJudgment.Prior.ACTIVE : TankJudgment.Prior.INACTIVE;
         LevelTankCellLookup lookup = new LevelTankCellLookup(level);
         TankJudgment.Result result = TankJudgment.judge(tileX, tileY, lookup, mode, prior, judgedTier);
         // The judgment sees the natural growth as broken already (N23-4). Breaking it is a change
@@ -191,18 +202,31 @@ public class TankControllerObjectEntity extends ObjectEntity {
         if (searchWaiting) {
             searchSignature = TankStructure.loadedSignature(tileX, tileY, lookup);
         }
-        if (!result.appliesJudgment()) {
-            return;
+        if (result.appliesJudgment()) {
+            TankValidation tank = result.getTank();
+            // A valid smaller tank loses the excess at once, an invalid one keeps everything (N13-4).
+            storage.applyStructure(tank);
+            if (tank != null) {
+                judgedTier = tank.getLowestTier();
+                setKeptTank(tank.getBounds());
+                claimValves(tank);
+            }
+            // No tank: the kept tank is still remembered (N13-3) and the storage is inactive (5-9).
         }
-        TankValidation tank = result.getTank();
-        // A valid smaller tank loses the excess at once, an invalid one keeps everything (N13-4).
-        storage.applyStructure(tank);
-        if (tank != null) {
-            judgedTier = tank.getLowestTier();
-            setKeptTank(tank.getBounds());
-            claimValves(tank);
+        judgeFloors(lookup, wasActive);
+    }
+
+    /**
+     * N29-9: records the interior floors of a newly recognized tank; for a tank that stays active,
+     * sets the loaded floors that grass or snow spread onto back to the record. Setting a floor is a
+     * change within reach: the controllers nearby judge again (and find nothing more to set back).
+     */
+    private void judgeFloors(LevelTankCellLookup lookup, boolean wasActive) {
+        List<TankFloorRecord.Revert> reverts = new ArrayList<>();
+        floorRecord = TankFloorRecord.afterJudgment(floorRecord, storage.isActive() ? kept : null, wasActive, lookup, reverts);
+        for (TankFloorRecord.Revert revert : reverts) {
+            TankInteriorPlacement.revertFloor(getLevel(), revert.tileX, revert.tileY, revert.floor);
         }
-        // No tank: the kept tank is still remembered (N13-3) and the storage is inactive (5-9).
     }
 
     private void setKeptTank(TankBounds bounds) {
@@ -278,6 +302,51 @@ public class TankControllerObjectEntity extends ObjectEntity {
         if (judgedTier != null) {
             save.addEnum("tier", judgedTier);
         }
+        if (floorRecord != null) {
+            saveFloorRecord(save);
+        }
+    }
+
+    /**
+     * N29-9: the recorded interior floors (of the kept tank), at most 5x5 cells: the floor tiles by
+     * name once each ({@code floorTiles}) and per interior cell, in reading order, the index of its
+     * floor there, or -1 for none recorded yet ({@code floorCells}). Names keep the record right
+     * when the tile ids change with the game version or the mods.
+     */
+    private void saveFloorRecord(SaveData save) {
+        int[] floors = floorRecord.getFloors();
+        List<String> names = new ArrayList<>();
+        int[] cells = new int[floors.length];
+        for (int i = 0; i < floors.length; i++) {
+            String name = floors[i] < 0 ? null : TileRegistry.getTileStringID(floors[i]);
+            if (name == null) {
+                cells[i] = -1;
+                continue;
+            }
+            int index = names.indexOf(name);
+            if (index < 0) {
+                index = names.size();
+                names.add(name);
+            }
+            cells[i] = index;
+        }
+        save.addStringArray("floorTiles", names.toArray(new String[0]));
+        save.addIntArray("floorCells", cells);
+    }
+
+    /** The saved record of the kept tank's interior floors, or {@code null} (none saved, N29-9). */
+    private static TankFloorRecord loadFloorRecord(LoadData save, TankBounds kept) {
+        String[] names = save.getStringArray("floorTiles", null, false);
+        int[] cells = save.getIntArray("floorCells", null, false);
+        if (kept == null || names == null || cells == null) {
+            return null;
+        }
+        int[] floors = new int[cells.length];
+        for (int i = 0; i < cells.length; i++) {
+            // A name the game does not know any more (a removed mod's tile) is no record (-1).
+            floors[i] = cells[i] < 0 || cells[i] >= names.length ? TankFloorRecord.UNKNOWN : TileRegistry.getTileID(names[cells[i]]);
+        }
+        return TankFloorRecord.restore(kept, floors);
     }
 
     @Override
@@ -301,6 +370,9 @@ public class TankControllerObjectEntity extends ObjectEntity {
             storage.restoreJudgment(kept != null && save.getBoolean("active", false, false),
                     Math.max(0, save.getInt("capacity", 0, false)));
         }
+        // N29-9: a judgment saved before the floor record existed has none: the next judgment of the
+        // active tank records the floors and sets nothing back.
+        floorRecord = storage.isActive() ? loadFloorRecord(save, kept) : null;
         // The view starts from the saved judgment: clients and the natural growth check of the
         // region loading now (its world time simulation, N20-1) see the tank at once.
         viewActive = storage.isActive();

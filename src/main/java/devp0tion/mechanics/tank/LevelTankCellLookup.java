@@ -6,6 +6,7 @@ import devp0tion.mechanics.core.MineralTier;
 import devp0tion.mechanics.core.TankBounds;
 import devp0tion.mechanics.core.TankCell;
 import devp0tion.mechanics.core.TankCellLookup;
+import devp0tion.mechanics.core.TankFloorRecord;
 import devp0tion.mechanics.core.TankStructure;
 import devp0tion.mechanics.objects.GlassBlockObject;
 import devp0tion.mechanics.objects.MineralWallObject;
@@ -14,6 +15,7 @@ import devp0tion.mechanics.objects.TankValveObject;
 import devp0tion.mechanics.objects.TankValveObjectItem;
 import devp0tion.mechanics.pipe.UndergroundPipeLayer;
 import necesse.engine.registries.ObjectLayerRegistry;
+import necesse.engine.registries.TileRegistry;
 import necesse.level.gameObject.GameObject;
 import necesse.level.gameTile.GameTile;
 import necesse.level.maps.Level;
@@ -37,9 +39,12 @@ import necesse.level.maps.Level;
  *     <li>Tiles outside the level or in a region that is not loaded read as {@code null} (something
  *     else). {@link #isLoaded} tells the tiles that are not loaded apart, for the judgments that
  *     leave them out (N20-7, {@code TankJudgment}); tiles outside the level count as loaded.</li>
+ *     <li>The floors for the controller's record of the interior floors ({@link TankFloorRecord},
+ *     N29-9): the floor tile id, and whether it is a natural spread floor
+ *     ({@link #isNaturalSpreadFloor}).</li>
  * </ul>
  */
-public final class LevelTankCellLookup implements TankCellLookup {
+public final class LevelTankCellLookup implements TankCellLookup, TankFloorRecord.FloorLookup {
 
     private static final TankCell EMPTY = TankCell.of(CellKind.EMPTY);
     private static final TankCell OTHER = TankCell.of(CellKind.OTHER);
@@ -68,6 +73,32 @@ public final class LevelTankCellLookup implements TankCellLookup {
     @Override
     public boolean isLoaded(int tileX, int tileY) {
         return !level.isTileWithinBounds(tileX, tileY) || level.regionManager.isTileLoaded(tileX, tileY);
+    }
+
+    @Override
+    public int getFloor(int tileX, int tileY) {
+        return isReadable(level, tileX, tileY) ? level.getTileID(tileX, tileY) : TankFloorRecord.UNKNOWN;
+    }
+
+    @Override
+    public boolean isNaturalSpread(int floor) {
+        return isNaturalSpreadFloor(floor);
+    }
+
+    /**
+     * Whether a floor tile is one the game spreads onto dirt by itself (N29-4, N29-9): a grass tile
+     * that spreads ({@code spreadToDirtChance() > 0}: grass, plains, swamp and overgrown grass), or
+     * snow, which a dirt tile turns into ({@code DirtTile.tick}).
+     */
+    public static boolean isNaturalSpreadFloor(int floor) {
+        if (floor < 0) {
+            return false;
+        }
+        if (floor == TileRegistry.snowID) {
+            return true;
+        }
+        GameTile tile = TileRegistry.getTile(floor);
+        return tile != null && tile.spreadToDirtChance() > 0;
     }
 
     /** The cell of the base layer object on a tile, with its tier and ownership. */
