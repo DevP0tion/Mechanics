@@ -16,16 +16,16 @@ import net.bytebuddy.asm.Advice;
 
 /**
  * The tooltip shown while the cursor is over a recognized tank's interior (5-4): the tank state as
- * {@code <fluid name> <current>/<max>} (6-2, 6-9). With mouse input the game draws hover tooltips
- * just right of the cursor (6-2).
+ * {@code <fluid name> <current>/<max>} (6-2, 6-9), or "비어 있음" / "Empty" for an empty tank
+ * (N31-7). With mouse input the game draws hover tooltips just right of the cursor (6-2).
  *
  * <p>An empty interior tile has no object of its own to hover, so the HUD's object hover call
  * ({@code LevelObject.onMouseHover}, which the HUD makes for the object under the cursor, the air
  * object included) is patched. The HUD may call it twice per frame (interactable object and hit
  * object); the tooltip is only added for the hit object, so it appears once.
  *
- * <p>TODO(design): whether an inactive tank (wall broken, fluid kept, 5-9) shows anything is
- * undecided; only recognized tanks show the tooltip.
+ * <p>Only recognized tanks show the tooltip: an inactive tank (wall broken, fluid kept, 5-9) shows
+ * none (N31-6).
  */
 public final class TankHoverTooltip {
 

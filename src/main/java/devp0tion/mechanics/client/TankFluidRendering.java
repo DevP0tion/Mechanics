@@ -53,9 +53,10 @@ import java.util.Objects;
  * {@link #onTankViewChanged} in the controller's object entity to remove it.
  *
  * <p>TODO(game): not verified visually; the dedicated server cannot draw. Needs checking on a
- * client: the fluid sprite, the wave shader, region edges and glass blocks on top.
- * <p>TODO(design): whether an inactive tank (wall broken, fluid kept, 5-9) still shows its fluid
- * is undecided; only recognized tanks are drawn.
+ * client: the fluid sprite, the wave shader, the deep look ({@link #FLUID_HEIGHT}), region edges
+ * and glass blocks on top.
+ * <p>Only recognized tanks are drawn: an inactive tank (wall broken, fluid kept, 5-9) does not draw
+ * its fluid (N31-5).
  */
 public final class TankFluidRendering {
 
@@ -64,11 +65,11 @@ public final class TankFluidRendering {
 
     /**
      * The liquid height written into the liquid data texture for tank cells (vanilla: below 0 is
-     * depth, -10 deepest), which picks the shallow/deep look.
-     * TODO(design): the look of a tank's fluid (shallow or deep) is undecided; -1, the shallowest
-     * liquid depth, is a rendering placeholder.
+     * depth, -10 deepest), which picks the shallow/deep look: the deepest depth the engine uses,
+     * so a tank's fluid has the deep look of the vanilla liquid tile (N31-9).
+     * TODO(game): the deep look is not verified visually.
      */
-    private static final int FLUID_HEIGHT = -1;
+    private static final int FLUID_HEIGHT = LiquidManager.minDepth;
 
     private TankFluidRendering() {
     }
@@ -131,8 +132,8 @@ public final class TankFluidRendering {
     }
 
     /**
-     * The colour crude oil is drawn with: it has no vanilla liquid tile to borrow (N17-5).
-     * TODO(design): provisional dark colour; crude oil's look is undecided.
+     * The colour crude oil is drawn with: it has no vanilla liquid tile to borrow (N17-5). Dark
+     * brown, as decided (N31-8).
      */
     public static final Color CRUDE_OIL_COLOR = new Color(28, 22, 18, 230);
 

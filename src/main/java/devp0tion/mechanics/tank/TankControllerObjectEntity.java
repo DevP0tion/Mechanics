@@ -365,9 +365,9 @@ public class TankControllerObjectEntity extends ObjectEntity {
         return viewCapacity;
     }
 
-    /** {@code <fluid name> <current>/<max>} (6-2, 6-9). */
+    /** {@code <fluid name> <current>/<max>} (6-2, 6-9); "비어 있음" / "Empty" when empty (N31-7). */
     public String getStatusText() {
-        return TankStatusText.format(FluidNames.displayName(viewFluid), viewAmount, viewCapacity);
+        return TankStatusText.format(FluidNames.displayName(viewFluid), viewAmount, viewCapacity, FluidNames.emptyText());
     }
 
 }

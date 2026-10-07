@@ -33,12 +33,13 @@ final class FluidTest {
         }
     }
 
-    public static void testOnlySeawaterAndFreshwaterHaveDecidedNames() {
+    public static void testFixedNamesOnlyWhereNoVanillaTileNameIsFollowed() {
         Check.equal("해수", FluidType.SEAWATER.getKoreanName());
         Check.equal("담수", FluidType.FRESHWATER.getKoreanName());
+        Check.equal("원유", FluidType.CRUDE_OIL.getKoreanName(), "N32-4");
         for (FluidType type : FluidType.values()) {
-            if (!type.isWater()) {
-                Check.isNull(type.getKoreanName(), type + " name is undecided");
+            if (!type.isWater() && type.hasLiquidTile()) {
+                Check.isNull(type.getKoreanName(), type + " follows its vanilla tile's name (N32-4)");
             }
         }
     }

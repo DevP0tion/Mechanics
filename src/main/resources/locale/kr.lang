@@ -38,9 +38,14 @@ tankvalvetier=티어: <wall>
 tankvalvetierfromwall=티어: 제작에 쓴 광물 벽의 티어
 
 [fluid]
-// Fluid display names (12-5). The other fluids' names are undecided (TODO(design), FluidNames).
+// Fluid display names (12-5, N32-4). Lava, slime, ooze, spirit water and quicksand take their vanilla
+// liquid tiles' names from the game (FluidNames).
 seawater=해수
 freshwater=담수
+// Crude oil has no vanilla tile (N32-4).
+crudeoil=원유
+// An empty tank's status text (N31-7).
+empty=비어 있음
 
 [tech]
 engineering=공학 작업대

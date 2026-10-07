@@ -43,10 +43,15 @@ tankvalvetier=Tier: <wall>
 tankvalvetierfromwall=Tier: that of the mineral wall used to craft it
 
 [fluid]
-// Fluid display names (12-5). The other fluids' names are undecided (TODO(design), FluidNames).
+// Fluid display names (12-5, N32-4). Lava, slime, ooze, spirit water and quicksand take their vanilla
+// liquid tiles' names from the game (FluidNames).
 // TODO(confirm): only the Korean names 해수 / 담수 are decided; plain translations.
 seawater=Seawater
 freshwater=Freshwater
+// Crude oil has no vanilla tile (N32-4).
+crudeoil=Crude Oil
+// An empty tank's status text (N31-7).
+empty=Empty
 
 [tech]
 engineering=Engineering Workbench

@@ -21,7 +21,7 @@ public enum FluidType {
 
     SEAWATER("watertile", Salinity.SALT, "해수"),
     FRESHWATER("watertile", Salinity.FRESH, "담수"),
-    // TODO(design): display names of the fluids below are undecided (numbers.md table 4).
+    // The fluids below are named after their vanilla liquid tiles, as the game localizes them (N32-4).
     LAVA("lavatile", Salinity.NOT_WATER, null),
     SLIME("liquidslimetile", Salinity.NOT_WATER, null),
     OOZE("liquidoozetile", Salinity.NOT_WATER, null),
@@ -29,10 +29,10 @@ public enum FluidType {
     QUICKSAND("quicksandtile", Salinity.NOT_WATER, null),
     /**
      * Crude oil (원유, N17-5): mod-only, no vanilla liquid tile. Only pumps from the advanced fire
-     * pump up move it (12-1, 12-6, {@link PumpTier#canPump}).
-     * TODO(design): its display name and temperature are undecided (numbers.md table 4).
+     * pump up move it (12-1, 12-6, {@link PumpTier#canPump}). Named 원유 / Crude Oil (N32-4).
+     * TODO(design): its temperature is undecided (numbers.md table 4).
      */
-    CRUDE_OIL(null, Salinity.NOT_WATER, null);
+    CRUDE_OIL(null, Salinity.NOT_WATER, "원유");
 
     /**
      * The deep sea starts below this liquid height (vanilla {@code LiquidManager.getHeight}: below 0
@@ -81,8 +81,8 @@ public enum FluidType {
     }
 
     /**
-     * The decided Korean display name, or {@code null} while it is undecided.
-     * Only 해수 and 담수 are decided (12-5).
+     * The fixed Korean display name: 해수 and 담수 (12-5), 원유 (N32-4); {@code null} for the fluids
+     * named after their vanilla liquid tile, whose names follow the game's localization (N32-4).
      */
     public String getKoreanName() {
         return koreanName;
