@@ -1,4 +1,8 @@
-# Builds the mod jar and publishes a GitHub release when a version tag (v*) is pushed.
+# Builds the mod jar and publishes a GitHub release, started in one of two ways:
+#   - pushing a version tag (v*): the release is made for that tag;
+#   - running the workflow by hand (Actions tab > Release > Run workflow) on a branch with a tag
+#     name such as v0.1.0: the release and its tag are created on that branch's latest commit.
+#     The run fails if the tag already exists.
 #
 # Release notes: each release needs its own notes file, .github/release-notes/<tag>.md
 # (for example .github/release-notes/v0.1.0.md). The run fails if the file is missing.
@@ -20,6 +24,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create for the release, for example v0.1.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -31,6 +41,8 @@ env:
   SERVER_PAGE: https://necessegame.com/server
   SERVER_SHA256: 8ba1abdbae6ac57e7ba33e56389e18717f78d9e46aaebae30cd50dfa5c4d697c
   SERVER_DIR: necesse-server-1-3-3-24926468
+  # The release tag: the typed input of a manual run, else the pushed tag.
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   release:
@@ -38,9 +50,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check the tag of a manual run
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+(\.[0-9]+)*$'; then
+            echo "::error::Tag '$TAG' is not of the form v<version>, for example v0.1.0"
+            exit 1
+          fi
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "::error::Tag $TAG already exists; push it or choose another"
+            exit 1
+          fi
+
       - name: Check the release notes file
         run: |
-          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          notes=".github/release-notes/${TAG}.md"
           if [ ! -f "$notes" ]; then
             echo "::error::Missing release notes file $notes"
             exit 1
@@ -83,7 +108,7 @@ jobs:
       - name: Check the mod version against the tag
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${TAG#v}"
           jars=(build/jar/*.jar)
           if [ "${#jars[@]}" -ne 1 ] || [ ! -f "${jars[0]}" ]; then
             echo "::error::Expected exactly one jar in build/jar, found: ${jars[*]}"
@@ -91,7 +116,7 @@ jobs:
           fi
           mod_version="$(unzip -p "${jars[0]}" mod.info | tr -d '\r' \
             | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*\([^,]*\),\{0,1\}[[:space:]]*$/\1/p')"
-          echo "Tag $GITHUB_REF_NAME, jar ${jars[0]}, mod.info version '$mod_version'"
+          echo "Tag $TAG, jar ${jars[0]}, mod.info version '$mod_version'"
           if [ "$mod_version" != "$version" ]; then
             echo "::error::mod.info version '$mod_version' does not match the tag version '$version'"
             exit 1
@@ -108,7 +133,8 @@ jobs:
           if grep -Eq '^[[:space:]]*<!-- prerelease -->[[:space:]]*$' "$NOTES_FILE"; then
             prerelease=(--prerelease)
           fi
-          gh release create "$GITHUB_REF_NAME" build/jar/*.jar \
+          gh release create "$TAG" build/jar/*.jar \
+            --target "$GITHUB_SHA" \
             --title "Mechanics $VERSION" \
             --notes-file "$NOTES_FILE" \
             ${prerelease[@]+"${prerelease[@]}"}
