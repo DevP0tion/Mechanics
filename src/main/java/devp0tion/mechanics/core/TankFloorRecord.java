@@ -27,6 +27,8 @@ import java.util.Objects;
  * TODO(confirm): a grass or snow floor that differs from the record is reverted also when a player
  * put it there while the tank was dormant (placements inside a dormant tank are not rejected, N29-3);
  * the game cannot tell it from natural spread.
+ * TODO(confirm): a floor that changed otherwise (not to grass or snow) does not update the record, so
+ * grass or snow spreading onto it later is compared with the floor recorded at the recognition.
  *
  * <p>The record is saved with the controller's judgment: one floor per interior cell (at most 5x5,
  * 4-2). Game independent: floors are the game's tile ids, which the controller saves by name.
