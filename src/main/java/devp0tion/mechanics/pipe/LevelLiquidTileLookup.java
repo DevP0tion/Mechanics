@@ -22,8 +22,9 @@ import necesse.level.maps.Level;
  *     a pump near the edge of a level is judged by the tiles that exist (as
  *     {@code LevelTankCellLookup.isAreaLoaded} does for tanks).</li>
  * </ul>
- * TODO(design): buckets cannot scoop the deep sea at all; a pump using up a deep seawater (crude
- * oil) tile turns it into dirt the same way, a placeholder until it is decided.
+ * Deep seawater (crude oil) is never used up: a pump on it is an inexhaustible source
+ * ({@link devp0tion.mechanics.core.LiquidTileSource}, N27-5), so it never turns a deep tile into
+ * dirt.
  */
 public final class LevelLiquidTileLookup implements LiquidTileLookup {
 

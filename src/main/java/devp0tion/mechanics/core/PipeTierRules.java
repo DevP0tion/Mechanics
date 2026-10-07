@@ -14,6 +14,8 @@ import java.util.Set;
  *     (N14-2); pumps pushing through the same pipes share it (N18-1).</li>
  *     <li>Maximum temperature, transportable kinds and state: judged when fluid reaches a new pipe,
  *     against the lowest tier of the network it joins (N12-4, N14-1).</li>
+ *     <li>Movement speed (이동 속도): how fast the fluid fills connected empty pipes (N25-1~N25-3,
+ *     {@link #getFillTicksPerBlock}).</li>
  * </ul>
  *
  * <p>The game's values are the one table {@link Row}; tests implement this interface with their
@@ -30,6 +32,21 @@ public interface PipeTierRules {
      */
     default boolean canCarry(MineralTier lowestTier, FluidType fluid) {
         return Row.of(lowestTier).carries(fluid);
+    }
+
+    /**
+     * The movement speed of the tier (N25-2): the fluid fills connected empty pipes one block per
+     * step (N25-1), so a pipe of this tier is reached at the earliest this many ticks after the pipe
+     * the fluid comes from was reached. It only limits filling empty pipes; full stretches are passed
+     * within the cycle (N25-3).
+     * <p>TODO(confirm): the unit, ticks per block, is the simplest form of "one block per step at the
+     * pipe's speed" (N25-1) in the engine's tick clock.
+     * <p>TODO(design): every tier's value is undecided (N25-2); the provisional value
+     * {@link #PROVISIONAL_FILL_TICKS_PER_BLOCK} limits nothing beyond the transport cap (N14-2), so
+     * the game fills empty pipes as fast as before.
+     */
+    default int getFillTicksPerBlock(MineralTier tier) {
+        return PROVISIONAL_FILL_TICKS_PER_BLOCK;
     }
 
     /** The game's rules: the table {@link Row}. */
@@ -123,6 +140,13 @@ public interface PipeTierRules {
 
     /** TODO(design): provisional "no maximum temperature" (fluid temperatures are undecided, 12-4). */
     int NO_TEMPERATURE_LIMIT = Integer.MAX_VALUE;
+
+    /**
+     * TODO(design): provisional movement speed of every tier (N25-2), in ticks per block: 1, one
+     * block per tick. The transport cap already lets a path's fluid reach at most one new pipe per
+     * cycle window (a pipe filled from empty has used its whole cap), so this value changes nothing.
+     */
+    int PROVISIONAL_FILL_TICKS_PER_BLOCK = 1;
 
     /** TODO(design): provisional "every fluid kind". */
     Set<FluidType> ALL = Collections.unmodifiableSet(EnumSet.allOf(FluidType.class));

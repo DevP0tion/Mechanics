@@ -9,8 +9,8 @@ final class PipeNetworkTest {
     private PipeNetworkTest() {
     }
 
-    private static PipeGrid grid() {
-        return new PipeGrid(Fluids.uniform(20));
+    private static EngineApi grid() {
+        return Engines.create(Fluids.uniform(20));
     }
 
     // ---------- the tier table ----------
@@ -35,7 +35,7 @@ final class PipeNetworkTest {
     }
 
     public static void testEachPipeHoldsItsOwnTiersAmount() {
-        PipeGrid grid = new PipeGrid(Fluids.TIERS);
+        EngineApi grid = Engines.create(Fluids.TIERS);
         PipeNode copper = grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
         PipeNode gold = grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.GOLD);
         Check.equal(10, copper.getCapacity(), "own tier (N12-3)");
@@ -45,14 +45,14 @@ final class PipeNetworkTest {
     // ---------- networks by reach ----------
 
     public static void testEmptyPipesBelongToNoNetwork() {
-        PipeGrid grid = grid();
+        EngineApi grid = grid();
         Fluids.baseLine(grid, 0, 4, 0, MineralTier.COPPER);
         Check.equal(0, grid.getNetworks().size(), "N13-1");
         Check.isNull(grid.getNetwork(0, 0, PipeLayer.BASE), "no network");
     }
 
     public static void testNewPumpStartsItsOwnNetwork() {
-        PipeGrid grid = grid();
+        EngineApi grid = grid();
         Pump a = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Pump b = Fluids.pump(grid, 5, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Check.isTrue(a.getNetwork() != null && a.getNetwork() != b.getNetwork(), "one network each (N18-2)");
@@ -60,7 +60,7 @@ final class PipeNetworkTest {
     }
 
     public static void testReachedPipesFormThePumpsNetwork() {
-        PipeGrid grid = grid();
+        EngineApi grid = grid();
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 5, 0, MineralTier.COPPER);
         grid.placeValve(6, 0, Fluids.valve(1000));
@@ -76,7 +76,7 @@ final class PipeNetworkTest {
 
     public static void testSameFluidNetworksMergeWhenTheFluidMeets() {
         // Two pumps push toward a valve between them; each starts its own network (N18-2).
-        PipeGrid grid = grid();
+        EngineApi grid = grid();
         Pump left = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.LAVA);
         Pump right = Fluids.fueledPump(grid, 4, 0, PumpTier.FIRE, FluidType.LAVA);
         Fluids.baseLine(grid, 1, 3, 0, MineralTier.COPPER);
@@ -92,7 +92,7 @@ final class PipeNetworkTest {
     }
 
     public static void testDifferentFluidsNeverJoin() {
-        PipeGrid grid = grid();
+        EngineApi grid = grid();
         Pump water = Fluids.fueledPump(grid, 0, 0, PumpTier.ADVANCED_FIRE, FluidType.FRESHWATER);
         Pump lava = Fluids.fueledPump(grid, 4, 0, PumpTier.ADVANCED_FIRE, FluidType.LAVA);
         Fluids.baseLine(grid, 1, 3, 0, MineralTier.COPPER);
@@ -110,7 +110,7 @@ final class PipeNetworkTest {
     }
 
     public static void testRemovalSplitsTheNetworkAndLosesTheRemovedFluid() {
-        PipeGrid grid = grid();
+        EngineApi grid = grid();
         Fluids.baseLine(grid, 0, 4, 0, MineralTier.COPPER);
         Fluids.fill(grid, 0, 4, 0, PipeLayer.BASE, FluidType.FRESHWATER);
         Check.equal(1, grid.getNetworks().size(), "reached and linked: one network");
@@ -125,7 +125,7 @@ final class PipeNetworkTest {
     }
 
     public static void testCuttingALinkSplitsAndRelinkingMerges() {
-        PipeGrid grid = grid();
+        EngineApi grid = grid();
         Fluids.baseLine(grid, 0, 3, 0, MineralTier.COPPER);
         Fluids.fill(grid, 0, 3, 0, PipeLayer.BASE, FluidType.SLIME);
         grid.toggleSide(1, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
@@ -135,7 +135,7 @@ final class PipeNetworkTest {
     }
 
     public static void testNetworkUsesItsLowestTier() {
-        PipeGrid grid = new PipeGrid(Fluids.TIERS);
+        EngineApi grid = Engines.create(Fluids.TIERS);
         grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.GOLD);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.IRON);
         grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.SPIDERITE);
@@ -146,7 +146,8 @@ final class PipeNetworkTest {
     // ---------- per-network route caches (N18-2) ----------
 
     public static void testRouteCachesArePerNetworkAndDroppedOnlyByChangesTheyCross() {
-        PipeGrid grid = grid();
+        // The legacy engine only: route caches are replaced by cell hints (N22-3).
+        EngineApi grid = new LegacyPipeGrid(Fluids.TIERS);
         Pump a = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 3, 0, MineralTier.COPPER);
         grid.placeValve(4, 0, Fluids.valve(1000));

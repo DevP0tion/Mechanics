@@ -20,6 +20,10 @@ import java.util.Set;
  * </ol>
  * The fluid of a tile comes from {@link LiquidTileLookup#getFluid} (deep seawater gives crude oil,
  * N17-5), so "the same liquid" means the same {@link FluidType}.
+ * <p>Deep seawater never runs out (N27-5): a pump whose tile gives crude oil is an inexhaustible
+ * source whatever the 5x5 judgment says, and never uses up a deep tile. Shallow seawater and the
+ * other liquids follow the rules above (their tiles are never crude oil, so a finite source of them
+ * never reaches a deep tile either).
  *
  * <h2>The 5x5 judgment (N20-7)</h2>
  * <ul>
@@ -220,6 +224,14 @@ public final class LiquidTileSource implements FluidSource {
         }
     }
 
+    /**
+     * Whether the pump tile's {@code fluid} never runs out: deep seawater (crude oil) always (N27-5),
+     * any other fluid when the 5x5 judgment is infinite (N19-3 ①).
+     */
+    private boolean isInexhaustible(FluidType fluid) {
+        return fluid == FluidType.CRUDE_OIL || isInfinite();
+    }
+
     private static int cellCode(FluidType fluid) {
         return fluid == null ? NO_FLUID : fluid.ordinal();
     }
@@ -264,7 +276,7 @@ public final class LiquidTileSource implements FluidSource {
         if (lookup.getFluid(pumpX, pumpY) != type) {
             return 0;
         }
-        if (isInfinite()) {
+        if (isInexhaustible(type)) {
             return Integer.MAX_VALUE;
         }
         long units = (long) connectedTiles().size() * FluidUnits.BUCKET;
@@ -288,7 +300,7 @@ public final class LiquidTileSource implements FluidSource {
         if (taken == maxAmount || lookup.getFluid(pumpX, pumpY) != type) {
             return taken;
         }
-        if (isInfinite()) {
+        if (isInexhaustible(type)) {
             return maxAmount;
         }
         while (taken < maxAmount) {

@@ -62,11 +62,11 @@ final class Fluids {
     }
 
     /** Places basic pipes from x0 to x1 (inclusive) on row y. */
-    static void baseLine(PipeGrid grid, int x0, int x1, int y, MineralTier tier) {
+    static void baseLine(EngineApi grid, int x0, int x1, int y, MineralTier tier) {
         line(grid, x0, x1, y, PipeLayer.BASE, tier);
     }
 
-    static void line(PipeGrid grid, int x0, int x1, int y, PipeLayer layer, MineralTier tier) {
+    static void line(EngineApi grid, int x0, int x1, int y, PipeLayer layer, MineralTier tier) {
         for (int x = x0; x <= x1; x++) {
             grid.placePipe(x, y, layer, tier);
         }
@@ -76,7 +76,7 @@ final class Fluids {
      * Fills pipes of a row segment to capacity with {@code fluid} as saved state (the grid builds
      * their networks as for loaded pipes).
      */
-    static void fill(PipeGrid grid, int x0, int x1, int y, PipeLayer layer, FluidType fluid) {
+    static void fill(EngineApi grid, int x0, int x1, int y, PipeLayer layer, FluidType fluid) {
         for (int x = x0; x <= x1; x++) {
             PipeNode node = grid.getPipe(x, y, layer);
             grid.loadPipe(x, y, layer, node.getTier(), node.getLinks(), fluid, node.getCapacity(), node.isLoaded());
@@ -84,13 +84,13 @@ final class Fluids {
     }
 
     /** Puts {@code amount} of {@code fluid} into one pipe as saved state. */
-    static PipeNode set(PipeGrid grid, int x, int y, PipeLayer layer, FluidType fluid, int amount) {
+    static PipeNode set(EngineApi grid, int x, int y, PipeLayer layer, FluidType fluid, int amount) {
         PipeNode node = grid.getPipe(x, y, layer);
         return grid.loadPipe(x, y, layer, node.getTier(), node.getLinks(), fluid, amount, node.isLoaded());
     }
 
     /** A pump placed at the tile, standing on an infinite liquid tile of {@code fluid}. */
-    static Pump pump(PipeGrid grid, int x, int y, PumpTier tier, FluidType fluid) {
+    static Pump pump(EngineApi grid, int x, int y, PumpTier tier, FluidType fluid) {
         Pump pump = new Pump(tier);
         pump.setTileSource(LiquidTileSource.infinite(fluid));
         grid.placePump(x, y, pump);
@@ -100,7 +100,7 @@ final class Fluids {
     /** Ticks the grid clock and a log-fueled pump until something other than WAITING happens. */
     static PumpResult cycle(Pump pump) {
         for (int i = 0; i < 1000; i++) {
-            pump.grid.tick();
+            pump.host.tick();
             PumpResult result = pump.tick();
             if (result.getStatus() != PumpResult.Status.WAITING) {
                 return result;
@@ -110,7 +110,7 @@ final class Fluids {
     }
 
     /** One game tick of the grid clock and every given pump; returns the pumps' results. */
-    static PumpResult[] tickAll(PipeGrid grid, Pump... pumps) {
+    static PumpResult[] tickAll(EngineApi grid, Pump... pumps) {
         grid.tick();
         PumpResult[] results = new PumpResult[pumps.length];
         for (int i = 0; i < pumps.length; i++) {
@@ -140,7 +140,7 @@ final class Fluids {
     }
 
     /** A log-fueled pump with plenty of logs. */
-    static Pump fueledPump(PipeGrid grid, int x, int y, PumpTier tier, FluidType fluid) {
+    static Pump fueledPump(EngineApi grid, int x, int y, PumpTier tier, FluidType fluid) {
         Pump pump = pump(grid, x, y, tier, fluid);
         pump.setFuelSupply(new Logs(1000));
         return pump;

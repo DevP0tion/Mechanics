@@ -48,19 +48,19 @@ final class TileBucketsTest {
         Check.equal(Collections.emptyList(), index.at(0, 0), "removing twice is harmless");
     }
 
-    // ---------- the pipe grid's route index ----------
+    // ---------- the legacy engine's route index (its per-pump route caches, replaced by hints, N22-3) ----------
 
     /** Every cached route is filed under all the buckets it crosses, and nothing else is filed. */
-    private static void checkRouteIndex(PipeGrid grid, String step) {
+    private static void checkRouteIndex(LegacyPipeGrid grid, String step) {
         int expected = 0;
         for (PipeNetwork network : grid.getNetworks()) {
-            for (java.util.Map.Entry<Pump, PipeGrid.PumpRoutes> entry : network.routeCache.entrySet()) {
+            for (java.util.Map.Entry<Pump, Object> entry : network.routeCache.entrySet()) {
                 Check.isTrue(entry.getKey().getNetwork() == network, step + ": a cache lives in its pump's network");
-                for (long bucket : entry.getValue().buckets) {
+                for (long bucket : ((LegacyPipeGrid.PumpRoutes) entry.getValue()).buckets) {
                     Check.isTrue(grid.routeBuckets.at(PipeGrid.keyX(bucket) * TileBuckets.SIZE,
                             PipeGrid.keyY(bucket) * TileBuckets.SIZE).contains(entry.getKey()), step + ": filed");
                 }
-                expected += entry.getValue().buckets.size();
+                expected += ((LegacyPipeGrid.PumpRoutes) entry.getValue()).buckets.size();
             }
         }
         Check.equal(expected, grid.routeBuckets.entryCount(), step + ": no stale entries");
@@ -71,7 +71,7 @@ final class TileBucketsTest {
     }
 
     public static void testAChangeDropsOnlyTheRoutesNearIt() {
-        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        LegacyPipeGrid grid = new LegacyPipeGrid(Fluids.uniform(20));
         // Pump A's line crosses from region 0 into region 1; pump B is far away in region 4.
         Pump a = Fluids.fueledPump(grid, 10, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 11, 20, 0, MineralTier.COPPER);
@@ -94,7 +94,7 @@ final class TileBucketsTest {
     }
 
     public static void testRouteIndexFollowsPushesMergesAndRemovals() {
-        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        LegacyPipeGrid grid = new LegacyPipeGrid(Fluids.uniform(20));
         // Two pumps at the ends of a line across a region edge (x = 15/16), a tank below its middle.
         Pump a = Fluids.fueledPump(grid, 10, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Pump b = Fluids.fueledPump(grid, 20, 0, PumpTier.FIRE, FluidType.FRESHWATER);

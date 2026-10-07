@@ -30,7 +30,8 @@ import java.util.Set;
  * (12-6, N20-4), is dormant: it stays connected, nothing is pulled from it, and it never stops the
  * pump, which pulls from the sources it can use.
  * A valve placed next to a pump later starts with its link cut, so the pump keeps its sources
- * (N13-3, N16-3); the wrench links and cuts valves ({@link PipeGrid#toggleSide}).
+ * (N13-3, N16-3); the wrench links and cuts valves ({@link PipeGrid#toggleSide}). A valve switched
+ * off by a wire signal is no source while it is off: nothing is pulled through it (N27-4).
  *
  * <h2>One cycle</h2>
  * <ol>
@@ -110,7 +111,7 @@ public class Pump extends LiquidStorage {
     private FluidType lastPushedFluid;
     private int x;
     private int y;
-    PipeGrid grid;
+    PumpHost host;
     PipeNetwork network;
 
     /**
@@ -213,20 +214,39 @@ public class Pump extends LiquidStorage {
         if (slot.direction == null) {
             return tileSource;
         }
-        if (grid == null || !grid.isPumpValveLinked(this, slot.direction)) {
-            // No valve there now (its region is unloaded), or a stale saved slot of a cut link: a
-            // valve is a source only while it is linked (N16-3).
+        TankValve valve = linkedValve(slot);
+        if (valve == null || !valve.isEnabled()) {
+            // A valve switched off by a wire signal blocks pulling too: no source while it is off,
+            // like a dormant tank (N27-4).
             return null;
         }
-        return grid.getValve(x + slot.direction.dx, y + slot.direction.dy).getTank();
+        return valve.getTank();
     }
 
-    /** The tanks the pump pulls from: never destinations of its own push. */
+    /**
+     * The valve behind a valve slot while it is linked, or {@code null}: no valve there now (its
+     * region is unloaded), or a stale saved slot of a cut link; a valve is a source only while it is
+     * linked (N16-3).
+     */
+    private TankValve linkedValve(SourceSlot slot) {
+        if (slot.direction == null || host == null || !host.isPumpValveLinked(this, slot.direction)) {
+            return null;
+        }
+        return host.getValve(x + slot.direction.dx, y + slot.direction.dy);
+    }
+
+    /**
+     * The tanks of the valves linked to the pump: never destinations of its own push. A valve
+     * switched off by a wire signal (no source while it is off, N27-4) still counts here, so the
+     * pump does not push into the tank it is linked to for pulling.
+     */
     List<TankStorage> getSourceTanks() {
         List<TankStorage> result = new ArrayList<>();
-        for (FluidSource source : getSources()) {
-            if (source instanceof TankStorage) {
-                result.add((TankStorage) source);
+        for (SourceSlot slot : sourceSlots) {
+            TankValve valve = linkedValve(slot);
+            TankStorage tank = valve == null ? null : valve.getTank();
+            if (tank != null) {
+                result.add(tank);
             }
         }
         return result;
@@ -267,21 +287,28 @@ public class Pump extends LiquidStorage {
      * output cells, or, while they are empty, the first source in pull order (N19-1) that is not
      * empty and holds a fluid the tier can move (N20-4). Sources of any other fluid are dormant
      * (N20-3). {@code null} when no source can give anything.
-     * <p>TODO(design): fluid left in the pump goes first even when the output cells hold another
-     * fluid (it then has nowhere to go); N20-5 does not cover fluid left in the pump.
+     * <ul>
+     *     <li>Fluid left in the pump goes first (N27-3): when it has nowhere to go, the pump stays
+     *     stopped ({@link PumpResult.Status#NO_DESTINATION}) until a place for it appears.</li>
+     *     <li>Output cells holding different fluids (N27-2): the fluid the pump last pushed stays the
+     *     baseline while at least one output cell holds it; when none does any more (or the pump
+     *     never pushed), the pump chooses as with empty output cells. The fluid only enters the
+     *     output cells that are empty or hold it.</li>
+     * </ul>
      */
-    private FluidType cycleFluid() {
+    FluidType cycleFluid() {
         if (getFluid() != null) {
             return getFluid();
         }
-        Set<FluidType> outputs = grid.getOutputFluids(this);
+        Set<FluidType> outputs = host.getOutputFluids(this);
         if (outputs.size() == 1) {
             return outputs.iterator().next();
         }
-        // Empty output cells: the first fluid that enters becomes the baseline (N20-5).
-        // TODO(design): output cells holding different fluids (pipes on several sides of the pump):
-        // N20-5 does not say which is the baseline. The pump chooses as with empty output cells, and
-        // the fluid only enters the output cells that are empty or hold it (as before N20-5).
+        if (outputs.size() > 1 && lastPushedFluid != null && outputs.contains(lastPushedFluid)) {
+            return lastPushedFluid;
+        }
+        // Empty output cells: the first fluid that enters becomes the baseline (N20-5); output
+        // cells of different fluids none of which the pump last pushed: the same choice (N27-2).
         return firstMovableSourceFluid();
     }
 
@@ -409,8 +436,8 @@ public class Pump extends LiquidStorage {
         return y;
     }
 
-    void place(PipeGrid grid, int x, int y) {
-        this.grid = grid;
+    void place(PumpHost host, int x, int y) {
+        this.host = host;
         this.x = x;
         this.y = y;
     }
@@ -423,6 +450,17 @@ public class Pump extends LiquidStorage {
      * the click cooldown.
      */
     public PumpResult tick() {
+        PumpResult timers = advanceTimers();
+        return timers != null ? timers : runCycle();
+    }
+
+    /**
+     * The timer part of {@link #tick} (the pipe engine's timer system, N22-5): the lit log burns
+     * down (N18-4) and the cycle counter advances. Returns {@code null} when a cycle is due now
+     * (the counter starts over and the engine runs the cycle, {@link #runCycle}), else what the
+     * tick did instead.
+     */
+    PumpResult advanceTimers() {
         if (burnTicksLeft > 0) {
             burnTicksLeft--;
         }
@@ -439,7 +477,7 @@ public class Pump extends LiquidStorage {
             return PumpResult.WAITING;
         }
         ticksSinceCycle = 0;
-        return runCycle();
+        return null;
     }
 
     /**
@@ -462,8 +500,9 @@ public class Pump extends LiquidStorage {
         return result;
     }
 
-    private PumpResult runCycle() {
-        if (grid == null) {
+    /** One cycle (due from {@link #advanceTimers} or a click). */
+    PumpResult runCycle() {
+        if (host == null) {
             throw new IllegalStateException("Pump is not placed in a grid");
         }
         // The liquid tile source searches its tiles once per cycle (N19-3, technical).
@@ -490,7 +529,7 @@ public class Pump extends LiquidStorage {
             // The output cells hold a fluid the tier cannot move: every source is dormant (N20-4, N20-5).
             return PumpResult.FLUID_NOT_ALLOWED;
         }
-        PipeGrid.PushPlan plan = grid.planPush(this, fluid);
+        PushPlan plan = host.planPush(this, fluid);
         long acceptable = plan.simulate(getCapacity());
         if (acceptable == 0) {
             return PumpResult.NO_DESTINATION;
@@ -509,7 +548,7 @@ public class Pump extends LiquidStorage {
         if (want > 0) {
             pull(fluid, want);
         }
-        grid.onPumpPushing(this, fluid);
+        host.onPumpPushing(this, fluid);
         PumpResult result = plan.run(getAmount());
         extract(fluid, Math.min(getAmount(), result.getMoved() + result.getLost()));
         return result;
