@@ -51,7 +51,9 @@ import java.util.Map;
  *     save entry when the region loads, else (older worlds) from the region's old pipe records, else
  *     from the old level mirror, else as a new pipe.</li>
  *     <li>Unloaded regions (N23-2): the engine keeps no mirror; the network summaries are saved with
- *     the level ({@code SUMMARY}). The old mirror ({@code MIRROR}) is only read, to migrate.</li>
+ *     the level ({@code SUMMARY}), and next to them the structure change numbers of the regions they
+ *     pass ({@code REGIONCHANGES}, N28-1; see {@link PipeGrid} for why the level file). The old
+ *     mirror ({@code MIRROR}) is only read, to migrate.</li>
  *     <li>Clients get the underground pipes' link flags and the faces blocked by another fluid
  *     ({@link PipeGrid#getFluidBlockedSides}, N13-2) per region when the region is sent to them
  *     ({@link PipeSyncPatches}) and per tile when either changes ({@link PacketUndergroundPipes},
@@ -663,6 +665,18 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         for (PipeGrid.RouteSummary summary : grid.getSummaries()) {
             save.addSaveData(saveSummary(summary));
         }
+        Map<Long, Integer> regionChanges = grid.getSavedRegionChanges();
+        if (!regionChanges.isEmpty()) {
+            // N28-1: region x, region y, number, for every region a summary passes.
+            int[] values = new int[regionChanges.size() * 3];
+            int i = 0;
+            for (Map.Entry<Long, Integer> entry : regionChanges.entrySet()) {
+                values[i++] = PipeGrid.keyX(entry.getKey());
+                values[i++] = PipeGrid.keyY(entry.getKey());
+                values[i++] = entry.getValue();
+            }
+            save.addIntArray("REGIONCHANGES", values);
+        }
         if (!legacyMirror.isEmpty()) {
             // Old mirror entries of regions not loaded since the update: kept to migrate them later.
             SaveData mirror = new SaveData("MIRROR");
@@ -676,6 +690,10 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     @Override
     public void applyLoadData(LoadData save) {
         super.applyLoadData(save);
+        int[] regionChanges = save.getIntArray("REGIONCHANGES", new int[0], false);
+        for (int i = 0; i + 2 < regionChanges.length; i += 3) {
+            grid.loadRegionChange(PipeGrid.key(regionChanges[i], regionChanges[i + 1]), regionChanges[i + 2]);
+        }
         for (LoadData summary : save.getLoadDataByName("SUMMARY")) {
             PipeGrid.RouteSummary loaded = loadSummary(summary);
             if (loaded != null) {
@@ -703,8 +721,8 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         return x + "," + y + "," + layer;
     }
 
-    /** Values per run in a saved summary. */
-    private static final int RUN_INTS = 11;
+    /** Values per run in a saved summary (11 before the region structure change number, N28-1). */
+    private static final int RUN_INTS = 12;
 
     private static SaveData saveSummary(PipeGrid.RouteSummary summary) {
         SaveData save = new SaveData("SUMMARY");
@@ -727,7 +745,9 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
             runs[o + 8] = run.lowestTier.ordinal();
             runs[o + 9] = run.full ? 1 : 0;
             runs[o + 10] = run.fluid == null ? -1 : run.fluid.ordinal();
+            runs[o + 11] = run.regionChange;
         }
+        save.addInt("runInts", RUN_INTS);
         save.addIntArray("runs", runs);
         return save;
     }
@@ -735,15 +755,17 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     private static PipeGrid.RouteSummary loadSummary(LoadData save) {
         try {
             int[] values = save.getIntArray("runs", new int[0], false);
-            PipeGrid.SummaryRun[] runs = new PipeGrid.SummaryRun[values.length / RUN_INTS];
+            // Summaries saved before N28-1 have 11 values per run and no number: as if written at 0.
+            int width = Math.max(11, save.getInt("runInts", 11, false));
+            PipeGrid.SummaryRun[] runs = new PipeGrid.SummaryRun[values.length / width];
             PipeLayer[] layers = PipeLayer.values();
             for (int i = 0; i < runs.length; i++) {
-                int o = i * RUN_INTS;
+                int o = i * width;
                 int fluid = values[o + 10];
                 runs[i] = new PipeGrid.SummaryRun(devp0tion.mechanics.core.TileBuckets.bucketOf(values[o], values[o + 1]),
                         values[o], values[o + 1], layers[values[o + 2]], values[o + 3], values[o + 4], layers[values[o + 5]],
                         values[o + 6], values[o + 7], MineralTier.values()[values[o + 8]], values[o + 9] != 0,
-                        fluid < 0 ? null : FluidType.values()[fluid]);
+                        fluid < 0 ? null : FluidType.values()[fluid], width > 11 ? values[o + 11] : 0);
             }
             return new PipeGrid.RouteSummary(save.getInt("pumpX"), save.getInt("pumpY"), save.getInt("valveX"),
                     save.getInt("valveY"), runs);

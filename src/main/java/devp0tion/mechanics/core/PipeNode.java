@@ -66,11 +66,8 @@ public final class PipeNode extends LiquidStorage {
     // Flow used in the current cycle window (N14-2), transient.
     long flowWindow = -1;
     int flowUsed;
-    /** The engine tick the fluid first reached this pipe (the fill speed, N25-1), transient. */
-    long reachedTick = NEVER_REACHED;
-
-    /** {@link #reachedTick} of a pipe reached before it was loaded: long ago. */
-    static final long NEVER_REACHED = Long.MIN_VALUE / 4;
+    /** The push (one cycle of one pump) that first reached this pipe (the fill speed, N28-7), transient. */
+    long reachedPush;
 
     /** Hint code of the step to the other layer on the same tile (or to the valve on it). */
     public static final int HINT_VERTICAL = 4;

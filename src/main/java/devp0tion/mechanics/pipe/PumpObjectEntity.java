@@ -16,6 +16,7 @@ import necesse.entity.objectEntity.InventoryObjectEntity;
 import necesse.inventory.InventoryItem;
 import necesse.inventory.InventoryRange;
 import necesse.level.maps.Level;
+import necesse.level.maps.regionSystem.Region;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,6 +56,9 @@ public class PumpObjectEntity extends InventoryObjectEntity {
     private boolean registered;
     private boolean deferred;
     private boolean loadedFromSave;
+    private boolean unloading;
+    /** The object this entity was created for ({@link PipeSystem#isReplacedEntity}). */
+    private int objectID = -1;
     private int links = LinkFlags.ALL_OPEN;
 
     // Saved state waiting for init.
@@ -82,6 +86,7 @@ public class PumpObjectEntity extends InventoryObjectEntity {
     @Override
     public void init() {
         super.init();
+        objectID = getLevel().getObjectID(tileX, tileY);
         if (!getLevel().isServer()) {
             return;
         }
@@ -158,12 +163,23 @@ public class PumpObjectEntity extends InventoryObjectEntity {
     }
 
     @Override
+    public void onUnloading(Region region) {
+        super.onUnloading(region);
+        unloading = true;
+    }
+
+    @Override
     public void remove() {
         super.remove();
         PipeSystem system = PipeSystem.getIfExists(getLevel());
         if (system != null && registered && system.getGrid().getPump(tileX, tileY) == pump) {
-            // Picked up or its region unloaded: either way it stops (N14-3); its state is saved here.
-            system.getGrid().removePump(tileX, tileY);
+            // Either way it stops (N14-3); its state is saved here.
+            if (unloading || PipeSystem.isReplacedEntity(this, objectID)) {
+                // Its region unloaded, or only this entity is replaced: not a structure change (N28-1).
+                system.getGrid().unloadPump(tileX, tileY);
+            } else {
+                system.getGrid().removePump(tileX, tileY);
+            }
         }
         registered = false;
     }

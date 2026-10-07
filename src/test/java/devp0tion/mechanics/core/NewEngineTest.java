@@ -6,10 +6,11 @@ import java.util.Map;
 
 /**
  * The new engine's own rules, which the compatibility comparison leaves out on purpose (N26-1):
- * the split at junctions (N24-3, N25-5, N27-1), the fill speed (N25-1~N25-3), the cap order by
- * distance (N26-4) and the network summary for unloaded regions (N23-2); and its structure: cell
- * hints repaired when used and kept across saves (N22-3, N25-1, N25-4, N25-6), systems run from one
- * tick (N22-5).
+ * the split at junctions (N24-3, N25-5, N27-1, N28-5, N28-8, N28-14), the fill speed (N25-1~N25-3,
+ * N28-7, N28-9~N28-11), dead-end branches filling (N28-6), the cap order by distance (N26-4) and
+ * the network summary for unloaded regions (N23-2, N28-1~N28-4); and its structure: cell hints
+ * repaired when used and kept across saves (N22-3, N25-1, N25-4, N25-6, N28-12, N28-13), systems run
+ * from one tick (N22-5).
  */
 final class NewEngineTest {
 
@@ -150,81 +151,138 @@ final class NewEngineTest {
         Check.equal(10, result.getDelivered(v[2]));
     }
 
-    // ---------------------------------------------------------------- N25-1~N25-3
+    // ---------------------------------------------------------------- N25-1~N25-3, N28-7, N28-9~N28-11
 
-    /** Iron pipes carry 20; empty pipes are reached at most one per 60 ticks. */
-    private static final PipeTierRules SLOW = new PipeTierRules() {
-        @Override
-        public int getTransportAmount(MineralTier tier) {
-            return 20;
-        }
+    /** Every pipe carries 20 (the cap per cycle window). */
+    private static final PipeTierRules SLOW = Fluids.uniform(20);
 
-        @Override
-        public int getFillTicksPerBlock(MineralTier tier) {
-            return 60;
-        }
-    };
+    public static void testFillSpeedIsPipesPerCycleProportionalToTheTransportAmount() {
+        // N28-7, N28-11: pipes per cycle = transport amount / 4 (provisional constant): iron's 80 gives
+        // the 20 pipes per cycle of before; at least one pipe.
+        Check.equal(20, PipeTierRules.TABLE.getFillCellsPerCycle(MineralTier.IRON), "iron");
+        Check.equal(10, Fluids.uniform(40).getFillCellsPerCycle(MineralTier.COPPER), "transport 40");
+        Check.equal(1, Fluids.uniform(2).getFillCellsPerCycle(MineralTier.COPPER), "never below one pipe");
+    }
 
-    public static void testFillSpeedLimitsOnlyEmptyPipes() {
-        PipeGrid grid = grid(SLOW);
-        line(grid, 1, 0, 5, 0);
-        TankValve valve = Fluids.valve(100000);
-        grid.placeValve(6, 0, valve);
-        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
-        int[] reachedAtCycle = new int[6];
-        int deliveries = 0;
-        for (int cycle = 1; cycle <= 25; cycle++) {
-            PumpResult result = cycle(grid, pump);
-            for (int x = 1; x <= 5; x++) {
-                if (reachedAtCycle[x] == 0 && grid.getPipe(x, 0, PipeLayer.BASE).isReached()) {
-                    reachedAtCycle[x] = cycle;
+    public static void testFrontReachesOnePipePerCycleAndFullPathsPassAtFullRate() {
+        // The cap (N14-2) lets a path reach at most one new pipe per cycle window: a pipe filled from
+        // empty used its whole cap. Any speed of one pipe per cycle or more therefore fills like the
+        // compatibility mode (no speed limit); a full path passes at full rate (N25-3).
+        for (boolean compatMode : new boolean[]{false, true}) {
+            PipeGrid grid = compatMode ? compat(SLOW) : grid(SLOW);
+            line(grid, 1, 0, 5, 0);
+            TankValve valve = Fluids.valve(100000);
+            grid.placeValve(6, 0, valve);
+            Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+            for (int cycle = 1; cycle <= 5; cycle++) {
+                cycle(grid, pump);
+                Check.isTrue(grid.getPipe(cycle, 0, PipeLayer.BASE).isFull(), compatMode + ": pipe " + cycle + " in cycle " + cycle);
+                if (cycle < 5) {
+                    Check.isFalse(grid.getPipe(cycle + 1, 0, PipeLayer.BASE).isReached(), compatMode + ": not further");
                 }
             }
-            if (result.getDelivered(valve) > 0) {
-                Check.equal(20, result.getDelivered(valve), "cycle " + cycle + ": a full path passes at full rate (N25-3)");
-                deliveries++;
+            for (int cycle = 6; cycle <= 8; cycle++) {
+                Check.equal(20, cycle(grid, pump).getDelivered(valve), "a full path passes at full rate (N25-3)");
             }
-        }
-        for (int x = 2; x <= 5; x++) {
-            Check.equal(reachedAtCycle[x - 1] + 3, reachedAtCycle[x], "pipe " + x + ": one block per 60 ticks (N25-1)");
-        }
-        Check.equal(25 - reachedAtCycle[5], deliveries, "every cycle after the line is full delivers");
-
-        // The same line without the speed limit (compatibility mode): one pipe per cycle (the cap).
-        PipeGrid old = compat(SLOW);
-        line(old, 1, 0, 5, 0);
-        old.placeValve(6, 0, Fluids.valve(100000));
-        Pump fast = pump(old, 0, 0, PumpTier.FIRE);
-        for (int cycle = 1; cycle <= 5; cycle++) {
-            cycle(old, fast);
-            Check.isTrue(old.getPipe(cycle, 0, PipeLayer.BASE).isFull(), "compat: pipe " + cycle + " in cycle " + cycle);
         }
     }
 
     public static void testFillSpeedKeepsFillingAReachedPipe() {
-        // A pipe already reached is filled whatever the speed; only the next empty one waits.
-        PipeTierRules rules = new PipeTierRules() {
-            @Override
-            public int getTransportAmount(MineralTier tier) {
-                return 30;
-            }
-
-            @Override
-            public int getFillTicksPerBlock(MineralTier tier) {
-                return 60;
-            }
-        };
-        PipeGrid grid = grid(rules);
+        // A pipe reached in an earlier cycle is filled up, and the front goes on into the next one in
+        // the same cycle: the front advances once per pump cycle (N28-7), not on a tick clock.
+        PipeGrid grid = grid(Fluids.uniform(30));
         line(grid, 1, 0, 3, 0);
         grid.placeValve(4, 0, Fluids.valve(1000));
         Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
         Check.equal(20, cycle(grid, pump).getPipeFill(), "the first pipe reached");
         PumpResult second = cycle(grid, pump);
         Check.equal(Status.PUMPED, second.getStatus());
-        Check.equal(10, second.getPipeFill(), "the reached pipe filled up, the next one not reached yet");
-        Check.isFalse(grid.getPipe(2, 0, PipeLayer.BASE).isReached(), "20 ticks after the first: too early");
-        Check.equal(Status.NO_DESTINATION, cycle(grid, pump).getStatus(), "40 ticks: nothing can move yet");
-        Check.equal(20, cycle(grid, pump).getPipeFill(), "60 ticks: the next pipe is reached");
+        Check.equal(20, second.getPipeFill(), "the reached pipe filled up and the next one reached");
+        Check.equal(30, grid.getPipe(1, 0, PipeLayer.BASE).getAmount());
+        Check.equal(10, grid.getPipe(2, 0, PipeLayer.BASE).getAmount(), "the next cycle: no tick clock to wait for");
+    }
+
+    /** Copper pipes: the front cannot enter them (speed 0, a test value); iron: one per cycle. */
+    private static final PipeTierRules NO_COPPER_FRONT = new PipeTierRules() {
+        @Override
+        public int getTransportAmount(MineralTier tier) {
+            return 20;
+        }
+
+        @Override
+        public int getFillCellsPerCycle(MineralTier tier) {
+            return tier == MineralTier.COPPER ? 0 : 1;
+        }
+    };
+
+    public static void testFrontSpeedIsTheNextPipesTier() {
+        // N28-10: in mixed piping the speed of the next pipe the front fills counts.
+        PipeGrid grid = grid(NO_COPPER_FRONT);
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.IRON);
+        grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.COPPER);
+        grid.placePipe(3, 0, PipeLayer.BASE, MineralTier.IRON);
+        grid.placeValve(4, 0, Fluids.valve(1000));
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        cycle(grid, pump);
+        cycle(grid, pump);
+        Check.isTrue(grid.getPipe(1, 0, PipeLayer.BASE).isFull(), "the iron pipe filled");
+        Check.isFalse(grid.getPipe(2, 0, PipeLayer.BASE).isReached(), "the copper pipe's own speed holds the front");
+        // The other way round: copper first, then iron; the iron pipe after it is reached at iron's speed.
+        PipeGrid other = grid(new PipeTierRules() {
+            @Override
+            public int getTransportAmount(MineralTier tier) {
+                return 20;
+            }
+
+            @Override
+            public int getFillCellsPerCycle(MineralTier tier) {
+                return tier == MineralTier.IRON ? 0 : 1;
+            }
+        });
+        other.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
+        other.placePipe(2, 0, PipeLayer.BASE, MineralTier.IRON);
+        other.placeValve(3, 0, Fluids.valve(1000));
+        Pump second = pump(other, 0, 0, PumpTier.FIRE);
+        cycle(other, second);
+        cycle(other, second);
+        Check.isTrue(other.getPipe(1, 0, PipeLayer.BASE).isFull(), "copper at copper's speed");
+        Check.isFalse(other.getPipe(2, 0, PipeLayer.BASE).isReached(), "iron at iron's speed");
+    }
+
+    public static void testWhatTheSpeedHoldsBackStaysInThePump() {
+        // N28-9: pump (0,0) -> (1,0) -> J (2,0); east (3,0) to valve A (4,0), full; north a copper
+        // pipe (2,-1) the front cannot enter (test speed 0) before valve B (2,-2). While filling, J
+        // gives each direction 10 (N28-8); B's 10 is not given to A, it stays in the pump.
+        PipeGrid grid = grid(NO_COPPER_FRONT);
+        line(grid, 1, 0, 3, 0);
+        TankValve a = Fluids.valve(100000);
+        grid.placeValve(4, 0, a);
+        fillAll(grid);
+        grid.placePipe(2, -1, PipeLayer.BASE, MineralTier.COPPER);
+        TankValve b = Fluids.valve(100000);
+        grid.placeValve(2, -2, b);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        PumpResult first = cycle(grid, pump);
+        Check.equal(10, first.getDelivered(a), "A: its own direction's amount only");
+        Check.equal(0, first.getDelivered(b));
+        Check.equal(10, pump.getAmount(), "B's amount stays in the pump");
+        PumpResult second = cycle(grid, pump);
+        Check.equal(10, second.getDelivered(a), "the next cycle pushes no more because of it (N28-9)");
+        Check.equal(10, pump.getAmount(), "the pump pulled only what it pushed");
+        Check.isFalse(grid.getPipe(2, -1, PipeLayer.BASE).isReached(), "the front never entered the copper pipe");
+
+        // The compatibility mode has no speed limit: everything goes on.
+        PipeGrid old = compat(NO_COPPER_FRONT);
+        line(old, 1, 0, 3, 0);
+        TankValve oldA = Fluids.valve(100000);
+        old.placeValve(4, 0, oldA);
+        fillAll(old);
+        old.placePipe(2, -1, PipeLayer.BASE, MineralTier.COPPER);
+        old.placeValve(2, -2, Fluids.valve(100000));
+        Pump oldPump = pump(old, 0, 0, PumpTier.FIRE);
+        cycle(old, oldPump);
+        Check.isTrue(old.getPipe(2, -1, PipeLayer.BASE).isReached(), "compat: no speed limit");
+        Check.equal(0, oldPump.getAmount());
     }
 
     // ---------------------------------------------------------------- N26-4
@@ -313,22 +371,73 @@ final class NewEngineTest {
         PipeNode[] held = new PipeNode[32];
         unloadMiddle(grid, held);
         Check.isNull(grid.getPipe(20, 0, PipeLayer.BASE), "no mirror: the region's pipes left the engine");
+        PipeGrid.RouteSummary written = grid.getSummaries().get(0);
         Check.equal(20, cycle(grid, pump[0]).getDelivered(valve[0]), "intact and unchanged: works as before");
         Check.equal(40, grid.getPathDistance(pump[0], valve[0], FluidType.FRESHWATER), "the summary's steps count");
+        Check.isTrue(written == grid.getSummaries().get(0), "a cycle that skips a stretch writes nothing (N28-2)");
 
-        // A dead-end pipe placed next to the path changes no path: the summary holds.
-        grid.placePipe(40, 1, PipeLayer.BASE, MineralTier.IRON);
-        Check.equal(20, cycle(grid, pump[0]).getDelivered(valve[0]), "a leaf touches no destination");
-        // A structure change on the path (cut and linked again): no longer the network last seen
-        // running normally (N23-2).
+        // N28-1: edits in regions the path does not pass (region (0,1) here) keep the flow going.
+        grid.placePipe(5, 20, PipeLayer.BASE, MineralTier.IRON);
+        grid.placePipe(6, 20, PipeLayer.BASE, MineralTier.IRON);
+        grid.toggleSide(5, 20, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
+        grid.removePipe(6, 20, PipeLayer.BASE);
+        Check.equal(20, cycle(grid, pump[0]).getDelivered(valve[0]), "an edit outside the passed regions");
+        // An edit inside a passed region, even one that changes no path (a cut linked again): the
+        // entries of that region are invalid, so the flow stops beyond the unloaded stretch.
         grid.toggleSide(39, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
         grid.toggleSide(39, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
         Check.equal(Status.NO_DESTINATION, cycle(grid, pump[0]).getStatus(), "the unloaded region is a dead end now");
+        Check.isTrue(written == grid.getSummaries().get(0), "marked invalid, not written again (N28-2)");
 
-        // The region loads again: normal again, and summarized again.
+        // The region loads again: a normal run writes the summary again, and it holds once more.
         loadMiddle(grid, held);
         Check.equal(20, cycle(grid, pump[0]).getDelivered(valve[0]), "loaded: normal");
         Check.equal(1, grid.getSummaries().size());
+        Check.isTrue(written != grid.getSummaries().get(0), "written again by the normal run");
+        unloadMiddle(grid, held);
+        Check.equal(20, cycle(grid, pump[0]).getDelivered(valve[0]), "intact again");
+    }
+
+    public static void testEditInAPassedLoadedRegionWhileTheMiddleIsUnloaded() {
+        // N28-1 from the pump's side: a dead-end pipe placed next to the path in region 0, which the
+        // path passes, stops the flow beyond the unloaded middle until a normal run.
+        TankValve[] valve = new TankValve[1];
+        Pump[] pump = new Pump[1];
+        PipeGrid grid = longLine(valve, pump);
+        cycle(grid, pump[0]);
+        PipeNode[] held = new PipeNode[32];
+        unloadMiddle(grid, held);
+        grid.placePipe(5, 1, PipeLayer.BASE, MineralTier.IRON);
+        PumpResult result = cycle(grid, pump[0]);
+        Check.equal(0, result.getDelivered(valve[0]), "nothing beyond the unloaded stretch");
+        Check.equal(Status.NO_DESTINATION, result.getStatus(), "no destination at all: the dead end is not filled either (N28-6)");
+        loadMiddle(grid, held);
+        Check.equal(10, cycle(grid, pump[0]).getDelivered(valve[0]), "normal: the dead end takes one direction's amount (N28-8)");
+    }
+
+    public static void testRegionChangeNumbersAreKeptForTheSummaries() {
+        // N28-1: the numbers the game saves are those of the regions some summary passes; restored
+        // with the summary, it holds; without them it would not.
+        TankValve[] valve = new TankValve[1];
+        Pump[] pump = new Pump[1];
+        PipeGrid grid = longLine(valve, pump);
+        cycle(grid, pump[0]);
+        grid.placePipe(5, 20, PipeLayer.BASE, MineralTier.IRON);
+        Map<Long, Integer> saved = grid.getSavedRegionChanges();
+        Check.equal(3, saved.size(), "regions (0,0), (1,0), (2,0)");
+        Check.isFalse(saved.containsKey(TileBuckets.bucketOf(5, 20)), "a region no summary passes is not saved");
+        PipeGrid.RouteSummary summary = grid.getSummaries().get(0);
+        Check.isTrue(grid.isIntact(summary), "intact");
+
+        PipeGrid restored = grid(Fluids.uniform(20));
+        for (Map.Entry<Long, Integer> entry : saved.entrySet()) {
+            restored.loadRegionChange(entry.getKey(), entry.getValue());
+        }
+        restored.loadSummary(summary);
+        Check.isTrue(restored.isIntact(summary), "restored with its numbers");
+        PipeGrid without = grid(Fluids.uniform(20));
+        without.loadSummary(summary);
+        Check.isFalse(without.isIntact(summary), "the numbers belong with the summary");
     }
 
     public static void testNoSummaryWithoutANormalCycle() {
@@ -376,6 +485,250 @@ final class NewEngineTest {
         }
         Check.equal(20, cycle(grid, pump).getDelivered(valve), "one loaded again, one still skipped");
         Check.equal(4, grid.getSummaries().get(0).runs.length);
+    }
+
+    public static void testJunctionInsideAnUnloadedStretchSplitsAsWhenLoaded() {
+        // N28-3: pump (0,5), trunk (1..40,5) to valve A (41,5); at J (20,5) a branch south (20,6..17),
+        // which parts at (20,17): west to valve B (18,17), east to valve C (22,17). J and the branch
+        // down to (20,15) are in region (1,0), B and C in region (1,1). B and C are nearer than A.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 5, 40, 5);
+        line(grid, 20, 6, 20, 17);
+        grid.placePipe(19, 17, PipeLayer.BASE, MineralTier.IRON);
+        grid.placePipe(21, 17, PipeLayer.BASE, MineralTier.IRON);
+        TankValve a = Fluids.valve(100000);
+        TankValve b = Fluids.valve(100000);
+        TankValve c = Fluids.valve(100000);
+        grid.placeValve(41, 5, a);
+        grid.placeValve(18, 17, b);
+        grid.placeValve(22, 17, c);
+        fillAll(grid);
+        Pump pump = pump(grid, 0, 5, PumpTier.FIRE);
+        PumpResult loaded = cycle(grid, pump);
+        // J: east 1 destination (A), south 2 (B, C): 20 = 6 each + 2, east first: A 7, south 13.
+        // (20,17): 13 = 6 each + 1, east first: C 7, B 6 (N24-3, N27-1).
+        Check.equal(7, loaded.getDelivered(a));
+        Check.equal(6, loaded.getDelivered(b));
+        Check.equal(7, loaded.getDelivered(c));
+        PipeGrid.RouteSummary toB = null;
+        for (PipeGrid.RouteSummary summary : grid.getSummaries()) {
+            if (summary.valveX == 18) {
+                toB = summary;
+            }
+        }
+        Check.equal(5, toB.runs.length, "cut at regions and after the junctions J and (20,17) (N28-3)");
+        for (int x = 16; x < 32; x++) {
+            grid.unloadPipe(x, 5, PipeLayer.BASE);
+        }
+        for (int y = 6; y < 16; y++) {
+            grid.unloadPipe(20, y, PipeLayer.BASE);
+        }
+        PumpResult skipped = cycle(grid, pump);
+        Check.equal(7, skipped.getDelivered(a), "J is unloaded: the same split by directions (N28-3)");
+        Check.equal(6, skipped.getDelivered(b));
+        Check.equal(7, skipped.getDelivered(c));
+    }
+
+    public static void testValveInAnUnloadedCellIsADeadEnd() {
+        // N28-4: pump (0,5), line (1..10,5) to valve A (11,5); at (5,5) a branch south (5,6..15) to
+        // valve B (5,16) in region (0,1). With B's cell unloaded, its amount goes to A.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 5, 10, 5);
+        line(grid, 5, 6, 5, 15);
+        TankValve a = Fluids.valve(30);
+        TankValve b = Fluids.valve(100000);
+        grid.placeValve(11, 5, a);
+        grid.placeValve(5, 16, b);
+        fillAll(grid);
+        Pump pump = pump(grid, 0, 5, PumpTier.FIRE);
+        PumpResult loaded = cycle(grid, pump);
+        Check.equal(10, loaded.getDelivered(a));
+        Check.equal(10, loaded.getDelivered(b));
+        grid.unloadValve(5, 16);
+        Check.equal(20, cycle(grid, pump).getDelivered(a), "B is a dead end: its amount goes to A");
+        Check.equal(Status.NO_DESTINATION, cycle(grid, pump).getStatus(), "A full, B unloaded: the pump stops (N7-4)");
+    }
+
+    public static void testSkippedStretchMayEndAtALoadedValve() {
+        // N23-2, N28-4: line (1..31,5) and valve (32,5) in region (2,0); the stretch of region (1,0)
+        // reaches the valve, which is loaded: it takes the fluid.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 5, 31, 5);
+        TankValve valve = Fluids.valve(100000);
+        grid.placeValve(32, 5, valve);
+        fillAll(grid);
+        Pump pump = pump(grid, 0, 5, PumpTier.FIRE);
+        Check.equal(20, cycle(grid, pump).getDelivered(valve));
+        for (int x = 16; x < 32; x++) {
+            grid.unloadPipe(x, 5, PipeLayer.BASE);
+        }
+        Check.equal(20, cycle(grid, pump).getDelivered(valve), "the last output position is loaded");
+    }
+
+    // ---------------------------------------------------------------- N28-5, N28-6, N28-8, N28-14
+
+    public static void testVerticalDirectionTakesTheRemainderFirst() {
+        // N28-5: pump (0,0) -> (1,0) -> J (2,0). From J: north (2,-1) to valve N (2,-2), east (3,0) to
+        // valve E (4,0), and down to the underground pipes (2,0..3) to valve V on (2,3). All full:
+        // 20 = 6 each + 2, vertical first, then north: V 7, N 7, E 6.
+        PipeGrid grid = grid(Fluids.uniform(1000));
+        line(grid, 1, 0, 3, 0);
+        grid.placePipe(2, -1, PipeLayer.BASE, MineralTier.IRON);
+        for (int y = 0; y <= 3; y++) {
+            grid.placePipe(2, y, PipeLayer.UNDERGROUND, MineralTier.IRON);
+        }
+        Check.equal(PipeGrid.Check.OK, grid.toggleVertical(2, 0), "link J to the underground pipe (N16-4)");
+        TankValve north = Fluids.valve(10000);
+        TankValve east = Fluids.valve(10000);
+        TankValve vertical = Fluids.valve(10000);
+        grid.placeValve(2, -2, north);
+        grid.placeValve(4, 0, east);
+        grid.placeValve(2, 3, vertical);
+        fillAll(grid);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        PumpResult result = cycle(grid, pump);
+        Check.equal(7, result.getDelivered(vertical), "vertical first (N28-5)");
+        Check.equal(7, result.getDelivered(north), "then north");
+        Check.equal(6, result.getDelivered(east), "east last");
+    }
+
+    public static void testDeadEndBranchesFillToo() {
+        // N28-6: pump (0,0), full line (1..5,0) to valve (6,0), and an empty dead-end branch (3,1),
+        // (3,2). While it fills, J (3,0) gives each direction one equal amount (N28-8).
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 0, 5, 0);
+        TankValve valve = Fluids.valve(100000);
+        grid.placeValve(6, 0, valve);
+        fillAll(grid);
+        grid.placePipe(3, 1, PipeLayer.BASE, MineralTier.IRON);
+        grid.placePipe(3, 2, PipeLayer.BASE, MineralTier.IRON);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        int[] branch = {10, 20, 30, 40};
+        for (int cycle = 0; cycle < 4; cycle++) {
+            PumpResult result = cycle(grid, pump);
+            Check.equal(10, result.getDelivered(valve), "cycle " + cycle + ": the valve's direction");
+            Check.equal(branch[cycle], grid.getPipe(3, 1, PipeLayer.BASE).getAmount()
+                    + grid.getPipe(3, 2, PipeLayer.BASE).getAmount(), "cycle " + cycle + ": the dead-end direction");
+        }
+        Check.equal(20, cycle(grid, pump).getDelivered(valve), "the branch is full: everything to the valve");
+
+        // The compatibility mode keeps the old fill of the destinations' paths only (TODO(confirm) G17).
+        PipeGrid old = compat(Fluids.uniform(20));
+        line(old, 1, 0, 5, 0);
+        TankValve oldValve = Fluids.valve(100000);
+        old.placeValve(6, 0, oldValve);
+        fillAll(old);
+        old.placePipe(3, 1, PipeLayer.BASE, MineralTier.IRON);
+        Pump oldPump = pump(old, 0, 0, PumpTier.FIRE);
+        Check.equal(20, cycle(old, oldPump).getDelivered(oldValve));
+        Check.isFalse(old.getPipe(3, 1, PipeLayer.BASE).isReached(), "compat: the dead end stays empty");
+    }
+
+    public static void testNoDestinationAtAllStopsThePump() {
+        // N7-4 as N28-6 reads it: without any destination the pump stops, empty pipes or not; with
+        // one, it fills the empty pipes even when every tank is full.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 0, 3, 0);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        Check.equal(Status.NO_DESTINATION, cycle(grid, pump).getStatus(), "no destination at all");
+        Check.isFalse(grid.getPipe(1, 0, PipeLayer.BASE).isReached(), "nothing filled");
+        TankValve valve = Fluids.valve(10);
+        valve.getTank().insert(FluidType.FRESHWATER, 10);
+        grid.placeValve(2, 1, valve);
+        PumpResult result = cycle(grid, pump);
+        Check.equal(Status.PUMPED, result.getStatus(), "a destination, full: the connected empty pipes still fill");
+        Check.equal(20, result.getPipeFill());
+        Check.equal(0, result.getDelivered(valve));
+    }
+
+    public static void testWhileFillingEachDirectionGetsOneEqualAmount() {
+        // N28-8: pump (0,0) -> (1,0) -> J (2,0). East (3,0) to valve A (4,0); south (2,1), (2,2),
+        // which parts to valve B (0,2) through (1,2) and valve C (4,2) through (3,2); north an empty
+        // dead end (2,-1). All but the dead end full.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 0, 3, 0);
+        line(grid, 2, 1, 2, 2);
+        grid.placePipe(1, 2, PipeLayer.BASE, MineralTier.IRON);
+        grid.placePipe(3, 2, PipeLayer.BASE, MineralTier.IRON);
+        TankValve a = Fluids.valve(100000);
+        TankValve b = Fluids.valve(100000);
+        TankValve c = Fluids.valve(100000);
+        grid.placeValve(4, 0, a);
+        grid.placeValve(0, 2, b);
+        grid.placeValve(4, 2, c);
+        fillAll(grid);
+        grid.placePipe(2, -1, PipeLayer.BASE, MineralTier.IRON);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        PumpResult filling = cycle(grid, pump);
+        // Filling at J: 3 directions, 20 = 6 each + 2, north then east first: dead end 7, A 7, south 6;
+        // (2,2) is not filling: by destinations, 3 each.
+        Check.equal(7, grid.getPipe(2, -1, PipeLayer.BASE).getAmount(), "the dead-end direction (N28-8)");
+        Check.equal(7, filling.getDelivered(a));
+        Check.equal(3, filling.getDelivered(b));
+        Check.equal(3, filling.getDelivered(c));
+        for (int i = 0; i < 4; i++) {
+            cycle(grid, pump);
+        }
+        Check.isTrue(grid.getPipe(2, -1, PipeLayer.BASE).isFull(), "the dead end filled");
+        PumpResult full = cycle(grid, pump);
+        // Not filling: by destinations (N24-3): east 1, south 2: A 7, south 13 -> C 7, B 6.
+        Check.equal(7, full.getDelivered(a));
+        Check.equal(6, full.getDelivered(b));
+        Check.equal(7, full.getDelivered(c));
+    }
+
+    public static void testJunctionsCountOnlyTheDestinationsTheFluidCarries() {
+        // N28-14: a ring of 16 pipes entered at (1,0) from the pump (0,0). Valve A hangs below (4,0),
+        // three steps east; valve B above (3,-4), six steps the other way round. At (4,0), B's hint
+        // points on east (B is nearer that way from there), but the fluid arriving there carries A
+        // only: B is not counted again, and each gets half.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 0, 5, 0);
+        line(grid, 5, -4, 5, -1);
+        line(grid, 1, -4, 4, -4);
+        line(grid, 1, -3, 1, -1);
+        TankValve a = Fluids.valve(100000);
+        TankValve b = Fluids.valve(100000);
+        grid.placeValve(4, 1, a);
+        grid.placeValve(3, -5, b);
+        fillAll(grid);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        PumpResult result = cycle(grid, pump);
+        Check.equal(Direction.EAST.ordinal(), grid.getPipe(4, 0, PipeLayer.BASE).getHint(PipeGrid.key(3, -5)),
+                "B's hint at A's junction points on, away from the fluid's way in");
+        Check.equal(10, result.getDelivered(a), "A: not split with B at its junction");
+        Check.equal(10, result.getDelivered(b));
+    }
+
+    public static void testChangeInAFullStretchMarksEveryDestinationOfItsNetwork() {
+        // N28-12: a full trunk with branches to V1 and V2. A pipe of V1's branch removed: V2 is
+        // searched again too, and a shortcut made inside the full stretch is taken at once.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 0, 10, 0);
+        line(grid, 3, 1, 3, 4);
+        line(grid, 8, 1, 8, 4);
+        grid.placeValve(3, 5, Fluids.valve(1000));
+        grid.placeValve(8, 5, Fluids.valve(1000));
+        fillAll(grid);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        cycle(grid, pump);
+        grid.removePipe(3, 2, PipeLayer.BASE);
+        Check.equal(new java.util.HashSet<>(java.util.Arrays.asList(PipeGrid.key(3, 5), PipeGrid.key(8, 5))),
+                new java.util.HashSet<>(grid.getStaleDestinations()), "every destination of the network");
+
+        // A detour to V2 and a shortcut placed inside it.
+        PipeGrid loop = grid(Fluids.uniform(20));
+        line(loop, 1, 0, 2, 0);
+        line(loop, 2, -3, 2, -1);
+        line(loop, 3, -3, 6, -3);
+        line(loop, 6, -2, 6, 0);
+        TankValve v = Fluids.valve(100000);
+        loop.placeValve(7, 0, v);
+        fillAll(loop);
+        Pump second = pump(loop, 0, 0, PumpTier.FIRE);
+        Check.equal(12, loop.getPathDistance(second, v, FluidType.FRESHWATER), "the detour");
+        line(loop, 3, 0, 5, 0);
+        Check.equal(6, loop.getPathDistance(second, v, FluidType.FRESHWATER), "the shortcut at once");
     }
 
     // ---------------------------------------------------------------- hints (N22-3, N25-1, N25-4, N25-6)
@@ -495,24 +848,46 @@ final class NewEngineTest {
         Check.equal(1, migrated.searches, "searched once");
     }
 
-    public static void testLoadedRegionMarksOnlyDisagreeingHints() {
-        // A pipe loaded with hints that agree with its neighbours marks nothing; one that misses a
-        // destination its neighbour has marks that destination.
+    public static void testLoadedHintsAreCheckedOnTheirOwnPipe() {
+        // N28-13: a loaded pipe's hints are checked on that pipe only; N25-6: a pipe loaded without a
+        // destination its neighbour has is how that destination reaches the pipes behind it.
         PipeGrid grid = grid(Fluids.uniform(20));
         line(grid, 1, 0, 6, 0);
         grid.placeValve(7, 0, Fluids.valve(1000));
         fillAll(grid);
         Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
         cycle(grid, pump);
+        long dest = PipeGrid.key(7, 0);
         PipeNode held = grid.unloadPipe(3, 0, PipeLayer.BASE);
         grid.loadPipe(3, 0, PipeLayer.BASE, held.getTier(), held.getLinks(), held.getFluid(), held.getAmount(), true,
                 held.getHintDestinations(), held.getHintCodes());
+        grid.checkLoadedHints();
         Check.equal(0, grid.getStaleDestinations().size(), "agreeing hints: nothing to search");
+
+        held = grid.unloadPipe(3, 0, PipeLayer.BASE);
+        grid.loadPipe(3, 0, PipeLayer.BASE, held.getTier(), held.getLinks(), held.getFluid(), held.getAmount(), true,
+                new long[]{dest}, new byte[]{(byte) Direction.NORTH.ordinal()});
+        grid.checkLoadedHints();
+        Check.equal(-1, grid.getPipe(3, 0, PipeLayer.BASE).getHint(dest), "a hint pointing at no pipe is dropped");
+        Check.equal(java.util.Collections.singleton(dest), grid.getStaleDestinations(), "and searched again when used");
+        Check.equal(20, cycle(grid, pump).getDelivered(grid.getValve(7, 0)), "repaired when used (N25-1)");
+        Check.equal(Direction.EAST.ordinal(), grid.getPipe(3, 0, PipeLayer.BASE).getHint(dest));
+
         held = grid.unloadPipe(3, 0, PipeLayer.BASE);
         grid.loadPipe(3, 0, PipeLayer.BASE, held.getTier(), held.getLinks(), held.getFluid(), held.getAmount(), true,
                 new long[0], new byte[0]);
-        Check.equal(java.util.Collections.singleton(PipeGrid.key(7, 0)), grid.getStaleDestinations(),
-                "a hint missing next to its neighbours' (N25-6)");
+        grid.checkLoadedHints();
+        Check.equal(java.util.Collections.singleton(dest), grid.getStaleDestinations(),
+                "a destination its neighbours have and it lacks (N25-6)");
+        cycle(grid, pump);
+
+        // A hint toward a tile that is not loaded cannot be checked and stays.
+        grid.unloadPipe(6, 0, PipeLayer.BASE);
+        held = grid.unloadPipe(5, 0, PipeLayer.BASE);
+        grid.loadPipe(5, 0, PipeLayer.BASE, held.getTier(), held.getLinks(), held.getFluid(), held.getAmount(), true,
+                held.getHintDestinations(), held.getHintCodes());
+        grid.checkLoadedHints();
+        Check.equal(Direction.EAST.ordinal(), grid.getPipe(5, 0, PipeLayer.BASE).getHint(dest), "kept");
     }
 
     // ---------------------------------------------------------------- structure and systems

@@ -57,7 +57,7 @@ import java.util.Set;
  * pipe whose region unloads leaves its network without a rebuild, and joins the networks around it
  * again when it loads.
  *
- * <h2>Cell hints (N22-3, N24-2, N25-1, N25-4, N25-6)</h2>
+ * <h2>Cell hints (N22-3, N24-2, N25-1, N25-4, N25-6, N28-12, N28-13)</h2>
  * Instead of a route cache per pump, each pipe keeps, per destination valve, the direction of the
  * next step toward it ({@link PipeNode#getHint}), no distance. A pump steps along them from its
  * output cells; the step count, when needed, is counted while stepping.
@@ -65,43 +65,64 @@ import java.util.Set;
  *     <li>A destination's hints come from a search back from its valve over the pipes the fluid can
  *     pass (empty, or holding one fluid along the way), loaded ones only. Ties of equal length go
  *     by the search order (north, east, south, west, then the other layer).</li>
- *     <li>A structure change marks only the destinations it affects (N25-4): a removed pipe or a cut
+ *     <li>A structure change marks destinations for a new search (N25-4): a removed pipe or a cut
  *     link, those whose hints step across it; a new link, or a new pipe linking two or more pipes,
  *     those with hints on the pipes it links (it may join or shorten paths); a valve's link or a new
- *     valve, that valve. A new pipe linked to one pipe only is a dead-end leaf and takes that pipe's
- *     hints, marking nothing. Marked destinations are searched again when they are used next: at the
+ *     valve, that valve. A change inside a full stretch (at a pipe holding fluid, so in a network)
+ *     marks every destination of that network, so a shortcut is taken at once (N28-12). A new pipe
+ *     linked to one pipe only is a dead-end leaf and takes that pipe's hints, marking nothing (it
+ *     changes no path). Marked destinations are searched again when they are used next: at the
  *     next pump cycle, before the pump reads its destinations. A loaded valve whose pipes already
  *     hold its saved hints is not searched (no full recompute on the first cycle, N25-1).
  *     TODO(confirm): a stale destination is searched at the next pump cycle of any pump, since a
  *     pump cannot step toward a destination it does not know yet (a new valve, a new connection).</li>
  *     <li>Hints are repaired when used: stepping reads every cell, so a missing pipe, a cut link or a
  *     loop sends the destination to a new search, and a cell of another fluid is a dead end for that
- *     push (N13-2).</li>
- *     <li>When a region loads, only destinations whose saved hints disagree with the pipes around
- *     the loaded pipe are marked (hints saved at different times, N25-6).</li>
+ *     push (N13-2). Stepping always ends: hints saved at different times can form a loop, so one
+ *     stepping pass takes at most as many steps as there are loaded pipes, plus one; past that the
+ *     destination is searched again (N28-13). TODO(confirm): that bound.</li>
+ *     <li>When a region loads, each loaded pipe's saved hints are checked on that pipe only
+ *     (N28-13): a direction must point at a pipe linked to it, or be the last step into the
+ *     destination valve's tile. A bad hint is dropped and its destination searched again when used
+ *     (N25-1). A direction toward a tile that is not loaded cannot be checked and stays. There are no
+ *     save numbers per region, so a region file older than the rest (a crash, a restored backup)
+ *     goes unnoticed, by the summary check too (N28-1).</li>
  *     <li>TODO(confirm): the hint codes are the four directions plus one for the other layer on the
  *     same tile (basic to underground pipe, underground pipe to the valve on its tile), so a code
  *     takes 3 bits rather than 2 (N24-2).</li>
  *     <li>TODO(confirm): N25-1 "hints are built as the fluid fills empty pipes" is read as: the
  *     search back from the valve covers empty pipes too, and the fluid then fills along those hints
- *     at the movement speed. Fluid never fills dead-end branches (no destination there, N7-4).</li>
+ *     at the movement speed. The other connected empty pipes fill as well (N28-6, below).</li>
  * </ul>
  *
- * <h2>Pushing (N7, N12, N14, N18-1, N23-1, N24-3, N25-3, N26-4)</h2>
+ * <h2>Pushing (N7, N12, N14, N18-1, N23-1, N24-3, N25-3, N26-4, N28-5~N28-11, N28-14)</h2>
  * <ul>
  *     <li>A pump's destinations are the valves its output cells have hints for, reached through
  *     pipes that are empty or hold its fluid, whose tank has room (the pump's own source tanks
  *     excluded), each along its hints from the nearest output cell (the pump's first pipe = 1).</li>
- *     <li>Distribution (N24-3): the pushed amount is split where the destinations' paths part, by
- *     the number of destinations behind each outgoing face; at each junction, what does not divide
- *     evenly goes one unit per destination, destinations taken by face in the fixed order north,
- *     east, south, west (N25-5, N27-1). TODO(confirm): the other layer (vertical) face comes after
- *     west. A share a destination cannot take is split again among the others.</li>
+ *     <li>Dead ends (N28-6): the fluid also fills every other connected empty pipe, dead-end
+ *     branches included, not only the destinations' paths. Each end of a dead-end branch (a loaded
+ *     pipe off those paths with nothing further to fill) gets a path from the pump, like a
+ *     destination without a tank ({@link #branchRoutes}), while its branch is not full.</li>
+ *     <li>Distribution (N24-3, N28-8): the pushed amount is split where the paths part. While
+ *     filling, a junction gives every open direction one equal amount, a dead-end direction too
+ *     (N28-8); otherwise it splits by the number of destinations behind each direction (N24-3).
+ *     What does not divide evenly goes one unit per direction (N28-8) or per destination (N24-3),
+ *     directions taken in the fixed order: the other layer (vertical) first, then north, east,
+ *     south, west (N25-5, N27-1, N28-5). A junction counts only the destinations the fluid arriving
+ *     there carries: the amount starts at the output cell with its destinations and the set narrows
+ *     at each junction, so a loop never counts a destination twice (N28-14). TODO(confirm): "while
+ *     filling" is read per junction: some pipe after the junction, on a path that leaves it, is not
+ *     full yet. An amount a destination cannot take is split again among the others, except what the
+ *     fill speed holds back (N28-9, below).</li>
  *     <li>Each share fills the pipes along its path, then enters the tank. Only the frontier (the
  *     first pipe not yet full) is written; full pipes are never written again (N7-1).</li>
- *     <li>Fill speed (N25-1~N25-3): an empty pipe is reached no sooner than its tier's movement
- *     speed after the pipe before it on the path ({@link PipeTierRules#getFillTicksPerBlock}); full
- *     stretches pass within the cycle.</li>
+ *     <li>Fill speed (N25-1~N25-3, N28-7, N28-10): the fluid front advances once per pump cycle, by
+ *     at most the movement speed in pipes per cycle along a path, the speed of the tier of the next
+ *     pipe it fills ({@link PipeTierRules#getFillCellsPerCycle}, N28-11); full stretches pass within
+ *     the cycle. What the speed keeps from entering stays in the pump and is not given to the other
+ *     destinations (N28-9); the pump pulls that much less, and the next cycle pushes no more than the
+ *     speed allows because of it.</li>
  *     <li>Each pipe lets at most its transport amount through per cycle window of
  *     {@link #CYCLE_TICKS} ticks, counted while stepping each share from the output cell to its end
  *     (N14-2, N23-1). Pumps pushing through the same pipe add up and share it (N18-1): among pumps
@@ -111,24 +132,46 @@ import java.util.Set;
  *     <li>When the fluid reaches a new pipe, the tier conditions are judged against the lowest tier
  *     of the network it comes from and that pipe (N12-4, N14-1); if they fail, only that pipe breaks
  *     and only the share headed into it is lost.</li>
- *     <li>No destination, or every destination full: the pump stops (N7-4).</li>
+ *     <li>No destination at all: the pump stops (N7-4 as N28-6 reads it). While it has one, it
+ *     keeps filling the empty pipes connected to it even when every tank is full; with every tank
+ *     and pipe full nothing can move, and the cycle stops the same way.</li>
  * </ul>
  *
- * <h2>Unloaded regions: the network summary (N14-3, N15-1, N23-2)</h2>
- * The engine holds no mirror of unloaded pipes. Instead, each pump's paths of its last normal cycle
- * are summarized per destination ({@link RouteSummary}): the pump (source position), the valve (last
- * output position) and the regions passed through, as runs of path cells per region with their
- * count, lowest transport amount and tier, and whether they were full. While a summary is intact a
- * path may skip an unloaded region whose run was full of its fluid, also several in a row; any other
- * unloaded cell is a dead end. Runs in loaded regions are refreshed every cycle (a region that loads
- * while the network runs is updated while it stays loaded).
- * TODO(confirm): "intact (무결)" is read as: no structure change has touched the destination's
- * hints (the destinations a change marks, see above) since the summary was last recorded.
+ * <h2>Unloaded regions: the network summary (N14-3, N15-1, N23-2, N28-1~N28-4)</h2>
+ * The engine holds no mirror of unloaded pipes. Instead, each pump's path to each destination is
+ * summarized ({@link RouteSummary}): the pump (source position), the valve (last output position)
+ * and the regions passed through, as runs of path cells with their count, lowest transport amount
+ * and tier, whether they were full, and the region's structure change number when written.
+ * <ul>
+ *     <li>Written (N28-2): every cycle that pushed along the path to its valve with every cell of
+ *     the path loaded (a normal run) writes the whole summary again. A cycle that skips an unloaded
+ *     stretch changes nothing in it. TODO(confirm): "pushed through to the end" is read as: the
+ *     cycle pushed and the path it stepped reached the valve, whether or not fluid entered the tank
+ *     in that cycle.</li>
+ *     <li>Intact (N28-1): a summary is intact while every region it passes still has the structure
+ *     change number written in it ({@link #getRegionChange}). Placing, breaking or wrenching a pipe,
+ *     pump or valve, or a pipe breaking, raises its region's number: that marks the summary entries
+ *     of that region invalid, without writing them again (N28-2). Changes in regions the path does
+ *     not pass do not matter. So an edit inside a passed region stops the flow beyond an unloaded
+ *     stretch until a normal run writes the summary again.</li>
+ *     <li>While a summary is intact a path may skip an unloaded stretch whose runs were full of its
+ *     fluid, also several in a row; any other unloaded cell is a dead end (N14-3, N15-1).</li>
+ *     <li>Inside a skipped stretch (N28-3) the cap and the split follow the same rules as for loaded
+ *     pipes: each run keeps the lowest transport amount of its cells (its cap counter is shared by
+ *     the pumps that skip it), and the runs are cut where the pump's destinations' paths part, so a
+ *     junction inside the stretch splits by the destinations behind each direction as when loaded.
+ *     A skipped stretch is full, so nothing there is filling (N28-8).</li>
+ *     <li>A destination whose valve is in an unloaded cell is a dead end (N28-4, N14-3): its share
+ *     goes to the other destinations; with none left the pump stops (N7-4).</li>
+ * </ul>
  *
  * <h2>Compatibility mode (N26-1)</h2>
  * {@link #setCompatMode} switches to the old rules, for comparison tests only: the remainder of a
  * split goes one unit each to the nearest destinations over all of them (N7-2), empty pipes fill
  * without the speed limit, and pumps take shared caps in the order they run (connection order).
+ * TODO(confirm) G17: it also keeps the old fill of the destinations' paths only (no dead-end
+ * branches, N28-6 left out), so the exact comparison with the old engine holds; the dead-end fill
+ * is tested apart.
  */
 public final class PipeGrid implements PumpHost {
 
@@ -218,6 +261,8 @@ public final class PipeGrid implements PumpHost {
     private final Set<Long> staleDestinations = new LinkedHashSet<>();
     private final Set<Long> checkDestinations = new LinkedHashSet<>();
     private final Map<Long, Long> searchedAt = new HashMap<>();
+    /** Pipes loaded with saved hints, to check before the hints are next used (N28-13). */
+    private final Set<PipeNode> loadedToCheck = Collections.newSetFromMap(new IdentityHashMap<PipeNode, Boolean>());
     /** Number of searches back from a valve so far (tests, benchmarks). */
     int searches;
 
@@ -236,6 +281,9 @@ public final class PipeGrid implements PumpHost {
         final FluidType fluid;
         final long changes;
         final List<Route> routes;
+        /** The dead-end ends (N28-6) worked out for these destinations, while the memo holds. */
+        List<Route> branchDestinations;
+        List<Route> branches;
 
         RouteMemo(FluidType fluid, long changes, List<Route> routes) {
             this.fluid = fluid;
@@ -253,6 +301,18 @@ public final class PipeGrid implements PumpHost {
     private long dryStamps;
     /** The {@link #changes} at each pump's last recorded summary (technical). */
     private final Map<Pump, Long> summaryRecordedAt = new IdentityHashMap<>();
+    /**
+     * The structure change number of each region (N28-1): raised by every structure change there
+     * (placing, removing, breaking or wrenching a pipe, pump or valve), never by a region loading or
+     * unloading. A summary run keeps its region's number when it is written and is invalid once they
+     * differ (N28-2). The game saves the numbers with the level, next to the summaries
+     * ({@link #getSavedRegionChanges}): the number is compared while the region is unloaded, when its
+     * own file cannot be read, and the level file is written together with the summaries, so the two
+     * always match. In this map, the numbers also outlive any region reload.
+     */
+    private final Map<Long, Integer> regionChanges = new HashMap<>();
+    /** The stamps of the real pushes, one per cycle of one pump (the fill speed, N28-7, technical). */
+    private long pushStamps;
 
     // Manual pump clicks waiting for the next tick (N22-5).
     private final List<Long> clickQueue = new ArrayList<>();
@@ -692,6 +752,7 @@ public final class PipeGrid implements PumpHost {
         unloadedTiles.remove(key(x, y));
         putCell(node);
         onPipePlaced(node);
+        structureChanged(x, y);
         return node;
     }
 
@@ -726,6 +787,7 @@ public final class PipeGrid implements PumpHost {
                 unindexHints(existing);
                 existing.setHints(hintDests, hintCodes);
                 indexHints(existing);
+                onCellLoaded(existing);
                 changed();
             }
             if (existing.getLinks() == LinkFlags.sanitize(links) && existing.getFluid() == contents
@@ -750,7 +812,7 @@ public final class PipeGrid implements PumpHost {
             } else if (emptied) {
                 listener.onPipeFluidChanged(x, y, layer);
             }
-            markAffected(x, y, false);
+            markAffected(x, y);
             return existing;
         }
         if (existing != null) {
@@ -794,6 +856,7 @@ public final class PipeGrid implements PumpHost {
             node.network = null;
         }
         unindexHints(node);
+        loadedToCheck.remove(node);
         node.loaded = false;
         return node;
     }
@@ -812,14 +875,16 @@ public final class PipeGrid implements PumpHost {
         Set<Long> affected = destinationsThrough(existing);
         PipeNode node = takeCell(x, y, layer);
         node.removed = true;
+        structureChanged(x, y);
         unindexHints(node);
+        loadedToCheck.remove(node);
         PipeNetwork network = node.network;
         if (network != null) {
             network.nodes.remove(node);
             node.network = null;
             rebuild(Collections.singletonList(network));
         }
-        markStale(affected, true);
+        markStale(affected);
         if (node.getFluid() != null) {
             listener.onPipeFluidChanged(x, y, layer);
         }
@@ -843,6 +908,7 @@ public final class PipeGrid implements PumpHost {
      */
     public void placeValve(int x, int y, TankValve valve) {
         addValve(x, y, valve);
+        structureChanged(x, y);
         boolean changed = false;
         for (Direction d : DIRS) {
             if (pumps.containsKey(key(x + d.dx, y + d.dy)) && valve.isSideOpen(d)) {
@@ -883,6 +949,7 @@ public final class PipeGrid implements PumpHost {
         TankValve valve = valves.remove(key(x, y));
         if (valve != null) {
             changed();
+            structureChanged(x, y);
             valvePositions.remove(valve);
             for (Direction d : DIRS) {
                 Pump pump = pumps.get(key(x + d.dx, y + d.dy));
@@ -964,6 +1031,7 @@ public final class PipeGrid implements PumpHost {
         // A new pump: an old summary at its tile belonged to another pump.
         dropSummariesOf(key(x, y));
         addPump(x, y, pump);
+        structureChanged(x, y);
     }
 
     /**
@@ -995,10 +1063,29 @@ public final class PipeGrid implements PumpHost {
     }
 
     /**
-     * Removes a pump (picked up, or its region unloaded). Its summary stays, kept by its tile, for
-     * when its region loads again (N23-2).
+     * Removes a pump that was picked up: it stops (N14-3), its summaries go with it, and it is a
+     * structure change of its region (N28-1). A pump whose region unloads leaves through
+     * {@link #unloadPump}.
      */
     public Pump removePump(int x, int y) {
+        Pump pump = takePump(x, y);
+        if (pump != null) {
+            structureChanged(x, y);
+            dropSummariesOf(key(x, y));
+        }
+        return pump;
+    }
+
+    /**
+     * The pump's region unloaded, or the game only replaces its entity with another one of the same
+     * pump: it leaves the engine and stops (N14-3). Its summaries stay, kept by its tile, for when its
+     * region loads again (N23-2); not a structure change (N28-1).
+     */
+    public Pump unloadPump(int x, int y) {
+        return takePump(x, y);
+    }
+
+    private Pump takePump(int x, int y) {
         Pump pump = pumps.remove(key(x, y));
         if (pump != null) {
             changed();
@@ -1075,6 +1162,10 @@ public final class PipeGrid implements PumpHost {
         if (other != null) {
             listener.onLinksChanged(nx, ny, other.part);
         }
+        structureChanged(x, y);
+        if (other != null) {
+            structureChanged(nx, ny);
+        }
         return Check.OK;
     }
 
@@ -1116,6 +1207,7 @@ public final class PipeGrid implements PumpHost {
         if (bottom != null) {
             listener.onLinksChanged(x, y, bottom.part);
         }
+        structureChanged(x, y);
         return Check.OK;
     }
 
@@ -1368,17 +1460,11 @@ public final class PipeGrid implements PumpHost {
     // ---------------------------------------------------------------- hints
 
     /**
-     * Marks destinations for a new search when used (N25-4). A structure change also drops the
-     * summaries of the paths to them: the network is no longer the one last seen running normally
-     * (N23-2).
+     * Marks destinations for a new search when used (N25-4). Their summaries stay: whether a summary
+     * still holds is told by the structure change numbers of the regions it passes (N28-1).
      */
-    private void markStale(Set<Long> dests, boolean structure) {
+    private void markStale(Set<Long> dests) {
         staleDestinations.addAll(dests);
-        if (structure) {
-            for (long dest : dests) {
-                dropSummariesTo(dest);
-            }
-        }
     }
 
     /**
@@ -1394,6 +1480,10 @@ public final class PipeGrid implements PumpHost {
             valvesLinked.add(valvePositions.get(valve));
         }
         Set<Long> stale = new LinkedHashSet<>(valvesLinked);
+        if (linked.size() > 1) {
+            // Inside a full stretch: every destination of the networks it joins (N28-12).
+            networkDestinations(linked, stale);
+        }
         if (linked.size() == 1) {
             PipeNode only = linked.get(0);
             int code = codeToward(node, only);
@@ -1410,7 +1500,7 @@ public final class PipeGrid implements PumpHost {
                 }
             }
         }
-        markStale(stale, true);
+        markStale(stale);
     }
 
     /**
@@ -1425,14 +1515,42 @@ public final class PipeGrid implements PumpHost {
         for (TankValve valve : getLinkedValves(node)) {
             result.add(valvePositions.get(valve));
         }
+        // A pipe of a full stretch: every destination of its network (N28-12).
+        networkDestinations(Collections.singletonList(node), result);
         return result;
+    }
+
+    /**
+     * N28-12: every destination of the networks of the given pipes (those holding fluid): each
+     * destination with a hint on one of their pipes.
+     */
+    private static void networkDestinations(List<PipeNode> cells, Set<Long> out) {
+        Set<PipeNetwork> done = null;
+        for (PipeNode cell : cells) {
+            PipeNetwork network = cell.network;
+            if (network == null) {
+                continue;
+            }
+            if (done == null) {
+                done = Collections.newSetFromMap(new IdentityHashMap<PipeNetwork, Boolean>());
+            }
+            if (!done.add(network)) {
+                continue;
+            }
+            for (PipeNode node : network.nodes) {
+                for (int i = 0; i < node.getHintCount(); i++) {
+                    out.add(node.getHintDestination(i));
+                }
+            }
+        }
     }
 
     /**
      * A link between two parts was cut or made by the wrench (N25-4). Pipe to pipe: a cut affects
      * the destinations whose hints step across it; a new link may join or shorten paths, so it
      * affects every destination with a hint on either pipe. Pipe to valve: that valve's destination.
-     * Links of pumps change no path.
+     * At a pipe holding fluid, every destination of its network too (N28-12). Links of pumps change
+     * no path.
      */
     private void linkChanged(int x1, int y1, Part part1, int x2, int y2, Part part2, boolean wasLinked) {
         Set<Long> stale = new LinkedHashSet<>();
@@ -1451,12 +1569,18 @@ public final class PipeGrid implements PumpHost {
                     }
                 }
             }
+            // Inside a full stretch: every destination of the networks on either side (N28-12).
+            networkDestinations(java.util.Arrays.asList(a, b), stale);
         } else if (pipe1 && part2 == Part.VALVE) {
             stale.add(key(x2, y2));
+            networkDestinations(Collections.singletonList(
+                    getPipe(x1, y1, part1 == Part.BASIC_PIPE ? PipeLayer.BASE : PipeLayer.UNDERGROUND)), stale);
         } else if (pipe2 && part1 == Part.VALVE) {
             stale.add(key(x1, y1));
+            networkDestinations(Collections.singletonList(
+                    getPipe(x2, y2, part2 == Part.BASIC_PIPE ? PipeLayer.BASE : PipeLayer.UNDERGROUND)), stale);
         }
-        markStale(stale, true);
+        markStale(stale);
     }
 
     /** The destinations whose hint at {@code from} steps into {@code to}. */
@@ -1470,13 +1594,13 @@ public final class PipeGrid implements PumpHost {
     }
 
     /** The contents of a loaded pipe changed (saved state): the fluid met on the way may differ (N13-2). */
-    private void markAffected(int x, int y, boolean structure) {
+    private void markAffected(int x, int y) {
         Set<Long> dests = new LinkedHashSet<>();
         collectAt(x, y, dests);
         for (Direction d : DIRS) {
             collectAt(x + d.dx, y + d.dy, dests);
         }
-        markStale(dests, structure);
+        markStale(dests);
     }
 
     private void collectAt(int x, int y, Set<Long> out) {
@@ -1496,26 +1620,81 @@ public final class PipeGrid implements PumpHost {
     }
 
     /**
-     * A pipe was loaded with its saved hints (N25-6). Hints saved at different times can disagree:
-     * a destination a linked pipe next to it has a hint for and it has none, or its hint pointing at
-     * a linked pipe that has none, is searched again when used.
+     * A pipe was loaded with its saved hints (N25-6): looked at before the hints are next used, when
+     * the rest of its region has loaded too ({@link #checkLoadedHints}).
      */
     private void onCellLoaded(PipeNode node) {
-        for (PipeNode next : linkedPipes(node)) {
-            int code = codeToward(node, next);
-            for (int i = 0; i < next.getHintCount(); i++) {
-                long dest = next.getHintDestination(i);
-                if (node.getHint(dest) < 0) {
-                    staleDestinations.add(dest);
+        loadedToCheck.add(node);
+    }
+
+    /**
+     * The pipes loaded since the hints were last used:
+     * <ul>
+     *     <li>N28-13: each saved hint must point at a pipe linked to its pipe, or be the last step
+     *     into the destination valve's tile; that is all that is checked. A bad one is dropped and
+     *     its destination searched again (repaired when used, N25-1). A hint toward a tile that is
+     *     not loaded cannot be checked and stays.</li>
+     *     <li>A destination a linked pipe next to it has a hint for and it has none is searched again
+     *     (N25-6): that is how a destination reaches the pipes behind a region that loads (a valve
+     *     placed while the region between was unloaded). It checks no saved hint.</li>
+     * </ul>
+     */
+    void checkLoadedHints() {
+        if (loadedToCheck.isEmpty()) {
+            return;
+        }
+        List<PipeNode> cells = new ArrayList<>(loadedToCheck);
+        loadedToCheck.clear();
+        for (PipeNode node : cells) {
+            if (node.removed || getPipe(node.getTileX(), node.getTileY(), node.getLayer()) != node) {
+                continue;
+            }
+            for (PipeNode next : linkedPipes(node)) {
+                for (int i = 0; i < next.getHintCount(); i++) {
+                    long dest = next.getHintDestination(i);
+                    if (node.getHint(dest) < 0) {
+                        staleDestinations.add(dest);
+                    }
                 }
             }
-            for (int i = 0; i < node.getHintCount(); i++) {
+            for (int i = node.getHintCount() - 1; i >= 0; i--) {
                 long dest = node.getHintDestination(i);
-                if (node.getHintCode(i) == code && next.getHint(dest) < 0) {
+                if (!hintChecks(node, dest, node.getHintCode(i))) {
+                    changed();
+                    node.removeHint(dest);
+                    Set<PipeNode> holders = hintCells.get(dest);
+                    if (holders != null) {
+                        holders.remove(node);
+                        if (holders.isEmpty()) {
+                            hintCells.remove(dest);
+                        }
+                    }
                     staleDestinations.add(dest);
                 }
             }
         }
+    }
+
+    /** Whether a hint points at a pipe linked to its pipe, or into its valve (N28-13); unloaded: unknown, kept. */
+    private boolean hintChecks(PipeNode node, long dest, int code) {
+        int x = node.getTileX();
+        int y = node.getTileY();
+        if (code == PipeNode.HINT_VERTICAL) {
+            if (node.getLayer() == PipeLayer.UNDERGROUND && key(x, y) == dest) {
+                return true;
+            }
+            PipeNode other = node.around[PipeNode.HINT_VERTICAL];
+            return other != null && linked(node, other, code);
+        }
+        Direction d = DIRS[code];
+        if (node.getLayer() == PipeLayer.BASE && key(x + d.dx, y + d.dy) == dest) {
+            return true;
+        }
+        PipeNode next = node.around[code];
+        if (next == null) {
+            return !isTileLoaded(x + d.dx, y + d.dy);
+        }
+        return linked(node, next, code);
     }
 
     private void indexHints(PipeNode node) {
@@ -1583,6 +1762,7 @@ public final class PipeGrid implements PumpHost {
 
     /** Searches the destinations marked since the last use (N25-4) and new valves without hints. */
     private void refreshHints() {
+        checkLoadedHints();
         if (!checkDestinations.isEmpty()) {
             for (long dest : checkDestinations) {
                 if (valves.containsKey(dest) && !hasAttachedHint(dest)) {
@@ -1714,8 +1894,11 @@ public final class PipeGrid implements PumpHost {
         final int distance;
         /** Elements before this index are known to be full: the frontier (N7-1). */
         int frontier;
+        /** What follows the last element: the valve, or for a dead-end end (N28-6) a mark of its own. */
+        final Object end;
 
         Route(TankValve valve, long dest, Object[] path, int[] faces, int[] stepsTo, int distance) {
+            this.end = valve != null ? valve : new Object();
             this.valve = valve;
             this.dest = dest;
             this.valveX = keyX(dest);
@@ -1726,12 +1909,12 @@ public final class PipeGrid implements PumpHost {
             this.distance = distance;
         }
 
-        /** The identity of element {@code i} for grouping at junctions, or of the valve past the end. */
+        /** The identity of element {@code i} for grouping at junctions, or of the end past the last one. */
         Object element(int i) {
             if (i < path.length) {
                 return path[i] instanceof SummaryRun ? ((SummaryRun) path[i]).key() : path[i];
             }
-            return valve;
+            return end;
         }
     }
 
@@ -1882,6 +2065,10 @@ public final class PipeGrid implements PumpHost {
                 }
                 if (summary == null) {
                     summary = summaryOf(pump, dest);
+                    if (summary != null && !isIntact(summary)) {
+                        // A structure change in a region it passes since it was written (N28-1).
+                        return new Walk(WALK_DEAD_END);
+                    }
                 }
                 int run = summary == null ? -1 : summary.indexOfRunAt(nx, ny, layer);
                 if (run < 0) {
@@ -1900,8 +2087,18 @@ public final class PipeGrid implements PumpHost {
                     last = skipped;
                     run++;
                 }
-                if (run >= summary.runs.length || last == null) {
+                if (last == null) {
                     return new Walk(WALK_DEAD_END);
+                }
+                if (run >= summary.runs.length) {
+                    // The skipped stretch reaches the valve: a loaded last output position takes the
+                    // fluid (N23-2); only one in an unloaded cell is a dead end (N28-4).
+                    int end = endFaceInto(last, dest, valve);
+                    if (end < 0) {
+                        return new Walk(WALK_DEAD_END);
+                    }
+                    path.end(end);
+                    break;
                 }
                 SummaryRun resume = summary.runs[run];
                 next = getPipe(resume.firstX, resume.firstY, resume.firstLayer);
@@ -1921,6 +2118,8 @@ public final class PipeGrid implements PumpHost {
             count++;
             path.add(next, code, count);
             cell = next;
+            // N28-13: hints saved at different times may form a loop; a pass never takes more steps
+            // than there are loaded pipes (plus one). TODO(confirm): that bound.
             if (++loadedSteps > limit) {
                 return new Walk(WALK_REPAIR);
             }
@@ -1928,6 +2127,25 @@ public final class PipeGrid implements PumpHost {
         Walk result = new Walk(WALK_OK);
         result.route = new Route(valve, dest, path.elements(), path.faces(), path.steps(), count);
         return result;
+    }
+
+    /**
+     * The face from the last cell of a skipped run into the valve right after it, or -1 when that
+     * cell does not reach the valve (only the valve's own flag can be read; the run's cells were
+     * linked to it when the summary was written, and nothing changed since, N28-1).
+     */
+    private static int endFaceInto(SummaryRun last, long dest, TankValve valve) {
+        int vx = keyX(dest);
+        int vy = keyY(dest);
+        if (last.lastLayer == PipeLayer.UNDERGROUND) {
+            return last.lastX == vx && last.lastY == vy && valve.isVerticalOpen() ? PipeNode.HINT_VERTICAL : -1;
+        }
+        for (Direction d : DIRS) {
+            if (last.lastX + d.dx == vx && last.lastY + d.dy == vy) {
+                return valve.isSideOpen(d.opposite()) ? d.ordinal() : -1;
+            }
+        }
+        return -1;
     }
 
     /** A path being stepped: its elements, the face into each (and last into the valve), the steps to each. */
@@ -2002,10 +2220,11 @@ public final class PipeGrid implements PumpHost {
         /** Number of path cells. */
         public final int count;
         /**
-         * The lowest transport amount of its cells (the cap, N14-2).
-         * TODO(confirm): with the lowest tier and {@link #full}, derived data the summary needs to keep
-         * the cap (N14-2), the tier judgment (N12-4) and "only full stretches are skipped" (N14-3)
-         * across unloaded regions.
+         * The lowest transport amount of its cells: the cap of the stretch when it is skipped, worked
+         * out as for loaded pipes (N14-2, N28-3). With the lowest tier and {@link #full}, the data the
+         * summary keeps for the cap, the tier judgment (N12-4) and "only full stretches are skipped"
+         * (N14-3) across unloaded regions; the runs are also cut where the pump's paths part, which
+         * keeps the split per direction there (N28-3).
          */
         public final int capacity;
         /** The lowest tier of its cells (N12-4). */
@@ -2013,10 +2232,12 @@ public final class PipeGrid implements PumpHost {
         /** Whether every cell was full of {@link #fluid} (only a full stretch may be skipped, N14-3, N15-1). */
         public final boolean full;
         public final FluidType fluid;
+        /** The structure change number of its region when it was written (N28-1). */
+        public final int regionChange;
 
         public SummaryRun(long region, int firstX, int firstY, PipeLayer firstLayer, int lastX, int lastY,
                           PipeLayer lastLayer, int count, int capacity, MineralTier lowestTier, boolean full,
-                          FluidType fluid) {
+                          FluidType fluid, int regionChange) {
             this.region = region;
             this.firstX = firstX;
             this.firstY = firstY;
@@ -2029,6 +2250,7 @@ public final class PipeGrid implements PumpHost {
             this.lowestTier = lowestTier;
             this.full = full;
             this.fluid = fluid;
+            this.regionChange = regionChange;
         }
 
         RunKey key() {
@@ -2071,9 +2293,9 @@ public final class PipeGrid implements PumpHost {
     }
 
     /**
-     * One pump's path to one destination in its last normal cycle (N23-2): the source (the pump's
-     * tile), the last output position (the valve's tile) and the regions passed through, as runs in
-     * path order.
+     * One pump's path to one destination in its last normal run (N23-2, N28-2): the source (the
+     * pump's tile), the last output position (the valve's tile) and the regions passed through, as
+     * runs in path order (cut at region borders and where the pump's paths part, N28-3).
      */
     public static final class RouteSummary {
         public final int pumpX;
@@ -2103,6 +2325,59 @@ public final class PipeGrid implements PumpHost {
     private RouteSummary summaryOf(Pump pump, long dest) {
         Map<Long, RouteSummary> byDest = summaries.get(key(pump.getTileX(), pump.getTileY()));
         return byDest == null ? null : byDest.get(dest);
+    }
+
+    /**
+     * N28-1: a summary is intact while every region it passes still has the structure change number
+     * written in it; a structure change there marked its entries invalid (N28-2).
+     */
+    boolean isIntact(RouteSummary summary) {
+        for (SummaryRun run : summary.runs) {
+            if (run.regionChange != getRegionChange(run.region)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** A structure change at the tile: its region's number rises (N28-1). */
+    private void structureChanged(int x, int y) {
+        regionChanges.merge(TileBuckets.bucketOf(x, y), 1, Integer::sum);
+    }
+
+    /** The structure change number of a region ({@link TileBuckets#bucketOf}), N28-1. */
+    public int getRegionChange(long region) {
+        Integer number = regionChanges.get(region);
+        return number == null ? 0 : number;
+    }
+
+    /**
+     * The structure change numbers the game saves with the level (N28-1): those of the regions some
+     * summary passes. No summary needs the others; after a restart they count from 0 again, and a
+     * summary written then keeps that.
+     */
+    public Map<Long, Integer> getSavedRegionChanges() {
+        Map<Long, Integer> result = new LinkedHashMap<>();
+        for (Map<Long, RouteSummary> byDest : summaries.values()) {
+            for (RouteSummary summary : byDest.values()) {
+                for (SummaryRun run : summary.runs) {
+                    Integer number = regionChanges.get(run.region);
+                    if (number != null) {
+                        result.put(run.region, number);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Restores a saved structure change number (level load, N28-1). */
+    public void loadRegionChange(long region, int number) {
+        if (number == 0) {
+            regionChanges.remove(region);
+        } else {
+            regionChanges.put(region, number);
+        }
     }
 
     /** Every summary (the game saves them with the level, N23-2). */
@@ -2169,10 +2444,69 @@ public final class PipeGrid implements PumpHost {
     }
 
     /**
-     * Records a pump's path after a push (N23-2): runs of loaded cells as they are now, skipped
-     * runs as they were (a region that loads while the network runs is updated while it is loaded).
+     * Writes the summaries of a push (N28-2): every destination path that is a normal run, every cell
+     * of it loaded and none removed, gets its whole summary written again. A path that skipped an
+     * unloaded stretch leaves its summary as it is. The runs are cut at region borders and right
+     * after the cells where the pump's destination paths part (N28-3).
      */
-    private void recordSummary(Pump pump, Route route, FluidType fluid) {
+    private void recordSummaries(Pump pump, List<Route> routes, FluidType fluid) {
+        Junctions junctions = null;
+        for (Route route : routes) {
+            if (valves.get(route.dest) != route.valve || !isNormalRun(route)) {
+                continue;
+            }
+            if (junctions == null) {
+                junctions = new Junctions(routes);
+            }
+            recordSummary(pump, route, fluid, junctions.partsAfter(route));
+        }
+    }
+
+    private static boolean isNormalRun(Route route) {
+        for (Object element : route.path) {
+            if (!(element instanceof PipeNode) || ((PipeNode) element).removed) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Where a pump's paths part (N28-3): the paths' elements as a tree from the pump. */
+    private static final class Junctions {
+        private final Map<Object, Junctions> next = new HashMap<>(4);
+
+        Junctions() {
+        }
+
+        Junctions(List<Route> routes) {
+            for (Route route : routes) {
+                Junctions node = this;
+                for (int i = 0; i <= route.path.length; i++) {
+                    Object element = route.element(i);
+                    Junctions child = node.next.get(element);
+                    if (child == null) {
+                        child = new Junctions();
+                        node.next.put(element, child);
+                    }
+                    node = child;
+                }
+            }
+        }
+
+        /** For each element of the route, whether the paths part right after it. */
+        boolean[] partsAfter(Route route) {
+            boolean[] result = new boolean[route.path.length];
+            Junctions node = this;
+            for (int i = 0; i < route.path.length; i++) {
+                node = node.next.get(route.element(i));
+                result[i] = node.next.size() > 1;
+            }
+            return result;
+        }
+    }
+
+    /** Writes one destination's summary from a normal run (every element a loaded pipe). */
+    private void recordSummary(Pump pump, Route route, FluidType fluid, boolean[] partsAfter) {
         List<SummaryRun> runs = new ArrayList<>();
         PipeNode first = null;
         PipeNode last = null;
@@ -2181,21 +2515,11 @@ public final class PipeGrid implements PumpHost {
         int capacity = 0;
         MineralTier lowest = null;
         boolean full = true;
-        for (Object element : route.path) {
-            if (element instanceof SummaryRun) {
-                if (first != null) {
-                    runs.add(new SummaryRun(region, first.getTileX(), first.getTileY(), first.getLayer(), last.getTileX(),
-                            last.getTileY(), last.getLayer(), count, capacity, lowest, full, fluid));
-                    first = null;
-                }
-                runs.add((SummaryRun) element);
-                continue;
-            }
-            PipeNode node = (PipeNode) element;
+        for (int i = 0; i < route.path.length; i++) {
+            PipeNode node = (PipeNode) route.path[i];
             long here = TileBuckets.bucketOf(node.getTileX(), node.getTileY());
-            if (first != null && here != region) {
-                runs.add(new SummaryRun(region, first.getTileX(), first.getTileY(), first.getLayer(), last.getTileX(),
-                        last.getTileY(), last.getLayer(), count, capacity, lowest, full, fluid));
+            if (first != null && (here != region || partsAfter[i - 1])) {
+                runs.add(newRun(region, first, last, count, capacity, lowest, full, fluid));
                 first = null;
             }
             if (first == null) {
@@ -2213,12 +2537,17 @@ public final class PipeGrid implements PumpHost {
             full &= node.getFluid() == fluid && node.isFull();
         }
         if (first != null) {
-            runs.add(new SummaryRun(region, first.getTileX(), first.getTileY(), first.getLayer(), last.getTileX(),
-                    last.getTileY(), last.getLayer(), count, capacity, lowest, full, fluid));
+            runs.add(newRun(region, first, last, count, capacity, lowest, full, fluid));
         }
         putSummary(key(pump.getTileX(), pump.getTileY()), route.dest,
                 new RouteSummary(pump.getTileX(), pump.getTileY(), route.valveX, route.valveY,
                         runs.toArray(new SummaryRun[0])));
+    }
+
+    private SummaryRun newRun(long region, PipeNode first, PipeNode last, int count, int capacity, MineralTier lowest,
+                              boolean full, FluidType fluid) {
+        return new SummaryRun(region, first.getTileX(), first.getTileY(), first.getLayer(), last.getTileX(),
+                last.getTileY(), last.getLayer(), count, capacity, lowest, full, fluid, getRegionChange(region));
     }
 
     // ---------------------------------------------------------------- pushing
@@ -2226,6 +2555,8 @@ public final class PipeGrid implements PumpHost {
     /**
      * The destinations of one push from {@code pump} with {@code fluid}: valves reached along the
      * hints through pipes that can carry it, excluding the tanks the pump is linked to for pulling.
+     * With at least one destination, the ends of the dead-end branches are filled too (N28-6), except
+     * in the compatibility mode (TODO(confirm) G17, see the class comment).
      */
     @Override
     public PushPlan planPush(Pump pump, FluidType fluid) {
@@ -2244,7 +2575,119 @@ public final class PipeGrid implements PumpHost {
                 destinations.add(route);
             }
         }
-        return new GridPushPlan(pump, fluid, destinations);
+        List<Route> branches = compatMode || destinations.isEmpty() ? Collections.<Route>emptyList()
+                : branchRoutes(pump, fluid, destinations);
+        return new GridPushPlan(pump, fluid, destinations, branches);
+    }
+
+    /**
+     * The paths to the ends of the dead-end branches (N28-6). The branches are the loaded pipes the
+     * fluid can enter (empty or holding it, N13-2) that are on no destination path, followed outward
+     * from the pipes of those paths and from the pump's own output cells. Each end (a branch pipe with
+     * nothing further) whose branch is not full yet gets a path: the destination path it hangs from
+     * up to the pipe it leaves, then its branch. So the paths part where the branch leaves, and that
+     * direction counts at the junction (N28-8). Kept while nothing changes (technical).
+     */
+    private List<Route> branchRoutes(Pump pump, FluidType fluid, List<Route> destinations) {
+        RouteMemo memo = routeMemo.get(pump);
+        boolean memoValid = memo != null && memo.fluid == fluid && memo.changes == changes;
+        if (memoValid && destinations.equals(memo.branchDestinations)) {
+            return memo.branches;
+        }
+        Set<PipeNode> onPath = Collections.newSetFromMap(new IdentityHashMap<PipeNode, Boolean>());
+        for (Route route : destinations) {
+            for (Object element : route.path) {
+                if (element instanceof PipeNode) {
+                    onPath.add((PipeNode) element);
+                }
+            }
+        }
+        Set<PipeNode> claimed = Collections.newSetFromMap(new IdentityHashMap<PipeNode, Boolean>());
+        Set<PipeNode> hasNext = Collections.newSetFromMap(new IdentityHashMap<PipeNode, Boolean>());
+        Map<PipeNode, PipeNode> before = new IdentityHashMap<>();
+        // Where each branch leaves: {destination index, element index}, or {-1, side} at the pump.
+        Map<PipeNode, int[]> leaves = new IdentityHashMap<>();
+        ArrayDeque<PipeNode> queue = new ArrayDeque<>();
+        for (Direction d : DIRS) {
+            PipeNode node = basePipes.get(key(pump.getTileX() + d.dx, pump.getTileY() + d.dy));
+            if (node != null && pump.isSideOpen(d) && node.isSideOpen(d.opposite()) && !onPath.contains(node)
+                    && traversable(node, fluid) && claimed.add(node)) {
+                leaves.put(node, new int[]{-1, d.ordinal()});
+                queue.add(node);
+            }
+        }
+        for (int r = 0; r < destinations.size(); r++) {
+            Object[] path = destinations.get(r).path;
+            for (int i = 0; i < path.length; i++) {
+                if (!(path[i] instanceof PipeNode)) {
+                    continue;
+                }
+                for (PipeNode next : linkedPipes((PipeNode) path[i])) {
+                    if (!onPath.contains(next) && traversable(next, fluid) && claimed.add(next)) {
+                        leaves.put(next, new int[]{r, i});
+                        queue.add(next);
+                    }
+                }
+            }
+        }
+        List<PipeNode> order = new ArrayList<>();
+        while (!queue.isEmpty()) {
+            PipeNode cell = queue.poll();
+            order.add(cell);
+            for (PipeNode next : linkedPipes(cell)) {
+                if (!onPath.contains(next) && traversable(next, fluid) && claimed.add(next)) {
+                    before.put(next, cell);
+                    hasNext.add(cell);
+                    queue.add(next);
+                }
+            }
+        }
+        List<Route> result = new ArrayList<>();
+        for (PipeNode end : order) {
+            if (hasNext.contains(end)) {
+                continue;
+            }
+            List<PipeNode> chain = new ArrayList<>();
+            boolean room = false;
+            for (PipeNode cell = end; cell != null; cell = before.get(cell)) {
+                chain.add(cell);
+                room |= cell.getFluid() != fluid || !cell.isFull();
+            }
+            if (!room) {
+                continue;
+            }
+            Collections.reverse(chain);
+            int[] from = leaves.get(chain.get(0));
+            Route base = from[0] < 0 ? null : destinations.get(from[0]);
+            int prefix = base == null ? 0 : from[1] + 1;
+            int length = prefix + chain.size();
+            Object[] path = new Object[length];
+            int[] faces = new int[length + 1];
+            int[] steps = new int[length];
+            if (base != null) {
+                System.arraycopy(base.path, 0, path, 0, prefix);
+                System.arraycopy(base.faces, 0, faces, 0, prefix);
+                System.arraycopy(base.stepsTo, 0, steps, 0, prefix);
+            }
+            for (int j = 0; j < chain.size(); j++) {
+                int e = prefix + j;
+                path[e] = chain.get(j);
+                faces[e] = e == 0 ? from[1] : codeToward((PipeNode) path[e - 1], chain.get(j));
+                steps[e] = e == 0 ? 1 : steps[e - 1] + 1;
+            }
+            faces[length] = -1;
+            result.add(new Route(null, Long.MIN_VALUE, path, faces, steps, steps[length - 1]));
+        }
+        if (memoValid) {
+            memo.branchDestinations = new ArrayList<>(destinations);
+            memo.branches = result;
+        }
+        return result;
+    }
+
+    /** The order of the directions at a junction (N28-5): the other layer (vertical) first, then N, E, S, W. */
+    static int directionOrder(int code) {
+        return code == PipeNode.HINT_VERTICAL ? -1 : code < 0 ? Integer.MAX_VALUE : code;
     }
 
     /** One push: the destinations and the logic that moves fluid to them, as a dry run or for real. */
@@ -2252,40 +2695,34 @@ public final class PipeGrid implements PumpHost {
         private final Pump pump;
         private final FluidType fluid;
         private final List<Route> destinations;
+        /** The ends of the dead-end branches (N28-6): filled like destinations, without a tank. */
+        private final List<Route> branches;
+        /** Set by {@link #deliver}: the fill speed stopped the share (N28-9). */
+        private boolean heldBySpeed;
 
-        GridPushPlan(Pump pump, FluidType fluid, List<Route> destinations) {
+        GridPushPlan(Pump pump, FluidType fluid, List<Route> destinations, List<Route> branches) {
             this.pump = pump;
             this.fluid = fluid;
             this.destinations = destinations;
+            this.branches = branches;
         }
 
+        /**
+         * What a push of {@code amount} would use, counting what the fill speed holds back: that stays
+         * in the pump (N28-9), so the pump pulls only what this cycle's push and what it keeps need.
+         */
         @Override
         public long simulate(int amount) {
             Stats stats = distribute(amount, new DryLedger());
-            return (long) stats.pipeFill + stats.deliveredTotal + stats.lost;
+            return (long) stats.pipeFill + stats.deliveredTotal + stats.lost + stats.held;
         }
 
         @Override
         public PumpResult run(int amount) {
             Stats stats = distribute(amount, new RealLedger());
             Long recorded = summaryRecordedAt.get(pump);
-            boolean record = recorded == null || recorded != changes;
-            for (Route route : record ? destinations : Collections.<Route>emptyList()) {
-                if (valves.get(route.dest) != route.valve) {
-                    continue;
-                }
-                boolean intact = true;
-                for (Object element : route.path) {
-                    if (element instanceof PipeNode && ((PipeNode) element).removed) {
-                        intact = false;
-                        break;
-                    }
-                }
-                if (intact) {
-                    recordSummary(pump, route, fluid);
-                }
-            }
-            if (record) {
+            if (recorded == null || recorded != changes) {
+                recordSummaries(pump, destinations, fluid);
                 summaryRecordedAt.put(pump, changes);
             }
             return new PumpResult(PumpResult.Status.PUMPED, fluid, stats.pipeFill + stats.deliveredTotal, stats.pipeFill,
@@ -2293,21 +2730,29 @@ public final class PipeGrid implements PumpHost {
         }
 
         /**
-         * Shares over the destinations that have room, delivered nearest first; what one cannot take
-         * is split again among the others (N7-2, N20-6).
+         * Amounts over the paths that have room, delivered nearest first; what one cannot take is split
+         * again among the others (N7-2, N20-6), except what the fill speed held back: that stays in the
+         * pump (N28-9).
          */
         private Stats distribute(int amount, Ledger ledger) {
             Stats stats = new Stats();
             List<Route> active = new ArrayList<>();
             for (Route route : destinations) {
-                if (ledger.tankSpace(route.valve) > 0) {
+                if (space(route, ledger) > 0) {
+                    active.add(route);
+                }
+            }
+            for (Route route : branches) {
+                if (space(route, ledger) > 0) {
                     active.add(route);
                 }
             }
             int remaining = amount;
             while (remaining > 0 && !active.isEmpty()) {
-                Map<Route, Integer> shares = compatMode ? nearestFirst(remaining, active) : splitAtJunctions(remaining, active);
+                Map<Route, Integer> shares = compatMode ? nearestFirst(remaining, active)
+                        : splitAtJunctions(remaining, active, ledger);
                 int used = 0;
+                int held = 0;
                 List<Route> saturated = new ArrayList<>();
                 for (Route route : active) {
                     Integer share = shares.get(route);
@@ -2318,12 +2763,18 @@ public final class PipeGrid implements PumpHost {
                     used += taken;
                     if (taken < share) {
                         saturated.add(route);
+                        if (heldBySpeed) {
+                            // N28-9: not given to the other paths; it stays in the pump, and the next
+                            // cycle pushes no more than the speed allows because of it.
+                            held += share - taken;
+                            stats.held += share - taken;
+                        }
                     }
                 }
-                remaining -= used;
+                remaining -= used + held;
                 for (int i = active.size() - 1; i >= 0; i--) {
                     Route route = active.get(i);
-                    if (saturated.contains(route) || ledger.tankSpace(route.valve) == 0) {
+                    if (saturated.contains(route) || space(route, ledger) == 0) {
                         active.remove(i);
                     }
                 }
@@ -2332,6 +2783,15 @@ public final class PipeGrid implements PumpHost {
                 }
             }
             return stats;
+        }
+
+        /** Room at a path's end: its tank's space, or for a dead-end end (N28-6) 1 while a pipe is left to fill. */
+        private int space(Route route, Ledger ledger) {
+            if (route.valve != null) {
+                return ledger.tankSpace(route.valve);
+            }
+            int frontier = advance(route, ledger);
+            return frontier >= 0 && frontier < route.path.length ? 1 : 0;
         }
 
         /** The old rule (compatibility mode, N7-2): equal shares, the remainder one unit each to the nearest. */
@@ -2347,17 +2807,23 @@ public final class PipeGrid implements PumpHost {
         }
 
         /**
-         * N24-3: the amount is split where the paths part, by the number of destinations behind each
-         * outgoing face; the remainder of each split goes one unit per destination, faces taken
-         * north, east, south, west (N25-5, N27-1), then the other layer (TODO(confirm)).
+         * The amount is split where the paths part (N24-3, N28-8): while filling, one equal amount per
+         * open direction, a dead-end direction too; otherwise by the number of destinations behind each
+         * direction. The remainder of each split goes one unit per direction or destination, directions
+         * taken vertical, north, east, south, west (N25-5, N27-1, N28-5).
          */
-        private Map<Route, Integer> splitAtJunctions(int amount, List<Route> active) {
+        private Map<Route, Integer> splitAtJunctions(int amount, List<Route> active, Ledger ledger) {
             Map<Route, Integer> shares = new IdentityHashMap<>();
-            split(amount, new ArrayList<>(active), 0, shares);
+            split(amount, new ArrayList<>(active), 0, shares, ledger);
             return shares;
         }
 
-        private void split(int amount, List<Route> group, int depth, Map<Route, Integer> out) {
+        /**
+         * Splits {@code amount} among the paths of {@code group}, the destinations this amount carries:
+         * at each junction only those count, and each direction's amount carries its own part of them
+         * on (N28-14), so a loop never counts a destination twice.
+         */
+        private void split(int amount, List<Route> group, int depth, Map<Route, Integer> out, Ledger ledger) {
             if (group.size() == 1) {
                 out.put(group.get(0), amount);
                 return;
@@ -2377,7 +2843,7 @@ public final class PipeGrid implements PumpHost {
                 }
                 k++;
             }
-            // Group the destinations by the element they step to: one group per outgoing face.
+            // Group the paths by the element they step to: one group per outgoing direction.
             Map<Object, List<Route>> byNext = new LinkedHashMap<>();
             Map<Object, Integer> faceOf = new HashMap<>();
             for (Route route : group) {
@@ -2391,16 +2857,46 @@ public final class PipeGrid implements PumpHost {
                 members.add(route);
             }
             List<Object> faces = new ArrayList<>(byNext.keySet());
-            faces.sort(Comparator.comparingInt(faceOf::get));
-            int count = group.size();
-            int base = amount / count;
-            int extra = amount % count;
+            faces.sort(Comparator.comparingInt(face -> directionOrder(faceOf.get(face))));
+            boolean filling = isFilling(group, k, ledger);
+            int units = filling ? faces.size() : group.size();
+            int base = amount / units;
+            int extra = amount % units;
             for (Object face : faces) {
                 List<Route> members = byNext.get(face);
-                int bonus = Math.min(extra, members.size());
+                int weight = filling ? 1 : members.size();
+                int bonus = Math.min(extra, weight);
                 extra -= bonus;
-                split(base * members.size() + bonus, members, k + 1, out);
+                split(base * weight + bonus, members, k + 1, out, ledger);
             }
+        }
+
+        /**
+         * N28-8 "while filling", read per junction (TODO(confirm), see the class comment): a pipe from
+         * element {@code k} on, on one of the group's paths, is not full of the fluid yet.
+         */
+        private boolean isFilling(List<Route> group, int k, Ledger ledger) {
+            for (Route route : group) {
+                int frontier = advance(route, ledger);
+                if (frontier < 0) {
+                    continue;
+                }
+                if (frontier >= k) {
+                    if (frontier < route.path.length) {
+                        return true;
+                    }
+                    continue;
+                }
+                for (int i = k; i < route.path.length; i++) {
+                    if (route.path[i] instanceof PipeNode) {
+                        PipeNode node = (PipeNode) route.path[i];
+                        if (ledger.fluid(node) != fluid || ledger.amount(node) < node.getCapacity()) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
         }
 
         /**
@@ -2408,6 +2904,7 @@ public final class PipeGrid implements PumpHost {
          * share used: filled, delivered, and lost into a pipe that broke (N14-1).
          */
         private int deliver(Route route, int share, Ledger ledger, Stats stats) {
+            heldBySpeed = false;
             Object[] path = route.path;
             int used = 0;
             while (share > 0) {
@@ -2419,7 +2916,8 @@ public final class PipeGrid implements PumpHost {
                     PipeNode node = (PipeNode) path[frontier];
                     if (ledger.amount(node) == 0) {
                         if (!compatMode && !mayReach(route, frontier, node, ledger)) {
-                            // The fluid front moves one block per step at the pipe's speed (N25-1~N25-3).
+                            // The front advanced as far as the speed allows in this cycle (N28-7).
+                            heldBySpeed = true;
                             break;
                         }
                         MineralTier lowest = lowestBefore(route, frontier);
@@ -2447,6 +2945,10 @@ public final class PipeGrid implements PumpHost {
                         break;
                     }
                 } else {
+                    if (route.valve == null) {
+                        // The end of a dead-end branch, full (N28-6).
+                        break;
+                    }
                     int take = Math.min(Math.min(share, ledger.tankSpace(route.valve)), flowLeft(path, path.length, ledger));
                     if (take <= 0) {
                         break;
@@ -2460,13 +2962,18 @@ public final class PipeGrid implements PumpHost {
             return used;
         }
 
-        /** Whether the empty pipe at {@code index} may be reached now (N25-1~N25-3). */
+        /**
+         * Whether the front may reach the empty pipe at {@code index} in this cycle (N28-7): fewer
+         * pipes right before it on the path were reached in this cycle than the speed of its tier
+         * (N28-10, {@link PipeTierRules#getFillCellsPerCycle}).
+         */
         private boolean mayReach(Route route, int index, PipeNode node, Ledger ledger) {
-            if (index == 0 || !(route.path[index - 1] instanceof PipeNode)) {
-                return true;
+            int reachedNow = 0;
+            for (int i = index - 1; i >= 0 && route.path[i] instanceof PipeNode
+                    && ledger.reachedThisCycle((PipeNode) route.path[i]); i--) {
+                reachedNow++;
             }
-            long since = ledger.reachedTick((PipeNode) route.path[index - 1]);
-            return tick - since >= tierRules.getFillTicksPerBlock(node.getTier());
+            return reachedNow < tierRules.getFillCellsPerCycle(node.getTier());
         }
 
         /**
@@ -2558,7 +3065,8 @@ public final class PipeGrid implements PumpHost {
 
             abstract void useRunFlow(SummaryRun run, int amount);
 
-            abstract long reachedTick(PipeNode node);
+            /** Whether this push (one cycle of the pump) reached the pipe (N28-7). */
+            abstract boolean reachedThisCycle(PipeNode node);
 
             abstract void fill(PipeNode node, int amount, Stats stats);
 
@@ -2579,6 +3087,8 @@ public final class PipeGrid implements PumpHost {
         }
 
         private final class RealLedger extends Ledger {
+            private final long push = ++pushStamps;
+
             @Override
             int amount(PipeNode node) {
                 return node.getAmount();
@@ -2621,8 +3131,8 @@ public final class PipeGrid implements PumpHost {
             }
 
             @Override
-            long reachedTick(PipeNode node) {
-                return node.reachedTick;
+            boolean reachedThisCycle(PipeNode node) {
+                return node.reachedPush == push;
             }
 
             @Override
@@ -2631,7 +3141,7 @@ public final class PipeGrid implements PumpHost {
                 node.insert(fluid, amount);
                 stats.updated.add(node);
                 if (!reached && node.isReached()) {
-                    node.reachedTick = tick;
+                    node.reachedPush = push;
                     attachReached(node);
                 }
                 if (node.isFull()) {
@@ -2725,8 +3235,8 @@ public final class PipeGrid implements PumpHost {
             }
 
             @Override
-            long reachedTick(PipeNode node) {
-                return node.getAmount() == 0 && node.dryStamp == stamp && node.dryFilled ? tick : node.reachedTick;
+            boolean reachedThisCycle(PipeNode node) {
+                return node.getAmount() == 0 && node.dryStamp == stamp && node.dryFilled;
             }
 
             @Override
@@ -2774,6 +3284,8 @@ public final class PipeGrid implements PumpHost {
         int pipeFill;
         int deliveredTotal;
         int lost;
+        /** What the fill speed kept from entering: it stays in the pump (N28-9). */
+        int held;
     }
 
     // ---------------------------------------------------------------- internals

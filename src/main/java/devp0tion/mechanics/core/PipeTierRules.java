@@ -14,8 +14,8 @@ import java.util.Set;
  *     (N14-2); pumps pushing through the same pipes share it (N18-1).</li>
  *     <li>Maximum temperature, transportable kinds and state: judged when fluid reaches a new pipe,
  *     against the lowest tier of the network it joins (N12-4, N14-1).</li>
- *     <li>Movement speed (이동 속도): how fast the fluid fills connected empty pipes (N25-1~N25-3,
- *     {@link #getFillTicksPerBlock}).</li>
+ *     <li>Movement speed (이동 속도): how many connected empty pipes the fluid fills along a path in
+ *     one pump cycle (N25-1~N25-3, N28-7, N28-11, {@link #getFillCellsPerCycle}).</li>
  * </ul>
  *
  * <p>The game's values are the one table {@link Row}; tests implement this interface with their
@@ -35,18 +35,17 @@ public interface PipeTierRules {
     }
 
     /**
-     * The movement speed of the tier (N25-2): the fluid fills connected empty pipes one block per
-     * step (N25-1), so a pipe of this tier is reached at the earliest this many ticks after the pipe
-     * the fluid comes from was reached. It only limits filling empty pipes; full stretches are passed
-     * within the cycle (N25-3).
-     * <p>TODO(confirm): the unit, ticks per block, is the simplest form of "one block per step at the
-     * pipe's speed" (N25-1) in the engine's tick clock.
-     * <p>TODO(design): every tier's value is undecided (N25-2); the provisional value
-     * {@link #PROVISIONAL_FILL_TICKS_PER_BLOCK} limits nothing beyond the transport cap (N14-2), so
-     * the game fills empty pipes as fast as before.
+     * The movement speed of the tier (N25-2) in pipes per cycle (N28-7): the fluid front advances
+     * once per pump cycle, filling at most this many empty pipes of the tier along a path in that
+     * cycle; in mixed piping, the speed of the next pipe it fills counts (N28-10). It only limits
+     * filling empty pipes; full stretches are passed within the cycle (N25-3). The speed is
+     * proportional to the tier's transport amount (N28-11).
+     * <p>TODO(design): the constant of that proportion is undecided (N28-11); the provisional
+     * {@link #PROVISIONAL_TRANSPORT_PER_FILL_CELL} gives iron (80) 20 pipes per cycle, the one pipe
+     * per tick of the 20-tick cycle used before. Rounded down, at least one pipe (provisional too).
      */
-    default int getFillTicksPerBlock(MineralTier tier) {
-        return PROVISIONAL_FILL_TICKS_PER_BLOCK;
+    default int getFillCellsPerCycle(MineralTier tier) {
+        return Math.max(1, getTransportAmount(tier) / PROVISIONAL_TRANSPORT_PER_FILL_CELL);
     }
 
     /** The game's rules: the table {@link Row}. */
@@ -142,11 +141,12 @@ public interface PipeTierRules {
     int NO_TEMPERATURE_LIMIT = Integer.MAX_VALUE;
 
     /**
-     * TODO(design): provisional movement speed of every tier (N25-2), in ticks per block: 1, one
-     * block per tick. The transport cap already lets a path's fluid reach at most one new pipe per
-     * cycle window (a pipe filled from empty has used its whole cap), so this value changes nothing.
+     * TODO(design): provisional constant of the movement speed (N28-11): pipes per cycle = transport
+     * amount / 4, so iron's 80 gives 20. The transport cap already lets a path's fluid reach at most
+     * one new pipe per cycle window (a pipe filled from empty has used its whole cap, N14-2), so the
+     * speed limits nothing while it is at least one pipe per cycle.
      */
-    int PROVISIONAL_FILL_TICKS_PER_BLOCK = 1;
+    int PROVISIONAL_TRANSPORT_PER_FILL_CELL = 4;
 
     /** TODO(design): provisional "every fluid kind". */
     Set<FluidType> ALL = Collections.unmodifiableSet(EnumSet.allOf(FluidType.class));
