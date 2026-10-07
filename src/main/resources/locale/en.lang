@@ -50,6 +50,7 @@ seawater=Seawater
 freshwater=Freshwater
 // Crude oil has no vanilla tile (N32-4).
 crudeoil=Crude Oil
+// No ooze here: English keeps the vanilla name "Ooze"; only the Korean file names it (N32-6).
 // An empty tank's status text (N31-7).
 empty=Empty
 

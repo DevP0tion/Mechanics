@@ -37,8 +37,9 @@ final class FluidTest {
         Check.equal("해수", FluidType.SEAWATER.getKoreanName());
         Check.equal("담수", FluidType.FRESHWATER.getKoreanName());
         Check.equal("원유", FluidType.CRUDE_OIL.getKoreanName(), "N32-4");
+        Check.equal("우즈", FluidType.OOZE.getKoreanName(), "N32-6: the vanilla Korean localization lacks it");
         for (FluidType type : FluidType.values()) {
-            if (!type.isWater() && type.hasLiquidTile()) {
+            if (!type.isWater() && type.hasLiquidTile() && type != FluidType.OOZE) {
                 Check.isNull(type.getKoreanName(), type + " follows its vanilla tile's name (N32-4)");
             }
         }

@@ -25,7 +25,8 @@ public enum FluidType {
     // The fluids below are named after their vanilla liquid tiles, as the game localizes them (N32-4).
     LAVA("lavatile", Salinity.NOT_WATER, null),
     SLIME("liquidslimetile", Salinity.NOT_WATER, null),
-    OOZE("liquidoozetile", Salinity.NOT_WATER, null),
+    // The vanilla Korean localization lacks ooze: its Korean name is the mod's, 우즈 (N32-6).
+    OOZE("liquidoozetile", Salinity.NOT_WATER, "우즈"),
     SPIRIT_WATER("spiritwatertile", Salinity.NOT_WATER, null),
     QUICKSAND("quicksandtile", Salinity.NOT_WATER, null),
     /**
@@ -82,8 +83,9 @@ public enum FluidType {
     }
 
     /**
-     * The fixed Korean display name: 해수 and 담수 (12-5), 원유 (N32-4); {@code null} for the fluids
-     * named after their vanilla liquid tile, whose names follow the game's localization (N32-4).
+     * The fixed Korean display name: 해수 and 담수 (12-5), 원유 (N32-4), 우즈 (N32-6: the vanilla
+     * Korean localization lacks ooze); {@code null} for the other fluids named after their vanilla
+     * liquid tile, whose names follow the game's localization (N32-4).
      */
     public String getKoreanName() {
         return koreanName;

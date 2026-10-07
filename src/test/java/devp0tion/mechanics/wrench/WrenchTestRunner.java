@@ -21,6 +21,7 @@ public final class WrenchTestRunner {
             WrenchRefusalTest.class,
             WrenchInfoTextTest.class,
             WrenchLocaleTest.class,
+            ModLocaleTest.class,
             devp0tion.mechanics.core.WrenchCheckTest.class
     };
 
