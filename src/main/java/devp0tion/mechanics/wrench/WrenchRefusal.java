@@ -21,6 +21,8 @@ import devp0tion.mechanics.core.PipeGrid;
  *     another fluid than the pump's other sources (N16-3).</li>
  * </ul>
  * A tile with no part the wrench acts on shows no reason (the click there does nothing).
+ * TODO(confirm): an empty tile is read as "nothing to refuse", so no tooltip appears there; the
+ * protected and out-of-range reasons are shown only over a part the wrench acts on.
  * Game independent, so it is tested by the plain test runner.
  */
 public enum WrenchRefusal {
