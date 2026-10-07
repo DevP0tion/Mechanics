@@ -67,8 +67,6 @@ public final class PipeNode extends LiquidStorage {
     // Flow used in the current cycle window (N14-2), transient.
     long flowWindow = -1;
     int flowUsed;
-    /** The push (one cycle of one pump) that first reached this pipe (the fill speed, N28-7), transient. */
-    long reachedPush;
 
     /** Hint code of the step to the other layer on the same tile (or to the valve on it). */
     public static final int HINT_VERTICAL = 4;

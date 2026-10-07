@@ -6,8 +6,9 @@ import java.util.Map;
 
 /**
  * The new engine's own rules:
- * the split at junctions (N24-3, N25-5, N27-1, N28-5, N28-8, N28-14), the fill speed (N25-1~N25-3,
- * N28-7, N28-9~N28-11), dead-end branches filling (N28-6), the cap order by distance (N26-4) and
+ * the split at junctions (N24-3, N25-5, N27-1, N28-5, N28-8, N28-14), filling empty pipes step by
+ * step under the cap only (N25-1, N32-1: no movement speed; N25-2, N25-3, N28-7, N28-9~N28-11 are
+ * discarded by it), dead-end branches filling (N28-6), the cap order by distance (N26-4) and
  * the network summary for unloaded regions (N23-2, N28-1~N28-4); and its structure: cell hints
  * repaired when used and kept across saves (N22-3, N25-1, N25-4, N25-6, N28-12, N28-13), systems run
  * from one tick (N22-5).
@@ -136,23 +137,15 @@ final class NewEngineTest {
         Check.equal(10, result.getDelivered(v[2]));
     }
 
-    // ---------------------------------------------------------------- N25-1~N25-3, N28-7, N28-9~N28-11
+    // ---------------------------------------------------------------- N25-1, N32-1
 
     /** Every pipe carries 20 (the cap per cycle window). */
     private static final PipeTierRules SLOW = Fluids.uniform(20);
 
-    public static void testFillSpeedIsPipesPerCycleProportionalToTheTransportAmount() {
-        // N28-7, N28-11: pipes per cycle = transport amount / 4 (provisional constant): iron's 80 gives
-        // the 20 pipes per cycle of before; at least one pipe.
-        Check.equal(20, PipeTierRules.TABLE.getFillCellsPerCycle(MineralTier.IRON), "iron");
-        Check.equal(10, Fluids.uniform(40).getFillCellsPerCycle(MineralTier.COPPER), "transport 40");
-        Check.equal(1, Fluids.uniform(2).getFillCellsPerCycle(MineralTier.COPPER), "never below one pipe");
-    }
-
     public static void testFrontReachesOnePipePerCycleAndFullPathsPassAtFullRate() {
-        // The cap (N14-2) lets a path reach at most one new pipe per cycle window: a pipe filled from
-        // empty used its whole cap. Any speed of one pipe per cycle or more therefore fills one pipe
-        // per cycle here; a full path passes at full rate (N25-3).
+        // No movement speed (N32-1): the cap alone (N14-2) lets a path reach at most one new pipe per
+        // cycle window, since a pipe filled from empty used its whole cap. A full path passes at full
+        // rate within the cycle.
         PipeGrid grid = grid(SLOW);
         line(grid, 1, 0, 5, 0);
         TankValve valve = Fluids.valve(100000);
@@ -166,13 +159,13 @@ final class NewEngineTest {
             }
         }
         for (int cycle = 6; cycle <= 8; cycle++) {
-            Check.equal(20, cycle(grid, pump).getDelivered(valve), "a full path passes at full rate (N25-3)");
+            Check.equal(20, cycle(grid, pump).getDelivered(valve), "a full path passes at full rate");
         }
     }
 
-    public static void testFillSpeedKeepsFillingAReachedPipe() {
+    public static void testAReachedPipeFillsUpAndTheFrontGoesOnInTheSameCycle() {
         // A pipe reached in an earlier cycle is filled up, and the front goes on into the next one in
-        // the same cycle: the front advances once per pump cycle (N28-7), not on a tick clock.
+        // the same cycle with what the cap leaves: no speed and no tick clock hold it (N32-1).
         PipeGrid grid = grid(Fluids.uniform(30));
         line(grid, 1, 0, 3, 0);
         grid.placeValve(4, 0, Fluids.valve(1000));
@@ -185,58 +178,38 @@ final class NewEngineTest {
         Check.equal(10, grid.getPipe(2, 0, PipeLayer.BASE).getAmount(), "the next cycle: no tick clock to wait for");
     }
 
-    /** Copper pipes: the front cannot enter them (speed 0, a test value); iron: one per cycle. */
-    private static final PipeTierRules NO_COPPER_FRONT = new PipeTierRules() {
-        @Override
-        public int getTransportAmount(MineralTier tier) {
-            return 20;
+    public static void testMixedTiersFillUnderTheCapOnly() {
+        // N32-1, N32-2 (the game's table): copper holds and carries 40, iron 80. Two advanced fire
+        // pumps (0,0) and (1,-1) push up to 80 per cycle into copper (1,0), then iron (2,0) and valve
+        // (3,0). No speed (N28-10 discarded): the copper pipe filled from empty used its whole cap, so
+        // the iron pipe is reached in the next cycle; from then on the copper pipe's 40 caps the path.
+        PipeGrid grid = grid(PipeTierRules.TABLE);
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
+        grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.IRON);
+        TankValve valve = Fluids.valve(100000);
+        grid.placeValve(3, 0, valve);
+        pump(grid, 0, 0, PumpTier.ADVANCED_FIRE);
+        pump(grid, 1, -1, PumpTier.ADVANCED_FIRE);
+        pushTick(grid);
+        Check.equal(40, grid.getPipe(1, 0, PipeLayer.BASE).getAmount(), "copper full: its whole cap");
+        Check.isFalse(grid.getPipe(2, 0, PipeLayer.BASE).isReached(), "the cap lets in one empty pipe per cycle");
+        pushTick(grid);
+        Check.equal(40, grid.getPipe(2, 0, PipeLayer.BASE).getAmount(), "iron reached: the copper pipe's cap");
+        pushTick(grid);
+        Check.equal(80, grid.getPipe(2, 0, PipeLayer.BASE).getAmount(), "iron full");
+        for (int i = 0; i < 2; i++) {
+            int before = valve.getTank().getAmount();
+            pushTick(grid);
+            Check.equal(before + 40, valve.getTank().getAmount(), "the copper pipe caps the path at 40");
         }
-
-        @Override
-        public int getFillCellsPerCycle(MineralTier tier) {
-            return tier == MineralTier.COPPER ? 0 : 1;
-        }
-    };
-
-    public static void testFrontSpeedIsTheNextPipesTier() {
-        // N28-10: in mixed piping the speed of the next pipe the front fills counts.
-        PipeGrid grid = grid(NO_COPPER_FRONT);
-        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.IRON);
-        grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.COPPER);
-        grid.placePipe(3, 0, PipeLayer.BASE, MineralTier.IRON);
-        grid.placeValve(4, 0, Fluids.valve(1000));
-        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
-        cycle(grid, pump);
-        cycle(grid, pump);
-        Check.isTrue(grid.getPipe(1, 0, PipeLayer.BASE).isFull(), "the iron pipe filled");
-        Check.isFalse(grid.getPipe(2, 0, PipeLayer.BASE).isReached(), "the copper pipe's own speed holds the front");
-        // The other way round: copper first, then iron; the iron pipe after it is reached at iron's speed.
-        PipeGrid other = grid(new PipeTierRules() {
-            @Override
-            public int getTransportAmount(MineralTier tier) {
-                return 20;
-            }
-
-            @Override
-            public int getFillCellsPerCycle(MineralTier tier) {
-                return tier == MineralTier.IRON ? 0 : 1;
-            }
-        });
-        other.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
-        other.placePipe(2, 0, PipeLayer.BASE, MineralTier.IRON);
-        other.placeValve(3, 0, Fluids.valve(1000));
-        Pump second = pump(other, 0, 0, PumpTier.FIRE);
-        cycle(other, second);
-        cycle(other, second);
-        Check.isTrue(other.getPipe(1, 0, PipeLayer.BASE).isFull(), "copper at copper's speed");
-        Check.isFalse(other.getPipe(2, 0, PipeLayer.BASE).isReached(), "iron at iron's speed");
     }
 
-    public static void testWhatTheSpeedHoldsBackStaysInThePump() {
-        // N28-9: pump (0,0) -> (1,0) -> J (2,0); east (3,0) to valve A (4,0), full; north a copper
-        // pipe (2,-1) the front cannot enter (test speed 0) before valve B (2,-2). While filling, J
-        // gives each direction 10 (N28-8); B's 10 is not given to A, it stays in the pump.
-        PipeGrid grid = grid(NO_COPPER_FRONT);
+    public static void testWhatTheCapKeepsFromAFillingDirectionGoesToTheOthers() {
+        // N32-1 (N28-9 discarded): pump (0,0) -> (1,0) -> J (2,0); east (3,0) to valve A (4,0), full;
+        // north a copper pipe (2,-1) that carries 5 (a test value) before valve B (2,-2). While
+        // filling, J gives each direction 10 (N28-8); the copper pipe takes 5 of B's 10, and the other
+        // 5 goes to A (N7-2, N20-6) instead of staying in the pump.
+        PipeGrid grid = grid(tier -> tier == MineralTier.COPPER ? 5 : 20);
         line(grid, 1, 0, 3, 0);
         TankValve a = Fluids.valve(100000);
         grid.placeValve(4, 0, a);
@@ -246,13 +219,14 @@ final class NewEngineTest {
         grid.placeValve(2, -2, b);
         Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
         PumpResult first = cycle(grid, pump);
-        Check.equal(10, first.getDelivered(a), "A: its own direction's amount only");
+        Check.equal(15, first.getDelivered(a), "A: its own 10 and what the copper pipe could not take");
         Check.equal(0, first.getDelivered(b));
-        Check.equal(10, pump.getAmount(), "B's amount stays in the pump");
+        Check.equal(5, grid.getPipe(2, -1, PipeLayer.BASE).getAmount(), "the copper pipe full");
+        Check.equal(0, pump.getAmount(), "nothing stays in the pump");
         PumpResult second = cycle(grid, pump);
-        Check.equal(10, second.getDelivered(a), "the next cycle pushes no more because of it (N28-9)");
-        Check.equal(10, pump.getAmount(), "the pump pulled only what it pushed");
-        Check.isFalse(grid.getPipe(2, -1, PipeLayer.BASE).isReached(), "the front never entered the copper pipe");
+        Check.equal(5, second.getDelivered(b), "B: the copper pipe's cap");
+        Check.equal(15, second.getDelivered(a), "A: the rest");
+        Check.equal(0, pump.getAmount());
     }
 
     // ---------------------------------------------------------------- N26-4

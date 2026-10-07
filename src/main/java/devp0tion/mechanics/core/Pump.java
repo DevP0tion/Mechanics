@@ -38,8 +38,8 @@ import java.util.Set;
  *     <li>The fluid is the one left in the pump, else the baseline (N20-5). The tier must be allowed
  *     to move it (12-1, 12-5, 12-6), else nothing happens.</li>
  *     <li>No destination at all, or nothing can move (every tank and every connected pipe full):
- *     the pump stops and pulls nothing (N7-4 as N28-6 reads it). What the fill speed keeps from
- *     entering stays in the pump (N28-9).</li>
+ *     the pump stops and pulls nothing (N7-4 as N28-6 reads it). There is no fill speed holding
+ *     fluid back in the pump (N28-9 discarded by N32-1).</li>
  *     <li>A log-fueled pump needs a lit log: a lit log burns for its whole timer (100 ticks) whether
  *     or not the pump moves anything (N18-4); a new log is only lit by a cycle that can run (the
  *     N7-4 conditions hold).</li>

@@ -11,12 +11,19 @@ import java.util.Set;
  * <ul>
  *     <li>Transport amount (운송량): what one pipe cell of the tier holds (N7-3, N12-3), and the most
  *     that may flow through it per pump cycle, so the lowest amount on a path caps that path
- *     (N14-2); pumps pushing through the same pipes share it (N18-1).</li>
+ *     (N14-2); pumps pushing through the same pipes share it (N18-1). It is 40 x the tier's tank
+ *     wall multiplier (N4-2), the capacity of one tank cell of the tier (N4-4), anchored at iron 80
+ *     (N19-8, N32-2).</li>
  *     <li>Maximum temperature, transportable kinds and state: judged when fluid reaches a new pipe,
  *     against the lowest tier of the network it joins (N12-4, N14-1).</li>
- *     <li>Movement speed (이동 속도): how many connected empty pipes the fluid fills along a path in
- *     one pump cycle (N25-1~N25-3, N28-7, N28-11, {@link #getFillCellsPerCycle}).</li>
  * </ul>
+ * There is no movement speed (N32-1): filling empty pipes is limited only by the transport amount
+ * as the per-cycle cap (N14-2). The cap equals a cell's capacity, so a pipe filled from empty uses
+ * its whole cap and a path's fluid enters at most one empty pipe per cycle; a separate speed of one
+ * pipe per cycle or more never bound. The per-tier speed (N25-2, N28-11), its unit of pipes per
+ * cycle (N28-7), its mixed-tier rule (N28-10), what it held back in the pump (N28-9) and the
+ * exemption of full stretches from it (N25-3) are discarded by N32-1; full stretches simply pass
+ * within the cycle up to the cap.
  *
  * <p>The game's values are the one table {@link Row}; tests implement this interface with their
  * own values.
@@ -34,20 +41,6 @@ public interface PipeTierRules {
         return Row.of(lowestTier).carries(fluid);
     }
 
-    /**
-     * The movement speed of the tier (N25-2) in pipes per cycle (N28-7): the fluid front advances
-     * once per pump cycle, filling at most this many empty pipes of the tier along a path in that
-     * cycle; in mixed piping, the speed of the next pipe it fills counts (N28-10). It only limits
-     * filling empty pipes; full stretches are passed within the cycle (N25-3). The speed is
-     * proportional to the tier's transport amount (N28-11).
-     * <p>TODO(design): the constant of that proportion is undecided (N28-11); the provisional
-     * {@link #PROVISIONAL_TRANSPORT_PER_FILL_CELL} gives iron (80) 20 pipes per cycle, the one pipe
-     * per tick of the 20-tick cycle used before. Rounded down, at least one pipe (provisional too).
-     */
-    default int getFillCellsPerCycle(MineralTier tier) {
-        return Math.max(1, getTransportAmount(tier) / PROVISIONAL_TRANSPORT_PER_FILL_CELL);
-    }
-
     /** The game's rules: the table {@link Row}. */
     PipeTierRules TABLE = Row::transportAmountOf;
 
@@ -59,30 +52,33 @@ public interface PipeTierRules {
     /**
      * The pipe tier table (numbers.md table 2), one row per tier.
      *
-     * <p>Decided: iron 운송량 = 80, the throughput of four fire pumps (20 per cycle x 4, N19-8).
+     * <p>Decided: the transport amount (운송량) follows the tank wall multipliers (N4-2), anchored at
+     * iron 80, the throughput of four fire pumps (20 per cycle x 4, N19-8): 40 x the multiplier,
+     * the capacity of one tank cell of the tier ({@link TankStructure#BASE_CAPACITY_PER_CELL} x
+     * {@link MineralTier#getCapacityMultiplier}, N4-4) (N32-2).
      * <p>TODO(design): every other value is undecided and only a provisional placeholder, not a
-     * curve: the other tiers' transport amount is iron's 80 ({@link #PROVISIONAL_TRANSPORT}); the
-     * maximum temperature has no limit ({@link #NO_TEMPERATURE_LIMIT}, the fluid temperatures are
-     * undecided too, 12-4); every tier carries every fluid kind; the state is liquid (gases are
-     * TODO, 12-3). With these placeholders no pipe ever breaks in the game (N12-4); tests use
-     * their own rules.
+     * curve: the maximum temperature has no limit ({@link #NO_TEMPERATURE_LIMIT}, the fluid
+     * temperatures are undecided too, 12-4, N32-3); every tier carries every fluid kind; the state
+     * is liquid (gases are TODO, 12-3). With these placeholders no pipe ever breaks in the game
+     * (N12-4); tests use their own rules.
      */
     enum Row {
 
-        //             transport amount        max temperature        kinds   state
-        COPPER(        PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        IRON(          80,                     NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        GOLD(          PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        DEMONIC(       PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        IVY(           PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        TUNGSTEN(      PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        GLACIAL(       PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        MYCELIUM(      PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        ANCIENTFOSSIL( PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        NIGHTSTEEL(    PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        SPIDERITE(     PROVISIONAL_TRANSPORT,  NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID);
+        //             transport amount  max temperature        kinds   state
+        COPPER(          40,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        IRON(            80,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        GOLD(           120,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        DEMONIC(        200,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        IVY(            320,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        TUNGSTEN(       480,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        GLACIAL(        680,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        MYCELIUM(       920,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        ANCIENTFOSSIL( 1200,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        NIGHTSTEEL(    1520,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
+        SPIDERITE(     1880,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID);
 
-        // Sources: iron transport amount N19-8. Everything else: TODO(design), see the enum comment.
+        // Sources: transport amount N32-2 (40 x the wall multiplier of N4-2, iron 80 of N19-8).
+        // Everything else: TODO(design), see the enum comment.
 
         private final int transportAmount;
         private final int maxTemperature;
@@ -134,19 +130,8 @@ public interface PipeTierRules {
     // Placeholder markers of the table (interface fields are constants; declared after use is fine
     // for enum constructor arguments that are compile-time constants).
 
-    /** TODO(design): provisional transport amount of every tier but iron: iron's value (N19-8). */
-    int PROVISIONAL_TRANSPORT = 80;
-
-    /** TODO(design): provisional "no maximum temperature" (fluid temperatures are undecided, 12-4). */
+    /** TODO(design): provisional "no maximum temperature" (fluid temperatures are undecided, 12-4, N32-3). */
     int NO_TEMPERATURE_LIMIT = Integer.MAX_VALUE;
-
-    /**
-     * TODO(design): provisional constant of the movement speed (N28-11): pipes per cycle = transport
-     * amount / 4, so iron's 80 gives 20. The transport cap already lets a path's fluid reach at most
-     * one new pipe per cycle window (a pipe filled from empty has used its whole cap, N14-2), so the
-     * speed limits nothing while it is at least one pipe per cycle.
-     */
-    int PROVISIONAL_TRANSPORT_PER_FILL_CELL = 4;
 
     /** TODO(design): provisional "every fluid kind". */
     Set<FluidType> ALL = Collections.unmodifiableSet(EnumSet.allOf(FluidType.class));

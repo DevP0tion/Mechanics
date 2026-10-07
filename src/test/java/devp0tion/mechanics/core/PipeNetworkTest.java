@@ -2,7 +2,8 @@ package devp0tion.mechanics.core;
 
 /**
  * Networks by reach (N13-1), per-network management and merging (N18-2), splitting (N18-3), pipe
- * capacity per tier (N12-3), the removed pipe's fluid (N12-1) and the tier table (N19-8, N15-2).
+ * capacity per tier (N12-3), the removed pipe's fluid (N12-1) and the tier table (N19-8, N15-2,
+ * N32-2).
  */
 final class PipeNetworkTest {
 
@@ -15,12 +16,25 @@ final class PipeNetworkTest {
 
     // ---------- the tier table ----------
 
-    public static void testIronCarriesEightyAndTheRestIsProvisional() {
+    public static void testTransportAmountsFollowTheTankWallMultipliers() {
+        // N32-2: 40 x the wall multiplier (N4-2), one tank cell of the tier (N4-4), iron 80 (N19-8).
         Check.equal(80, PipeTierRules.TABLE.getTransportAmount(MineralTier.IRON), "N19-8: four fire pumps");
         Check.equal(4 * PumpTier.FIRE.getUnitsPerCycle(), PipeTierRules.TABLE.getTransportAmount(MineralTier.IRON));
+        int[] expected = {40, 80, 120, 200, 320, 480, 680, 920, 1200, 1520, 1880};
+        Check.equal(expected.length, MineralTier.values().length);
         for (MineralTier tier : MineralTier.values()) {
-            Check.equal(PipeTierRules.PROVISIONAL_TRANSPORT == 80 ? 80 : -1,
-                    PipeTierRules.TABLE.getTransportAmount(tier), tier + ": placeholder = iron's value");
+            Check.equal(expected[tier.ordinal()], PipeTierRules.TABLE.getTransportAmount(tier), tier.name());
+            Check.equal(40 * tier.getCapacityMultiplier(), PipeTierRules.TABLE.getTransportAmount(tier),
+                    tier + ": 40 x the wall multiplier");
+            Check.equal(TankStructure.BASE_CAPACITY_PER_CELL * tier.getCapacityMultiplier(),
+                    PipeTierRules.TABLE.getTransportAmount(tier), tier + ": one tank cell of the tier");
+        }
+    }
+
+    public static void testTheOtherColumnsAreProvisional() {
+        for (MineralTier tier : MineralTier.values()) {
+            Check.equal(PipeTierRules.NO_TEMPERATURE_LIMIT, PipeTierRules.Row.of(tier).getMaxTemperature(),
+                    tier + ": placeholder without a temperature limit");
             for (FluidType fluid : FluidType.values()) {
                 Check.isTrue(PipeTierRules.TABLE.canCarry(tier, fluid), tier + " " + fluid + ": placeholder carries all");
             }

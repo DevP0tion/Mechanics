@@ -95,10 +95,11 @@ import java.util.Set;
  *     takes 3 bits rather than 2 (N24-2).</li>
  *     <li>TODO(confirm): N25-1 "hints are built as the fluid fills empty pipes" is read as: the
  *     search back from the valve covers empty pipes too, and the fluid then fills along those hints
- *     at the movement speed. The other connected empty pipes fill as well (N28-6, below).</li>
+ *     step by step, as far as the cap allows (N14-2; no movement speed, N32-1). The other connected
+ *     empty pipes fill as well (N28-6, below).</li>
  * </ul>
  *
- * <h2>Pushing (N7, N12, N14, N18-1, N23-1, N24-3, N25-3, N26-4, N28-5~N28-11, N28-14)</h2>
+ * <h2>Pushing (N7, N12, N14, N18-1, N23-1, N24-3, N26-4, N28-5, N28-6, N28-8, N28-14, N32-1)</h2>
  * <ul>
  *     <li>A pump's destinations are the valves its output cells have hints for, reached through
  *     pipes that are empty or hold its fluid, whose tank has room (the pump's own source tanks
@@ -116,16 +117,14 @@ import java.util.Set;
  *     there carries: the amount starts at the output cell with its destinations and the set narrows
  *     at each junction, so a loop never counts a destination twice (N28-14). TODO(confirm): "while
  *     filling" is read per junction: some pipe after the junction, on a path that leaves it, is not
- *     full yet. An amount a destination cannot take is split again among the others, except what the
- *     fill speed holds back (N28-9, below).</li>
+ *     full yet. An amount a destination cannot take is split again among the others.</li>
  *     <li>Each share fills the pipes along its path, then enters the tank. Only the frontier (the
  *     first pipe not yet full) is written; full pipes are never written again (N7-1).</li>
- *     <li>Fill speed (N25-1~N25-3, N28-7, N28-10): the fluid front advances once per pump cycle, by
- *     at most the movement speed in pipes per cycle along a path, the speed of the tier of the next
- *     pipe it fills ({@link PipeTierRules#getFillCellsPerCycle}, N28-11); full stretches pass within
- *     the cycle. What the speed keeps from entering stays in the pump and is not given to the other
- *     destinations (N28-9); the pump pulls that much less, and the next cycle pushes no more than the
- *     speed allows because of it.</li>
+ *     <li>No movement speed (N32-1): filling empty pipes is limited only by the cap below (N14-2).
+ *     The cap equals a pipe's capacity, so a pipe filled from empty uses its whole cap and a path's
+ *     fluid enters at most one empty pipe per cycle window; full stretches pass within the cycle.
+ *     The per-tier fill speed and what it held back in the pump (N25-2, N25-3, N28-7, N28-9~N28-11)
+ *     are discarded by N32-1.</li>
  *     <li>Each pipe lets at most its transport amount through per cycle window of
  *     {@link #CYCLE_TICKS} ticks, counted while stepping each share from the output cell to its end
  *     (N14-2, N23-1). Pumps pushing through the same pipe add up and share it (N18-1): among pumps
@@ -313,8 +312,6 @@ public final class PipeGrid implements PumpHost {
      * always match. In this map, the numbers also outlive any region reload.
      */
     private final Map<Long, Integer> regionChanges = new HashMap<>();
-    /** The stamps of the real pushes, one per cycle of one pump (the fill speed, N28-7, technical). */
-    private long pushStamps;
 
     // Manual pump clicks waiting for the next tick (N22-5).
     private final List<Long> clickQueue = new ArrayList<>();
@@ -2921,8 +2918,6 @@ public final class PipeGrid implements PumpHost {
         private final List<Route> destinations;
         /** The ends of the dead-end branches (N28-6): filled like destinations, without a tank. */
         private final List<Route> branches;
-        /** Set by {@link #deliver}: the fill speed stopped the share (N28-9). */
-        private boolean heldBySpeed;
 
         GridPushPlan(Pump pump, FluidType fluid, List<Route> destinations, List<Route> branches) {
             this.pump = pump;
@@ -2931,14 +2926,11 @@ public final class PipeGrid implements PumpHost {
             this.branches = branches;
         }
 
-        /**
-         * What a push of {@code amount} would use, counting what the fill speed holds back: that stays
-         * in the pump (N28-9), so the pump pulls only what this cycle's push and what it keeps need.
-         */
+        /** What a push of {@code amount} would use: filled, delivered and lost. */
         @Override
         public long simulate(int amount) {
             Stats stats = distribute(amount, new DryLedger());
-            return (long) stats.pipeFill + stats.deliveredTotal + stats.lost + stats.held;
+            return (long) stats.pipeFill + stats.deliveredTotal + stats.lost;
         }
 
         @Override
@@ -2955,8 +2947,7 @@ public final class PipeGrid implements PumpHost {
 
         /**
          * Amounts over the paths that have room, delivered nearest first; what one cannot take is split
-         * again among the others (N7-2, N20-6), except what the fill speed held back: that stays in the
-         * pump (N28-9).
+         * again among the others (N7-2, N20-6).
          */
         private Stats distribute(int amount, Ledger ledger) {
             Stats stats = new Stats();
@@ -2975,7 +2966,6 @@ public final class PipeGrid implements PumpHost {
             while (remaining > 0 && !active.isEmpty()) {
                 Map<Route, Integer> shares = splitAtJunctions(remaining, active, ledger);
                 int used = 0;
-                int held = 0;
                 List<Route> saturated = new ArrayList<>();
                 for (Route route : active) {
                     Integer share = shares.get(route);
@@ -2986,15 +2976,9 @@ public final class PipeGrid implements PumpHost {
                     used += taken;
                     if (taken < share) {
                         saturated.add(route);
-                        if (heldBySpeed) {
-                            // N28-9: not given to the other paths; it stays in the pump, and the next
-                            // cycle pushes no more than the speed allows because of it.
-                            held += share - taken;
-                            stats.held += share - taken;
-                        }
                     }
                 }
-                remaining -= used + held;
+                remaining -= used;
                 for (int i = active.size() - 1; i >= 0; i--) {
                     Route route = active.get(i);
                     if (saturated.contains(route) || space(route, ledger) == 0) {
@@ -3115,7 +3099,6 @@ public final class PipeGrid implements PumpHost {
          * share used: filled, delivered, and lost into a pipe that broke (N14-1).
          */
         private int deliver(Route route, int share, Ledger ledger, Stats stats) {
-            heldBySpeed = false;
             Object[] path = route.path;
             int used = 0;
             while (share > 0) {
@@ -3126,11 +3109,6 @@ public final class PipeGrid implements PumpHost {
                 if (frontier < path.length) {
                     PipeNode node = (PipeNode) path[frontier];
                     if (ledger.amount(node) == 0) {
-                        if (!mayReach(route, frontier, node, ledger)) {
-                            // The front advanced as far as the speed allows in this cycle (N28-7).
-                            heldBySpeed = true;
-                            break;
-                        }
                         MineralTier lowest = lowestBefore(route, frontier);
                         lowest = lowest == null ? node.getTier() : MineralTier.lowest(lowest, node.getTier());
                         if (!tierRules.canCarry(lowest, fluid)) {
@@ -3171,20 +3149,6 @@ public final class PipeGrid implements PumpHost {
                 }
             }
             return used;
-        }
-
-        /**
-         * Whether the front may reach the empty pipe at {@code index} in this cycle (N28-7): fewer
-         * pipes right before it on the path were reached in this cycle than the speed of its tier
-         * (N28-10, {@link PipeTierRules#getFillCellsPerCycle}).
-         */
-        private boolean mayReach(Route route, int index, PipeNode node, Ledger ledger) {
-            int reachedNow = 0;
-            for (int i = index - 1; i >= 0 && route.path[i] instanceof PipeNode
-                    && ledger.reachedThisCycle((PipeNode) route.path[i]); i--) {
-                reachedNow++;
-            }
-            return reachedNow < tierRules.getFillCellsPerCycle(node.getTier());
         }
 
         /**
@@ -3276,9 +3240,6 @@ public final class PipeGrid implements PumpHost {
 
             abstract void useRunFlow(SummaryRun run, int amount);
 
-            /** Whether this push (one cycle of the pump) reached the pipe (N28-7). */
-            abstract boolean reachedThisCycle(PipeNode node);
-
             abstract void fill(PipeNode node, int amount, Stats stats);
 
             abstract int tankSpace(TankValve valve);
@@ -3298,7 +3259,6 @@ public final class PipeGrid implements PumpHost {
         }
 
         private final class RealLedger extends Ledger {
-            private final long push = ++pushStamps;
 
             @Override
             int amount(PipeNode node) {
@@ -3342,17 +3302,11 @@ public final class PipeGrid implements PumpHost {
             }
 
             @Override
-            boolean reachedThisCycle(PipeNode node) {
-                return node.reachedPush == push;
-            }
-
-            @Override
             void fill(PipeNode node, int amount, Stats stats) {
                 boolean reached = node.isReached();
                 node.insert(fluid, amount);
                 stats.updated.add(node);
                 if (!reached && node.isReached()) {
-                    node.reachedPush = push;
                     attachReached(node);
                 }
                 if (node.isFull()) {
@@ -3446,11 +3400,6 @@ public final class PipeGrid implements PumpHost {
             }
 
             @Override
-            boolean reachedThisCycle(PipeNode node) {
-                return node.getAmount() == 0 && node.dryStamp == stamp && node.dryFilled;
-            }
-
-            @Override
             void fill(PipeNode node, int amount, Stats stats) {
                 touch(node);
                 node.dryAdded += amount;
@@ -3495,8 +3444,6 @@ public final class PipeGrid implements PumpHost {
         int pipeFill;
         int deliveredTotal;
         int lost;
-        /** What the fill speed kept from entering: it stays in the pump (N28-9). */
-        int held;
     }
 
     // ---------------------------------------------------------------- internals
