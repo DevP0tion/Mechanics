@@ -127,8 +127,9 @@ public final class TankRegistry {
      * An object or the floor tile at ({@code tileX}, {@code tileY}) changed (5-1). On the server,
      * every controller within {@link TankStructure#REACH} searches its tank again on its next tick.
      * A controller whose tank another controller's contests (N29-8,
-     * {@link TankControllerObjectEntity#isContested}) also does for a change within twice the reach,
-     * where the other tank's cells are: the tank still valid is recognized once the other one is not.
+     * {@link TankControllerObjectEntity#isContested}) also does for a change within twice the reach
+     * (REACH x 2, 12 tiles), where the other tank's cells are: the tank still valid is recognized once
+     * the other one is not, for example right after the competing controller is broken (N29-10).
      */
     public static void onTileChanged(Level level, int tileX, int tileY) {
         if (level == null || !level.isServer()) {

@@ -8,7 +8,7 @@ import java.util.Set;
 
 /**
  * How a tank controller judges the tank it keeps (N20-7 tank part, N20-8, N21-3, N22-7, N23-4,
- * N26-3, N29-1, N29-2, N29-5, N29-8).
+ * N26-3, N29-1, N29-2, N29-5, N29-8, N29-10).
  *
  * <p>The judgment is anchored at the controller: the tank it keeps (its range, N13-3), whether that
  * tank is active and its capacity ({@link TankStorage}), and the tank's lowest tier (N29-1). The
@@ -34,13 +34,15 @@ import java.util.Set;
  *     <li>Two tanks at once (N29-8): when one change makes the tanks of two controllers valid at the
  *     same time and they share a valve that belongs to no tank yet (on their shared wall), neither is
  *     recognized, whichever controller judges first, until a player changes something within reach
- *     of either tank (a contested controller also judges again after a change within reach of the
- *     other tank, {@code TankRegistry.onTileChanged}; TODO(confirm): that reading of "until a player
- *     changes something"), so the tank still valid then is recognized. A valve that already belongs
- *     to a tank keeps N13-3 and N15-3. A rectangle touching cells that are not loaded
- *     is no competitor (it cannot be judged valid). TODO(confirm): a competing controller that is not
- *     loaded (dormant) is not seen, so the loaded one recognizes its tank and takes the valve; the
- *     other finds the valve taken when it loads (N15-3).</li>
+ *     of either tank, so the tank still valid then is recognized. That reading is decided as
+ *     implemented (N29-10): a contested controller judges again after a change within its own reach
+ *     ({@link TankStructure#REACH}, 6 tiles) and also within twice the reach (REACH x 2, 12 tiles),
+ *     where the other tank's cells are ({@code TankRegistry.onTileChanged}), so breaking the
+ *     competing controller recognizes the other tank right away. A valve that already belongs to a
+ *     tank keeps N13-3 and N15-3. A rectangle touching cells that are not loaded is no competitor (it
+ *     cannot be judged valid). Note: a competing controller that is not loaded (dormant) is not seen,
+ *     so the loaded one recognizes its tank and takes the valve; the other finds the valve taken
+ *     when it loads (N15-3).</li>
  *     <li>Natural growth (N23-4, N26-3, N29-5): while the tank is active, natural growth on its
  *     loaded interior cells ({@link TankCell#isNaturalGrowth}: every object of the game's grass kind,
  *     placed by a player or not) is broken when the tank is judged, without drops, instead of making

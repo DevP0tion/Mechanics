@@ -240,7 +240,7 @@ final class TankJudgmentTest {
 
     public static void testACompetitorTouchingUnloadedCellsDoesNotCount() {
         // The right tank's east part (x >= 6) is not loaded: it cannot be judged valid, so the left
-        // tank is recognized (TODO(confirm) in TankJudgment for a dormant controller).
+        // tank is recognized (like a dormant competing controller, see the N29-8 note in TankJudgment).
         TankJudgment.Result left = TankJudgment.judge(0, 1, new Partial(twoTanks(), 6), Mode.CHANGE, Prior.INACTIVE);
         Check.equal(Kind.FOUND_LOADED, left.getKind());
         Check.equal(new TankBounds(0, 0, 5, 3), left.getTank().getBounds());
