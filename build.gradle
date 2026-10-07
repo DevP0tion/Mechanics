@@ -103,6 +103,17 @@ tasks.register('coreTest', JavaExec) {
     getMainClass().set("devp0tion.mechanics.core.CoreTestRunner")
 }
 
+// The engineering wrench's game-independent logic (devp0tion.mechanics.wrench: mode, targets, tooltip
+// text, N30) and the engine's click previews, run the same way with their own runner.
+tasks.register('wrenchTest', JavaExec) {
+    group "verification"
+    description "Runs the dependency-free tests of the wrench's game-independent logic"
+    dependsOn "testClasses"
+
+    classpath = sourceSets.test.output + sourceSets.main.output
+    getMainClass().set("devp0tion.mechanics.wrench.WrenchTestRunner")
+}
+
 tasks.named('test') {
     // No JUnit tests; 'test' runs coreTest instead.
     enabled = false
@@ -111,6 +122,7 @@ tasks.named('test') {
 
 tasks.named('check') {
     dependsOn "coreTest"
+    dependsOn "wrenchTest"
 }
 
 // ---------- Necesse tasks ----------

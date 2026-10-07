@@ -18,8 +18,8 @@ advancedfirepump=고급 화력 펌프
 // Ingredient groups (N10-2, N10-3)
 anymineralwall=아무 광물 벽
 anypipe=아무 파이프
-// The wrench (12-8). Note: the vanilla wire tool (wrench) is also named 렌치 in Korean.
-mechanicswrench=렌치
+// The engineering wrench (12-8, N30-3). The vanilla wire tool (wrench) is named 렌치, hence the name.
+mechanicswrench=공학 렌치
 
 [itemtooltip]
 // Placement rejection rules (N8-1, N11-1, N16-2) and the valve's wire rule (N11-3), in the item descriptions (N11-6)
@@ -30,8 +30,9 @@ glassblocktip=인식된 탱크의 내부에는 유리 블럭만 설치할 수 �
 // Pump placement rejection (N17-1) and wire rule (N11-3), in the item descriptions (N11-6)
 pumpsourcestip=서로 다른 유체가 든 공급원이 함께 연결되는 자리에는 설치할 수 없습니다.
 pumpwiretip=와이어 신호를 받으면 작동을 멈춥니다.
-// Wrench controls (12-8, 13-4, 13-5)
-mechanicswrenchtip=좌클릭: 파이프 회수. 칸의 가장자리 쪽 우클릭: 그 방향 연결 또는 끊기. 칸 가운데 우클릭: 같은 칸의 기본·지하 연결 또는 끊기. 들고 있으면 지하 파이프가 보입니다.
+// Wrench controls (12-8, 13-4, 13-5), the mode key (N30-5) and the tooltip preview (N30-1, N30-2).
+// [input=...] is drawn as the bound key.
+mechanicswrenchtip=좌클릭: 파이프 회수. 칸의 가장자리 쪽 우클릭: 그 방향 연결 또는 끊기. 칸 가운데 우클릭: 같은 칸의 기본·지하 연결 또는 끊기. [input=mechanicswrenchmode]: 기본 모드와 지하 모드 전환(지하 모드에서는 회수와 방향 연결이 지하 파이프 먼저). 들고 있으면 지하 파이프가 보이고, 가리킨 칸의 파이프 유체·연결과 우클릭이 거부될 이유가 표시됩니다.
 // Valve tier (N13-5): <wall> is the mineral wall's name.
 tankvalvetier=티어: <wall>
 tankvalvetierfromwall=티어: 제작에 쓴 광물 벽의 티어
@@ -43,3 +44,34 @@ freshwater=담수
 
 [tech]
 engineering=공학 작업대
+
+[controls]
+// The engineering wrench's mode key (N30-5), default the middle mouse button.
+mechanicswrenchmode=공학 렌치 모드 전환
+mechanicswrenchmodetip=들고 있는 공학 렌치를 기본 모드와 지하 모드로 전환합니다. 공학 렌치를 들고 있는 동안에는 피펫이 작동하지 않습니다.
+
+[misc]
+// The notice at the moment the wrench's mode switches (N30-5).
+mechanicswrenchbasicmode=기본 모드
+mechanicswrenchundergroundmode=지하 모드
+
+[ui]
+// The engineering wrench's tooltip (N30-1, N30-2). <fluid> is the fluid's name, <directions> a list of directions.
+// TODO(confirm): the direction names (북·동·남·서, 위아래 for the vertical link) and the labels.
+mechanicswrenchfluid=유체: <fluid>
+mechanicswrenchempty=비어 있음
+mechanicswrenchlinked=연결된 방향: <directions>
+mechanicswrenchblocked=다른 유체로 막힌 방향: <directions>
+mechanicswrenchnone=없음
+mechanicswrenchdirnorth=북
+mechanicswrenchdireast=동
+mechanicswrenchdirsouth=남
+mechanicswrenchdirwest=서
+mechanicswrenchdirvertical=위아래
+// Why a right click would be refused (N30-1, WrenchRefusal).
+mechanicswrenchprotected=보호된 칸이라 바꿀 수 없습니다.
+mechanicswrenchoutofrange=너무 멀어서 바꿀 수 없습니다.
+mechanicswrenchnotloaded=불러오지 않았거나 월드 밖인 칸이라 바꿀 수 없습니다.
+mechanicswrenchnothingtolink=이 칸에는 연결할 것이 없습니다.
+mechanicswrenchnovertical=이 칸에는 기본·지하로 연결할 것이 없습니다.
+mechanicswrenchsourcefluid=탱크에 펌프의 다른 공급원과 다른 유체가 들어 있어 연결할 수 없습니다.

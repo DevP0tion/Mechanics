@@ -1,5 +1,6 @@
 package devp0tion.mechanics;
 
+import devp0tion.mechanics.client.WrenchControls;
 import devp0tion.mechanics.pipe.PipeSystem;
 import devp0tion.mechanics.pipe.UndergroundPipeLayer;
 import devp0tion.mechanics.registry.MechanicsContainers;
@@ -29,6 +30,8 @@ public class MechanicsMod {
         MechanicsItems.load();
         MechanicsContainers.load();
         MechanicsPackets.load();
+        // The wrench's mode key binding (N30-5); mod controls can only be added while mods load.
+        WrenchControls.register();
         // The level's pipe grid and the underground pipes' state (N7-1, N14-4).
         PipeSystem.register();
         // Placement rejection inside recognized tanks (N16-2); objects also go through

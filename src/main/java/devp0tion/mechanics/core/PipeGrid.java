@@ -1258,6 +1258,43 @@ public final class PipeGrid implements PumpHost {
         return Check.OK;
     }
 
+    /**
+     * What {@link #toggleSide} would return now, changing nothing: the wrench's tooltip previews why
+     * a right click would be refused (N30-1). Read only.
+     */
+    public Check checkToggleSide(int x, int y, Part part, Direction direction) {
+        int nx = x + direction.dx;
+        int ny = y + direction.dy;
+        if (!isTileLoaded(x, y) || !isTileLoaded(nx, ny)) {
+            return Check.NOT_LOADED;
+        }
+        End own = end(x, y, part, direction);
+        if (own == null) {
+            return Check.NOTHING_THERE;
+        }
+        End other = neighbourEnd(part, nx, ny, direction.opposite());
+        boolean pumpValve = other != null && (part == Part.PUMP && other.part == Part.VALVE
+                || part == Part.VALVE && other.part == Part.PUMP);
+        if (!pumpValve || own.isOpen() && other.isOpen()) {
+            return Check.OK;
+        }
+        Pump pump = pumps.get(part == Part.PUMP ? key(x, y) : key(nx, ny));
+        TankValve valve = valves.get(part == Part.VALVE ? key(x, y) : key(nx, ny));
+        List<FluidType> fluids = pump.getSourceFluids(Pump.SourceSlot.valve(part == Part.PUMP ? direction : direction.opposite()));
+        fluids.add(valve.getStoredFluid());
+        return Pump.canConnectSources(fluids) ? Check.OK : Check.DIFFERENT_SOURCE_FLUID;
+    }
+
+    /** What {@link #toggleVertical} would return now, changing nothing (N30-1). Read only. */
+    public Check checkToggleVertical(int x, int y) {
+        if (!isTileLoaded(x, y)) {
+            return Check.NOT_LOADED;
+        }
+        long key = key(x, y);
+        return basePipes.containsKey(key) || valves.containsKey(key) || undergroundPipes.containsKey(key)
+                ? Check.OK : Check.NOTHING_THERE;
+    }
+
     /** One part's flag toward one side (or the vertical one). */
     private static final class End {
         final Part part;
