@@ -43,6 +43,11 @@ import java.util.Set;
  *     their controllers hold now: a newly placed controller does not make an existing tank count as
  *     invalid for this check.</li>
  * </ul>
+ *
+ * <h2>Loaded cells only (N20-7, N21-3)</h2>
+ * A controller judges the tank it keeps again with the loaded cells only
+ * ({@link #validateLoaded}, used by {@link TankJudgment}); every other check here reads every cell,
+ * and a cell that is not loaded reads as something else.
  */
 public final class TankStructure {
 
@@ -113,6 +118,27 @@ public final class TankStructure {
      * {@link TankValidation.Reason}.
      */
     public static TankValidation validate(TankBounds bounds, TankCellLookup lookup, GridPos controller) {
+        return validate(bounds, lookup, controller, false);
+    }
+
+    /**
+     * {@link #validate(TankBounds, TankCellLookup, GridPos)} with loaded cells only (N20-7, N21-3):
+     * the cells that are not loaded ({@link TankCellLookup#isLoaded}) are left out, the way the
+     * pump's 5x5 judgment leaves them out. A border cell left out breaks no border rule and adds no
+     * tier, controller or valve; an interior cell left out breaks no interior rule, and the interior
+     * conditions (5-5) hold when every loaded interior cell meets them. The capacity counts every
+     * interior cell of the rectangle.
+     * <p>TODO(design): while border cells are not loaded, the lowest tier (the capacity multiplier,
+     * N13-5) is taken from the loaded border cells only, so the capacity can differ from the whole
+     * tank's until it is judged with every cell loaded; a lower capacity then loses the excess
+     * (N11-2).
+     */
+    public static TankValidation validateLoaded(TankBounds bounds, TankCellLookup lookup, GridPos controller) {
+        return validate(bounds, lookup, controller, true);
+    }
+
+    private static TankValidation validate(TankBounds bounds, TankCellLookup lookup, GridPos controller,
+                                           boolean loadedOnly) {
         int interiorWidth = bounds.getInteriorWidth();
         int interiorHeight = bounds.getInteriorHeight();
         if (interiorWidth < MIN_INTERIOR_SIZE || interiorHeight < MIN_INTERIOR_SIZE) {
@@ -132,7 +158,7 @@ public final class TankStructure {
         MineralTier lowest = null;
         for (int tileY = bounds.y; tileY <= bounds.getMaxY(); tileY++) {
             for (int tileX = bounds.x; tileX <= bounds.getMaxX(); tileX++) {
-                if (!bounds.isOnBorder(tileX, tileY)) {
+                if (!bounds.isOnBorder(tileX, tileY) || loadedOnly && !lookup.isLoaded(tileX, tileY)) {
                     continue;
                 }
                 TankCell cell = lookup.getCell(tileX, tileY);
@@ -189,6 +215,7 @@ public final class TankStructure {
 
         // Interior (5-5, 5-11, N15-4)
         int interiorCells = bounds.getInteriorCellCount();
+        int judgedCells = 0;
         boolean invalidObject = false;
         boolean liquidFloor = false;
         int glass = 0;
@@ -196,6 +223,10 @@ public final class TankStructure {
         int tankFloor = 0;
         for (int tileY = bounds.y + 1; tileY < bounds.getMaxY(); tileY++) {
             for (int tileX = bounds.x + 1; tileX < bounds.getMaxX(); tileX++) {
+                if (loadedOnly && !lookup.isLoaded(tileX, tileY)) {
+                    continue;
+                }
+                judgedCells++;
                 TankCell cell = lookup.getCell(tileX, tileY);
                 CellKind kind = cell == null ? CellKind.OTHER : cell.getKind();
                 if (kind == CellKind.GLASS) {
@@ -224,11 +255,11 @@ public final class TankStructure {
             return TankValidation.invalid(bounds, TankValidation.Reason.LIQUID_FLOOR);
         }
         TankValidation.InteriorCondition condition;
-        if (glass == interiorCells) {
+        if (glass == judgedCells) {
             condition = TankValidation.InteriorCondition.ALL_GLASS;
-        } else if (empty == interiorCells) {
+        } else if (empty == judgedCells) {
             condition = TankValidation.InteriorCondition.ALL_EMPTY;
-        } else if (tankFloor == interiorCells) {
+        } else if (tankFloor == judgedCells) {
             condition = TankValidation.InteriorCondition.TANK_FLOOR;
         } else {
             return TankValidation.invalid(bounds, TankValidation.Reason.MIXED_INTERIOR);
@@ -246,6 +277,33 @@ public final class TankStructure {
     private static boolean isForeignController(TankCell controller, TankBounds bounds) {
         TankBounds kept = controller.getKeptTank();
         return kept != null && !kept.equals(bounds);
+    }
+
+    /** Whether every cell of the rectangle {@code bounds} is loaded ({@link TankCellLookup#isLoaded}). */
+    public static boolean isLoaded(TankBounds bounds, TankCellLookup lookup) {
+        for (int y = bounds.y; y <= bounds.getMaxY(); y++) {
+            for (int x = bounds.x; x <= bounds.getMaxX(); x++) {
+                if (!lookup.isLoaded(x, y)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Whether every tile a tank search around ({@code tileX}, {@code tileY}) can read is loaded: the
+     * square of {@link #REACH} tiles around it ({@link #findTank}).
+     */
+    public static boolean isSearchAreaLoaded(int tileX, int tileY, TankCellLookup lookup) {
+        for (int y = tileY - REACH; y <= tileY + REACH; y++) {
+            for (int x = tileX - REACH; x <= tileX + REACH; x++) {
+                if (!lookup.isLoaded(x, y)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /**
@@ -438,6 +496,11 @@ public final class TankStructure {
             public TankCell getCell(int x, int y) {
                 return x == tileX && y == tileY ? cell : lookup.getCell(x, y);
             }
+
+            @Override
+            public boolean isLoaded(int x, int y) {
+                return lookup.isLoaded(x, y);
+            }
         };
     }
 
@@ -475,6 +538,11 @@ public final class TankStructure {
                 loaded[index] = true;
             }
             return cells[index];
+        }
+
+        @Override
+        public boolean isLoaded(int tileX, int tileY) {
+            return source.isLoaded(tileX, tileY);
         }
     }
 

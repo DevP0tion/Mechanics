@@ -4,6 +4,7 @@ import devp0tion.mechanics.client.TankFluidRendering;
 import devp0tion.mechanics.core.FluidType;
 import devp0tion.mechanics.core.GridPos;
 import devp0tion.mechanics.core.TankBounds;
+import devp0tion.mechanics.core.TankJudgment;
 import devp0tion.mechanics.core.TankStatusText;
 import devp0tion.mechanics.core.TankStorage;
 import devp0tion.mechanics.core.TankStructure;
@@ -14,6 +15,7 @@ import necesse.engine.save.LoadData;
 import necesse.engine.save.SaveData;
 import necesse.entity.objectEntity.ObjectEntity;
 import necesse.level.maps.Level;
+import necesse.level.maps.regionSystem.Region;
 
 import java.util.Objects;
 
@@ -23,27 +25,33 @@ import java.util.Objects;
  *
  * <h2>Server</h2>
  * <ul>
- *     <li>Searches its tank ({@link TankStructure#findTank}) when it is created and again after
- *     any object or floor tile within reach changed ({@link TankRegistry#onTileChanged}, 5-1). While
- *     part of the area a tank could cover is not loaded, the search waits (D5).</li>
+ *     <li>Judges its tank ({@link TankJudgment}) when it is created and again after any object or
+ *     floor tile within reach changed ({@link TankRegistry#onTileChanged}, 5-1).</li>
  *     <li>First come, first served (N13-3): it keeps the tank it recognized ({@link #getKeptTank()})
  *     while that rectangle is valid, even when a later change also puts it in another tank's border,
  *     and it remembers that tank while it is invalid. The valves of its tank become its own
  *     ({@link TankValveObjectEntity#getOwner()}). The kept tank is saved and synced to clients.</li>
- *     <li>The regions its recognized tank spans are kept loaded together (N15-6,
- *     {@link TankRegionsLevelData}); a controller loaded with a kept tank registers that tank's
- *     regions right away, so a tank loaded only in part gets the rest loaded.</li>
+ *     <li>Its judgment is saved: the kept tank (the range), whether it is active and its capacity
+ *     (N20-7, N22-7). A controller loaded while part of its tank is not loaded keeps the saved
+ *     judgment, so an active tank works from the moment the controller loads; a change in a loaded
+ *     cell judges the tank again with the loaded cells only (N21-3). The regions a tank spans are not
+ *     kept loaded together (N20-8).</li>
+ *     <li>Natural growth found inside its active tank when it judges the tank is broken without
+ *     drops ({@link TankInteriorPlacement#breakNaturalGrowth}, N23-4, N26-3).</li>
  *     <li>One fluid type and amount, saved with the world ({@link TankStorage}, 12-7). A broken
  *     wall deactivates the tank and keeps the fluid (5-9); a rebuilt tank smaller than the stored
  *     amount loses the excess (N11-2); breaking the controller loses the fluid with this entity
- *     (5-10). The capacity is not saved: it comes from the tank recognized after loading.</li>
+ *     (5-10).</li>
+ *     <li>While the controller is not loaded its tank is dormant (N21-2): an unloading controller
+ *     releases its storage like a removed one ({@link #remove()}), so its valves are neither
+ *     destinations nor sources until it loads again.</li>
  * </ul>
  *
  * <h2>Clients</h2>
  * Clients get a view (recognized bounds, fluid, amount, capacity) through the object entity
  * content packet: structural changes at once, amount-only changes at most every
  * {@link #AMOUNT_SYNC_TICKS} ticks (coalesced). The controller window, the hover tooltip and the
- * fluid rendering read that view.
+ * fluid rendering read that view. A loaded controller starts with the view of its saved judgment.
  */
 public class TankControllerObjectEntity extends ObjectEntity {
 
@@ -59,11 +67,16 @@ public class TankControllerObjectEntity extends ObjectEntity {
 
     // Server state.
     private final TankStorage storage = new TankStorage();
+    /** A cell within reach changed (or the controller is new or loaded): judge on the next tick. */
     private boolean structureChanged = true;
-    /** Whether a search (or a re-validation of the kept tank) has completed since creation or loading. */
-    private boolean searchCompleted;
-    private TankBounds regionsRegisteredFor;
-    private boolean regionsRegistered;
+    /** The next judgment is the first one after loading with a saved judgment (N22-7). */
+    private boolean justLoaded;
+    /** Loaded from a save made before the judgment was saved: judged with the cells loaded then. */
+    private boolean judgmentUnknown;
+    /** A search waits for the whole search area to load (tried every tick). */
+    private boolean searchWaiting;
+    /** The region is unloading: nothing about the tank changes for the others (N21-2). */
+    private boolean unloading;
     private int ticksSinceViewSync = AMOUNT_SYNC_TICKS;
 
     // The tank this controller keeps (N13-3): saved, and synced to clients for their placement checks.
@@ -87,17 +100,28 @@ public class TankControllerObjectEntity extends ObjectEntity {
     }
 
     @Override
+    public void onUnloading(Region region) {
+        super.onUnloading(region);
+        unloading = true;
+    }
+
+    @Override
     public void remove() {
         super.remove();
         unregister();
         // Nothing passes fluid into or out of this storage any more, also in the rest of this tick,
         // before its valves look their tank up again: a broken controller loses the fluid (5-10,
-        // N19-2). Also right for any other removal: an unloading region saved this entity before,
-        // and an entity the engine only replaces (region loading, placement) is a fresh one that no
-        // valve points at (it keeps no tank). Only this storage changes: the pipe grid is untouched.
+        // N19-2). Also right for any other removal: an unloading region saved this entity (and its
+        // judgment) before, and its tank is dormant until it loads again (N21-2); an entity the engine
+        // only replaces (region loading, placement) is one that no valve points at yet. Only this
+        // storage changes: the pipe grid is untouched.
         storage.release();
-        // Its tank's cells may now belong to other tanks (also when only unloading: harmless).
-        TankRegistry.onTankReleased(getLevel(), kept);
+        if (!unloading) {
+            // Its tank's cells may now belong to other tanks. An unloading controller changes no
+            // cell: the controllers nearby judge again only when a loaded cell changes (N20-7), and
+            // its valves still count as its own while it is not loaded (TankStructure.effectiveValveOwner).
+            TankRegistry.onTankReleased(getLevel(), kept);
+        }
     }
 
     @Override
@@ -115,7 +139,7 @@ public class TankControllerObjectEntity extends ObjectEntity {
 
     // ------------------------------------------------------------------ server
 
-    /** Something near the controller changed: search the tank again on the next tick (5-1). */
+    /** Something near the controller changed: judge the tank again on the next tick (5-1). */
     void markStructureChanged() {
         structureChanged = true;
     }
@@ -124,26 +148,32 @@ public class TankControllerObjectEntity extends ObjectEntity {
     public void serverTick() {
         super.serverTick();
         if (structureChanged) {
-            searchTank();
+            judge(justLoaded ? TankJudgment.Mode.LOAD : TankJudgment.Mode.CHANGE);
+        } else if (searchWaiting) {
+            judge(TankJudgment.Mode.SEARCH);
         }
         updateView();
-        updateRegionKeeping();
     }
 
-    private void searchTank() {
+    /** Judges the tank ({@link TankJudgment}) and applies the result. */
+    private void judge(TankJudgment.Mode mode) {
         Level level = getLevel();
-        if (!LevelTankCellLookup.isAreaLoaded(level, tileX, tileY)) {
-            // The regions a recognized tank spans are kept loaded together (N15-6), so a tank is not
-            // judged by half of it. The search area (the whole reach) can still cover regions beyond
-            // the tank: the controller keeps its previous state and searches again once everything
-            // within reach is loaded (retried every tick). The kept tank itself is checked as soon as
-            // its own rectangle is loaded: the search would find it first anyway (N13-3).
-            revalidateKeptTank(level);
-            return;
+        TankJudgment.Prior prior = judgmentUnknown ? TankJudgment.Prior.UNKNOWN
+                : storage.isActive() ? TankJudgment.Prior.ACTIVE : TankJudgment.Prior.INACTIVE;
+        TankJudgment.Result result = TankJudgment.judge(tileX, tileY, new LevelTankCellLookup(level), mode, prior);
+        // The judgment sees the natural growth as broken already (N23-4). Breaking it is a change
+        // within reach: the controllers nearby judge again.
+        for (GridPos cell : result.getNaturalGrowth()) {
+            TankInteriorPlacement.breakNaturalGrowth(level, cell.x, cell.y);
         }
         structureChanged = false;
-        searchCompleted = true;
-        TankValidation tank = TankStructure.findTank(tileX, tileY, new LevelTankCellLookup(level)).getTank();
+        justLoaded = false;
+        searchWaiting = !result.isSettled();
+        if (!result.appliesJudgment()) {
+            return;
+        }
+        judgmentUnknown = false;
+        TankValidation tank = result.getTank();
         // A valid smaller tank loses the excess at once, an invalid one keeps everything (N13-4).
         storage.applyStructure(tank);
         if (tank != null) {
@@ -151,35 +181,6 @@ public class TankControllerObjectEntity extends ObjectEntity {
             claimValves(tank);
         }
         // No tank: the kept tank is still remembered (N13-3) and the storage is inactive (5-9).
-    }
-
-    /**
-     * While the search area is not fully loaded: when the kept tank's rectangle is loaded and still
-     * a valid tank for this controller, it is recognized again right away (the full search would
-     * return it first, {@link TankStructure#findTank}). Otherwise nothing changes until the search.
-     */
-    private void revalidateKeptTank(Level level) {
-        if (kept == null || !isLoaded(level, kept)) {
-            return;
-        }
-        TankValidation tank = TankStructure.validate(kept, new LevelTankCellLookup(level), new GridPos(tileX, tileY));
-        if (tank.isValid()) {
-            structureChanged = false;
-            searchCompleted = true;
-            storage.applyStructure(tank);
-            claimValves(tank);
-        }
-    }
-
-    private static boolean isLoaded(Level level, TankBounds bounds) {
-        for (int y = bounds.y; y <= bounds.getMaxY(); y++) {
-            for (int x = bounds.x; x <= bounds.getMaxX(); x++) {
-                if (level.isTileWithinBounds(x, y) && !level.regionManager.isTileLoaded(x, y)) {
-                    return false;
-                }
-            }
-        }
-        return true;
     }
 
     private void setKeptTank(TankBounds bounds) {
@@ -191,7 +192,7 @@ public class TankControllerObjectEntity extends ObjectEntity {
         }
     }
 
-    /** The valves of the recognized tank become this controller's (N13-3). */
+    /** The valves of the recognized tank become this controller's (N13-3); loaded valves only. */
     private void claimValves(TankValidation tank) {
         GridPos self = new GridPos(tileX, tileY);
         for (GridPos position : tank.getValves()) {
@@ -201,39 +202,6 @@ public class TankControllerObjectEntity extends ObjectEntity {
                 valve.setOwner(self);
             }
         }
-    }
-
-    /**
-     * Keeps the regions of the recognized tank loaded together (N15-6). Nothing is cleared before
-     * the first completed search: a controller loaded from a save starts inactive, and clearing its
-     * saved entry then would let the tank's other regions unload (for example an offline owner's
-     * settlement on a dedicated server). A controller loaded with a kept tank registers that tank's
-     * regions at once instead: when only part of the tank is loaded, the rest is loaded with it, so
-     * the tank can be recognized again; the first completed search then sets the entry as usual.
-     */
-    private void updateRegionKeeping() {
-        if (!searchCompleted) {
-            // Before the first search only a saved kept tank can be set (searches set it after).
-            if (kept != null && !regionsRegistered) {
-                TankRegionsLevelData data = TankRegionsLevelData.get(getLevel(), true);
-                if (data != null) {
-                    data.setTank(tileX, tileY, kept);
-                }
-                regionsRegisteredFor = kept;
-                regionsRegistered = true;
-            }
-            return;
-        }
-        TankBounds active = storage.isActive() ? kept : null;
-        if (regionsRegistered && Objects.equals(active, regionsRegisteredFor)) {
-            return;
-        }
-        TankRegionsLevelData data = TankRegionsLevelData.get(getLevel(), active != null);
-        if (data != null) {
-            data.setTank(tileX, tileY, active);
-        }
-        regionsRegisteredFor = active;
-        regionsRegistered = true;
     }
 
     private void updateView() {
@@ -282,6 +250,12 @@ public class TankControllerObjectEntity extends ObjectEntity {
             save.addInt("tankWidth", kept.outerWidth);
             save.addInt("tankHeight", kept.outerHeight);
         }
+        // The judgment (N20-7, N22-7): the range above, the active state and the capacity. A
+        // controller not judged yet since it loaded from an older save has none to save.
+        if (!judgmentUnknown) {
+            save.addBoolean("active", storage.isActive());
+            save.addInt("capacity", storage.getCapacity());
+        }
     }
 
     @Override
@@ -296,7 +270,24 @@ public class TankControllerObjectEntity extends ObjectEntity {
             kept = new TankBounds(save.getInt("tankX", 0, false), save.getInt("tankY", 0, false),
                     save.getInt("tankWidth", 0, false), save.getInt("tankHeight", 0, false));
         }
+        if (save.hasLoadDataByName("active")) {
+            // The saved judgment applies at once (N22-7): an active tank works before the first tick.
+            storage.restoreJudgment(kept != null && save.getBoolean("active", false, false),
+                    Math.max(0, save.getInt("capacity", 0, false)));
+            judgmentUnknown = false;
+        } else {
+            // Saved before the judgment was saved: inactive until judged with the cells loaded then.
+            judgmentUnknown = kept != null;
+        }
+        // The view starts from the saved judgment: clients and the natural growth check of the
+        // region loading now (its world time simulation, N20-1) see the tank at once.
+        viewActive = storage.isActive();
+        viewBounds = viewActive ? kept : null;
+        viewFluid = storage.getFluid();
+        viewAmount = storage.getAmount();
+        viewCapacity = storage.getCapacity();
         structureChanged = true;
+        justLoaded = true;
     }
 
     // ------------------------------------------------------------------ sync

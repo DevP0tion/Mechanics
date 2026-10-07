@@ -15,6 +15,9 @@ import java.util.Objects;
  *     ({@link #hasOtherLayerObject()}), whether the floor is a liquid tile ({@link #isLiquidFloor()})
  *     and whether it is the tank floor tile ({@link #isTankFloor()}). Only interior cells look at
  *     these; the border only looks at the base layer object.</li>
+ *     <li>Natural growth (N20-1, N23-4): whether the base layer object is natural growth the game
+ *     placed by itself ({@link #isNaturalGrowth()}), which the judgment of an active tank breaks
+ *     instead of letting it invalidate the tank ({@link TankJudgment}).</li>
  * </ul>
  *
  * <p>TODO(design): the tank floor tile element itself (name and special function) is undecided
@@ -29,9 +32,15 @@ public final class TankCell {
     private final boolean tankFloor;
     private final boolean liquidFloor;
     private final boolean otherLayerObject;
+    private final boolean naturalGrowth;
 
     private TankCell(CellKind kind, MineralTier mineral, TankBounds keptTank, GridPos valveOwner,
                      boolean tankFloor, boolean liquidFloor, boolean otherLayerObject) {
+        this(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, false);
+    }
+
+    private TankCell(CellKind kind, MineralTier mineral, TankBounds keptTank, GridPos valveOwner,
+                     boolean tankFloor, boolean liquidFloor, boolean otherLayerObject, boolean naturalGrowth) {
         this.kind = kind;
         this.mineral = mineral;
         this.keptTank = keptTank;
@@ -39,6 +48,7 @@ public final class TankCell {
         this.tankFloor = tankFloor;
         this.liquidFloor = liquidFloor;
         this.otherLayerObject = otherLayerObject;
+        this.naturalGrowth = naturalGrowth;
     }
 
     /** A mineral wall of the given tier. */
@@ -89,19 +99,39 @@ public final class TankCell {
     /** A copy of this cell with the given tank floor state. */
     public TankCell withTankFloor(boolean tankFloor) {
         return tankFloor == this.tankFloor ? this
-                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject);
+                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
     }
 
     /** A copy of this cell with the given liquid floor state (N15-4). */
     public TankCell withLiquidFloor(boolean liquidFloor) {
         return liquidFloor == this.liquidFloor ? this
-                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject);
+                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
     }
 
     /** A copy of this cell with the given "object on another layer" state (N15-4). */
     public TankCell withOtherLayerObject(boolean otherLayerObject) {
         return otherLayerObject == this.otherLayerObject ? this
-                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject);
+                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
+    }
+
+    /**
+     * A copy of this cell with the given natural growth state (N20-1, N23-4): whether the base
+     * layer object is natural growth the game placed by itself. Only meaningful for
+     * {@link CellKind#OTHER}: any other kind is never natural growth, and the flag is ignored there.
+     */
+    public TankCell withNaturalGrowth(boolean naturalGrowth) {
+        boolean value = naturalGrowth && kind == CellKind.OTHER;
+        return value == this.naturalGrowth ? this
+                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, value);
+    }
+
+    /**
+     * This cell with its natural growth broken (N23-4): an empty base layer, the floor and the other
+     * layers as they are. A cell without natural growth is returned unchanged.
+     */
+    public TankCell withNaturalGrowthBroken() {
+        return naturalGrowth ? new TankCell(CellKind.EMPTY, null, null, null, tankFloor, liquidFloor, otherLayerObject, false)
+                : this;
     }
 
     public CellKind getKind() {
@@ -148,6 +178,14 @@ public final class TankCell {
         return otherLayerObject;
     }
 
+    /**
+     * Whether the base layer object is natural growth the game placed by itself (N20-1: grass and
+     * the like, snow piles, cobwebs; never one a player placed). The game adapter decides what counts.
+     */
+    public boolean isNaturalGrowth() {
+        return naturalGrowth;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -159,12 +197,13 @@ public final class TankCell {
         TankCell other = (TankCell) o;
         return kind == other.kind && mineral == other.mineral && Objects.equals(keptTank, other.keptTank)
                 && Objects.equals(valveOwner, other.valveOwner) && tankFloor == other.tankFloor
-                && liquidFloor == other.liquidFloor && otherLayerObject == other.otherLayerObject;
+                && liquidFloor == other.liquidFloor && otherLayerObject == other.otherLayerObject
+                && naturalGrowth == other.naturalGrowth;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject);
+        return Objects.hash(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
     }
 
     @Override
@@ -173,7 +212,7 @@ public final class TankCell {
                 + (keptTank != null ? "[keeps " + keptTank + "]" : "")
                 + (valveOwner != null ? "[owner " + valveOwner + "]" : "")
                 + (tankFloor ? "+tankFloor" : "") + (liquidFloor ? "+liquidFloor" : "")
-                + (otherLayerObject ? "+otherLayer" : "");
+                + (otherLayerObject ? "+otherLayer" : "") + (naturalGrowth ? "+naturalGrowth" : "");
     }
 
 }

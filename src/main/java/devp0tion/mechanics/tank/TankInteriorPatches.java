@@ -25,7 +25,9 @@ import java.awt.geom.Line2D;
  * ({@code GrassTile.tick} and the other growing tiles), the world time simulation of a loading region
  * ({@code GrassTile.addSimulateGrow} and the like), spreading plants ({@code GrassSpreadOptions}),
  * snow piles and cobwebs. Each checks {@code GameObject.canPlace(Level, int, int, int, boolean)} with
- * {@code byPlayer = false} first; that check gets the interior check too.
+ * {@code byPlayer = false} first; that check gets the interior check too, against the tanks of the
+ * loaded controllers ({@link TankInteriorPlacement#checkNaturalObject}). What grows while no
+ * controller of a tank is loaded is broken when the controller judges its tank (N23-4).
  */
 public final class TankInteriorPatches {
 

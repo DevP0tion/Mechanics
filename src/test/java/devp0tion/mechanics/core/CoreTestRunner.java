@@ -21,7 +21,7 @@ public final class CoreTestRunner {
             TankStructureTest.class,
             TankSearchTest.class,
             TankOwnershipTest.class,
-            TankRegionsTest.class,
+            TankJudgmentTest.class,
             TankStatusTextTest.class,
             LiquidStorageTest.class,
             PipeLinkTest.class,

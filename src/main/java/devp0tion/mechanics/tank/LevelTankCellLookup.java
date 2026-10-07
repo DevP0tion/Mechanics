@@ -32,9 +32,11 @@ import necesse.level.maps.Level;
  *     <li>For the interior checks (N15-4): whether any other object layer holds something (wall and
  *     table decorations, carpets, every other registered layer) except the underground pipe layer
  *     ({@link #countsForInterior}), and whether the floor is a liquid tile.</li>
+ *     <li>Natural growth (N20-1, N23-4): whether the base layer object is natural growth the game
+ *     placed by itself ({@link TankInteriorPlacement#isNaturalGrowth}).</li>
  *     <li>Tiles outside the level or in a region that is not loaded read as {@code null} (something
- *     else). Callers that must not judge a tank by unloaded tiles check {@link #isAreaLoaded}
- *     first (D5).</li>
+ *     else). {@link #isLoaded} tells the tiles that are not loaded apart, for the judgments that
+ *     leave them out (N20-7, {@code TankJudgment}); tiles outside the level count as loaded.</li>
  * </ul>
  */
 public final class LevelTankCellLookup implements TankCellLookup {
@@ -59,7 +61,13 @@ public final class LevelTankCellLookup implements TankCellLookup {
         return cellAt(level, tileX, tileY)
                 .withTankFloor(isTankFloor(tile))
                 .withLiquidFloor(tile.isLiquid)
-                .withOtherLayerObject(hasOtherLayerObject(level, tileX, tileY));
+                .withOtherLayerObject(hasOtherLayerObject(level, tileX, tileY))
+                .withNaturalGrowth(TankInteriorPlacement.isNaturalGrowth(level, tileX, tileY));
+    }
+
+    @Override
+    public boolean isLoaded(int tileX, int tileY) {
+        return !level.isTileWithinBounds(tileX, tileY) || level.regionManager.isTileLoaded(tileX, tileY);
     }
 
     /** The cell of the base layer object on a tile, with its tier and ownership. */
@@ -132,22 +140,6 @@ public final class LevelTankCellLookup implements TankCellLookup {
      */
     public static boolean isTankFloor(GameTile tile) {
         return false;
-    }
-
-    /**
-     * Whether every tile a tank search around ({@code tileX}, {@code tileY}) can read is loaded
-     * ({@link TankStructure#REACH}). Tiles outside the level count as loaded: they never will be,
-     * and they are read as "something else".
-     */
-    public static boolean isAreaLoaded(Level level, int tileX, int tileY) {
-        for (int y = tileY - TankStructure.REACH; y <= tileY + TankStructure.REACH; y++) {
-            for (int x = tileX - TankStructure.REACH; x <= tileX + TankStructure.REACH; x++) {
-                if (level.isTileWithinBounds(x, y) && !level.regionManager.isTileLoaded(x, y)) {
-                    return false;
-                }
-            }
-        }
-        return true;
     }
 
     private static boolean isReadable(Level level, int tileX, int tileY) {

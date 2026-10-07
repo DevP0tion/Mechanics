@@ -9,6 +9,8 @@ import necesse.engine.GameEventListener;
 import necesse.engine.GameEvents;
 import necesse.engine.localization.Localization;
 import necesse.engine.events.players.ItemPlaceEvent;
+import necesse.engine.network.packet.PacketChangeObject;
+import necesse.engine.registries.ObjectLayerRegistry;
 import necesse.inventory.item.Item;
 import necesse.inventory.item.placeableItem.StonePlaceableItem;
 import necesse.inventory.item.placeableItem.bucketItem.InfiniteWaterBucketItem;
@@ -50,9 +52,16 @@ import java.util.Iterator;
  * inside a recognized tank either ({@link #checkNaturalObject}, {@code TankInteriorPatches.NaturalCanPlace}):
  * grass and the other plants growing on their tiles, also in the world time simulation when a region
  * loads, plants spreading (reeds, flowers and the like), snow piles and cobwebs. They all check
- * {@code GameObject.canPlace(level, x, y, rotation, byPlayer = false)} before placing.
+ * {@code GameObject.canPlace(level, x, y, rotation, byPlayer = false)} before placing. The tanks are
+ * those of the loaded controllers, as each judged it last (a loaded controller starts with its saved
+ * judgment, N22-7); there is no index of tank ranges (N23-4). What grows while no controller of the
+ * tank is loaded, for example in a region that loads before the controller's, is broken when the
+ * controller judges its active tank ({@link #breakNaturalGrowth}, N23-4, N26-3).
  * TODO(design): natural floor tile changes (grass and snow tiles spreading onto dirt) change the
  * floor, not an object layer; N20-1 names objects, so they are not blocked.
+ * TODO(design): while a tank is dormant (its controller not loaded, N21-2), nothing is rejected in
+ * the loaded part of its interior, placements by players included; a player's object there makes
+ * the tank invalid at its next judgment.
  */
 public final class TankInteriorPlacement {
 
@@ -115,37 +124,63 @@ public final class TankInteriorPlacement {
      * is inside a recognized tank and the object is not allowed there, else {@code null}.
      */
     public static String checkObject(Level level, GameObject object, int tileX, int tileY, int rotation) {
-        return checkObject(level, object, tileX, tileY, rotation, false);
-    }
-
-    /**
-     * {@link #checkObject} for an object the game places by itself (natural generation, N20-1). On
-     * the server it also covers the recognized tanks whose controllers have not searched again since
-     * their region loaded ({@link TankRegionsLevelData#isRegisteredInterior}): the world time
-     * simulation of a region grows plants while the region loads.
-     */
-    public static String checkNaturalObject(Level level, GameObject object, int tileX, int tileY, int rotation) {
-        return checkObject(level, object, tileX, tileY, rotation, true);
-    }
-
-    private static String checkObject(Level level, GameObject object, int tileX, int tileY, int rotation, boolean natural) {
-        if (level == null || object == null) {
-            return null;
-        }
-        boolean registered = natural && TankRegionsLevelData.get(level, false) != null;
-        if (!registered && TankRegistry.getControllers(level).isEmpty()) {
+        if (level == null || object == null || TankRegistry.getControllers(level).isEmpty()) {
             return null;
         }
         MultiTile multiTile = object.getMultiTile(rotation);
         Iterator<MultiTile.CoordinateValue<GameObject>> tiles = multiTile.streamObjects(tileX, tileY).iterator();
         while (tiles.hasNext()) {
             MultiTile.CoordinateValue<GameObject> tile = tiles.next();
-            if (!TankInteriorRule.isAllowed(placementOf(tile.value)) && (isRecognizedInterior(level, tile.tileX, tile.tileY)
-                    || registered && TankRegionsLevelData.isRegisteredInterior(level, tile.tileX, tile.tileY))) {
+            if (!TankInteriorRule.isAllowed(placementOf(tile.value)) && isRecognizedInterior(level, tile.tileX, tile.tileY)) {
                 return ERROR;
             }
         }
         return null;
+    }
+
+    /**
+     * {@link #checkObject} for an object the game places by itself (natural generation, N20-1): the
+     * same check, against the tanks of the loaded controllers as each judged it last. A controller
+     * loaded with its region starts with its saved judgment (N22-7), so the world time simulation of
+     * that region already sees its tank.
+     */
+    public static String checkNaturalObject(Level level, GameObject object, int tileX, int tileY, int rotation) {
+        return checkObject(level, object, tileX, tileY, rotation);
+    }
+
+    /**
+     * Whether the base layer object on the tile is natural growth the game placed by itself (N20-1,
+     * N23-4): an object of the grass kind (grass and the other plants that grow and spread on their
+     * own, reeds, cobwebs, snow piles; the game's own grass flag) not placed by a player.
+     * TODO(design): the game does not record how an object came there, so this is what the judgment
+     * breaks inside an active tank whether it grew in a region's world time simulation or on a tile
+     * tick while no controller of the tank was loaded. Flower patches spreading from planted ones
+     * are marked as placed by a player by the game, and objects of other mods that grow by
+     * themselves without the grass flag are not covered: they still make the tank invalid.
+     */
+    public static boolean isNaturalGrowth(Level level, int tileX, int tileY) {
+        GameObject object = level.getObject(ObjectLayerRegistry.BASE_LAYER, tileX, tileY);
+        return object != null && object.getID() != 0 && object.isGrass
+                && !level.objectLayer.isPlayerPlaced(ObjectLayerRegistry.BASE_LAYER, tileX, tileY);
+    }
+
+    /**
+     * Breaks the natural growth on the tile (N23-4) without drops (N26-3): the base layer is cleared
+     * and the clients that have the tile are told. Server only. The change is reported like any
+     * other ({@link TankChangePatches}).
+     */
+    static void breakNaturalGrowth(Level level, int tileX, int tileY) {
+        if (level == null || !level.isServer() || !isNaturalGrowth(level, tileX, tileY)) {
+            return;
+        }
+        int layer = ObjectLayerRegistry.BASE_LAYER;
+        level.objectLayer.setObject(layer, tileX, tileY, 0);
+        level.objectLayer.setObjectRotation(layer, tileX, tileY, 0);
+        level.objectLayer.setIsPlayerPlaced(layer, tileX, tileY, false);
+        if (level.getServer() != null) {
+            level.getServer().network.sendToClientsWithTile(new PacketChangeObject(level, layer, tileX, tileY, 0, 0),
+                    level, tileX, tileY);
+        }
     }
 
     /** Whether an item placement event puts something not allowed into a recognized tank. */

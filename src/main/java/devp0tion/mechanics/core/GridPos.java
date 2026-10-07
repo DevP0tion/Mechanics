@@ -2,7 +2,7 @@ package devp0tion.mechanics.core;
 
 /**
  * A position on an integer grid: a tile (for example the controller a valve belongs to, N13-3) or a
- * region ({@link TankRegions}). Immutable.
+ * region. Immutable.
  */
 public final class GridPos {
 

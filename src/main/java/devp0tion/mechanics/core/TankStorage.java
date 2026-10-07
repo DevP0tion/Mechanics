@@ -17,7 +17,11 @@ package devp0tion.mechanics.core;
  *     extended.</li>
  *     <li>When the controller goes away the storage is released ({@link #release}): from that moment
  *     it takes and gives nothing and the valves that still point at it have no tank, so no push or
- *     pull reaches it before they look their tank up again (5-10, N19-2).</li>
+ *     pull reaches it before they look their tank up again (5-10, N19-2). A controller that only
+ *     unloads goes away the same way: while it is unloaded its tank is dormant, its valves neither
+ *     destinations nor sources (N21-2).</li>
+ *     <li>The active state and the capacity are the controller's judgment: saved with the controller
+ *     and restored when it loads ({@link #restoreJudgment}, N20-7, N22-7).</li>
  * </ul>
  */
 public final class TankStorage extends LiquidStorage {
@@ -54,6 +58,19 @@ public final class TankStorage extends LiquidStorage {
 
     public boolean isActive() {
         return active;
+    }
+
+    /**
+     * Restores the judgment the controller saved (N20-7, N22-7): whether the tank is active and its
+     * capacity, as they were when it was saved. Nothing is discarded: only a new judgment of the
+     * structure loses fluid ({@link #applyStructure}, N11-2). A released storage stays inactive.
+     */
+    public void restoreJudgment(boolean active, int capacity) {
+        if (released) {
+            return;
+        }
+        setCapacity(capacity);
+        this.active = active;
     }
 
     /**
