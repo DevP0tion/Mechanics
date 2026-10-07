@@ -42,9 +42,9 @@ import java.util.List;
  *     <li>Manual pump: a click is one cycle, applied only on the server in the next tick of the
  *     systems (N22-5), at most every 20 ticks per pump (N3-2, N3-3; see the per-player TODO(design) in
  *     {@link Pump}).</li>
- *     <li>Fuel (11-7, 11-8): the log-fueled pumps burn any log from one slot. TODO(confirm): how
- *     logs get into the pump is not decided; a vanilla-style container with one fuel slot is the
- *     placeholder (the vanilla object inventory window).</li>
+ *     <li>Fuel (11-7, 11-8): the log-fueled pumps burn any log from one slot. Logs get in both ways
+ *     (N31-4): the vanilla object inventory window with the one fuel slot, and a right click on
+ *     the pump while holding logs ({@code PumpObject.interact}).</li>
  *     <li>Clients get the link flags (drawn as cut faces, N16-4) and the slot (vanilla inventory
  *     sync); the fluid stays on the server.</li>
  * </ul>

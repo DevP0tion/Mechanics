@@ -53,8 +53,8 @@ import java.util.Set;
  *
  * <p>Wire (11-3, N11-3): from tier 2 up a wire signal switches the pump off; the game maps the
  * signal to {@link #setEnabled}.
- * <p>TODO(design): the manual pump's click cooldown is per pump (N3-3 as implemented since round
- * 2); whether it should be per player is held for the user.
+ * <p>The manual pump's click cooldown is per pump: one cycle every 20 ticks however many players
+ * click (N3-3, N31-3).
  */
 public class Pump extends LiquidStorage {
 
