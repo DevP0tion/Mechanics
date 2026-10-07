@@ -50,6 +50,17 @@ final class NewEngineTest {
         }
     }
 
+    /** Runs the systems until a tick in which some pump ran a cycle (the global push tick, N28-16). */
+    private static Map<Long, PumpResult> pushTick(PipeGrid grid) {
+        for (int i = 0; i < 100; i++) {
+            Map<Long, PumpResult> results = grid.runTick();
+            if (!results.isEmpty()) {
+                return results;
+            }
+        }
+        throw new AssertionError("no cycle");
+    }
+
     /** Runs the systems until the pump at the tile ran a cycle; returns its result. */
     private static PumpResult cycle(PipeGrid grid, Pump pump) {
         for (int i = 0; i < 100; i++) {
@@ -305,7 +316,7 @@ final class NewEngineTest {
         PipeGrid grid = grid(Fluids.uniform(20));
         TankValve[] valve = new TankValve[1];
         Pump[] pumps = sharedTrunk(grid, 1, valve);
-        Map<Long, PumpResult> results = grid.runTick();
+        Map<Long, PumpResult> results = pushTick(grid);
         PumpResult a = results.get(PipeGrid.key(0, 0));
         PumpResult b = results.get(PipeGrid.key(3, -2));
         Check.equal(Status.PUMPED, b.getStatus(), "the nearer pump");
@@ -315,7 +326,7 @@ final class NewEngineTest {
 
         PipeGrid old = compat(Fluids.uniform(20));
         sharedTrunk(old, 1, valve);
-        Map<Long, PumpResult> oldResults = old.runTick();
+        Map<Long, PumpResult> oldResults = pushTick(old);
         Check.equal(Status.PUMPED, oldResults.get(PipeGrid.key(0, 0)).getStatus(), "compat: the first to run");
         Check.equal(Status.NO_DESTINATION, oldResults.get(PipeGrid.key(3, -2)).getStatus());
     }
@@ -325,7 +336,7 @@ final class NewEngineTest {
         PipeGrid grid = grid(Fluids.uniform(20));
         TankValve[] valve = new TankValve[1];
         sharedTrunk(grid, 2, valve);
-        Map<Long, PumpResult> results = grid.runTick();
+        Map<Long, PumpResult> results = pushTick(grid);
         Check.equal(Status.PUMPED, results.get(PipeGrid.key(0, 0)).getStatus(), "A: connected first");
         Check.equal(Status.NO_DESTINATION, results.get(PipeGrid.key(3, -3)).getStatus());
     }
@@ -361,7 +372,7 @@ final class NewEngineTest {
                 Check.isFalse(ticksA.equals(ticksB), "compat: each pump's own phase");
             } else {
                 Check.equal(ticksA, ticksB, "the same ticks (N28-16)");
-                Check.equal(3, ticksA.size(), "every 20 ticks");
+                Check.equal(java.util.Arrays.asList(20L, 40L, 60L), ticksA, "the global push ticks, every 20 ticks");
             }
         }
     }
@@ -380,7 +391,7 @@ final class NewEngineTest {
         grid.loadPump(0, 0, pumps[0]);
         grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST);
         grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST);
-        Map<Long, PumpResult> results = grid.runTick();
+        Map<Long, PumpResult> results = pushTick(grid);
         Check.equal(Status.PUMPED, results.get(PipeGrid.key(0, 0)).getStatus(), "A: placed first, loaded last");
         Check.equal(Status.NO_DESTINATION, results.get(PipeGrid.key(3, -3)).getStatus());
         Check.equal(0L, pumps[0].getInstallNumber(), "unchanged");
@@ -959,6 +970,64 @@ final class NewEngineTest {
                 held.getHintDestinations(), held.getHintCodes());
         grid.checkLoadedHints();
         Check.equal(Direction.EAST.ordinal(), grid.getPipe(5, 0, PipeLayer.BASE).getHint(dest), "kept");
+    }
+
+    public static void testHintNumbersComeFromTheGroupsTable() {
+        // N28-15: two separate lines are two groups with their own tables; a pipe linking them merges
+        // the groups (the smaller one renumbered); a cut splits them again, each part with its own.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 0, 3, 0);
+        line(grid, 5, 0, 10, 0);
+        TankValve valve = Fluids.valve(100000);
+        grid.placeValve(11, 0, valve);
+        fillAll(grid);
+        int left = grid.getPipe(1, 0, PipeLayer.BASE).getHintTableId();
+        int right = grid.getPipe(5, 0, PipeLayer.BASE).getHintTableId();
+        Check.isTrue(left != right, "two groups");
+        grid.placePipe(4, 0, PipeLayer.BASE, MineralTier.IRON);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        cycle(grid, pump);
+        for (int x = 1; x <= 10; x++) {
+            Check.equal(right, grid.getPipe(x, 0, PipeLayer.BASE).getHintTableId(), "merged into the larger group's table");
+        }
+        Check.isTrue(grid.getHintTable(left) == null || grid.getHintTable(left).isRetired(), "the smaller table is old");
+        long dest = PipeGrid.key(11, 0);
+        Check.equal(Direction.EAST.ordinal(), grid.getPipe(2, 0, PipeLayer.BASE).getHint(dest), "hints read through the table");
+        Check.equal(0, grid.getPipe(2, 0, PipeLayer.BASE).getHintNumbers()[0], "a small number, not the valve position");
+
+        grid.toggleSide(3, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
+        int cutLeft = grid.getPipe(1, 0, PipeLayer.BASE).getHintTableId();
+        Check.isTrue(cutLeft != grid.getPipe(5, 0, PipeLayer.BASE).getHintTableId(), "split: each part its own table");
+        Check.equal(Direction.EAST.ordinal(), grid.getPipe(2, 0, PipeLayer.BASE).getHint(dest), "renumbered, same hints");
+        Check.equal(right, grid.getPipe(5, 0, PipeLayer.BASE).getHintTableId(), "the larger part keeps it");
+    }
+
+    public static void testUnloadedPipesKeepTheirOldTable() {
+        // N28-15: a pipe of an unloaded region keeps its table's id. Its group merges into another
+        // meanwhile: the old table stays, read only, until that pipe loads and is renumbered.
+        // Valve V (0,0), line (1..3,0) fed by the pump (1,-1); a larger line (1..10,2) apart.
+        PipeGrid grid = grid(Fluids.uniform(20));
+        line(grid, 1, 0, 3, 0);
+        line(grid, 1, 2, 10, 2);
+        grid.placeValve(0, 0, Fluids.valve(100000));
+        Pump pump = pump(grid, 1, -1, PumpTier.FIRE);
+        cycle(grid, pump);
+        long dest = PipeGrid.key(0, 0);
+        PipeNode held = grid.unloadPipe(3, 0, PipeLayer.BASE);
+        int old = held.getHintTableId();
+        Check.equal(Direction.WEST.ordinal(), held.getHint(dest), "it had a hint toward the valve");
+        // (2,1) links the rest of its group to the larger line: the groups merge.
+        grid.placePipe(2, 1, PipeLayer.BASE, MineralTier.IRON);
+        HintTable oldTable = grid.getHintTable(old);
+        Check.isTrue(oldTable != null && oldTable.isRetired(), "old, kept for the unloaded pipe");
+        Check.isTrue(grid.getPipe(2, 0, PipeLayer.BASE).getHintTableId() != old, "the loaded pipes renumbered");
+        grid.loadPipe(3, 0, PipeLayer.BASE, held.getTier(), held.getLinks(), held.getFluid(), held.getAmount(),
+                old, held.getHintNumbers(), held.getHintCodes());
+        PipeNode loaded = grid.getPipe(3, 0, PipeLayer.BASE);
+        Check.equal(grid.getPipe(2, 0, PipeLayer.BASE).getHintTableId(), loaded.getHintTableId(),
+                "renumbered into its group's table on load");
+        Check.equal(Direction.WEST.ordinal(), loaded.getHint(dest), "the same hint");
+        Check.isNull(grid.getHintTable(old), "no pipe refers to the old table: dropped");
     }
 
     // ---------------------------------------------------------------- structure and systems

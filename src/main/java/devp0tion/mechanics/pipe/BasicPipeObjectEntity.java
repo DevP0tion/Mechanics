@@ -29,7 +29,8 @@ import necesse.level.maps.regionSystem.Region;
  *     region unloads, or the engine only replaces this entity with another one of the same pipe
  *     ({@link PipeSystem#isReplacedEntity}), the pipe leaves the engine (no mirror, N23-2). When the
  *     pipe is removed its fluid is lost (N12-1).</li>
- *     <li>Saved: link flags, fluid and amount, hints (per destination valve, its direction, N24-2).</li>
+ *     <li>Saved: link flags, fluid and amount, hints (per destination valve, its direction, N24-2;
+ *     destinations as numbers of its group's table, with the table's id, N28-15).</li>
  *     <li>Clients get the link flags, which they draw (connections and cut faces, N16-4), and the
  *     faces where a pipe holding another fluid meets it ({@link PipeGrid#getFluidBlockedSides}: the
  *     neighbouring basic pipes, and the underground pipe on its tile through the vertical link),
@@ -52,7 +53,8 @@ public class BasicPipeObjectEntity extends ObjectEntity {
     private int blockedSides;
     private FluidType savedFluid;
     private int savedAmount;
-    private long[] savedHintDests;
+    private int savedHintTable = -1;
+    private int[] savedHintNumbers;
     private byte[] savedHintCodes;
 
     public BasicPipeObjectEntity(Level level, int tileX, int tileY) {
@@ -98,8 +100,8 @@ public class BasicPipeObjectEntity extends ObjectEntity {
             if (placed) {
                 node = grid.placePipe(tileX, tileY, PipeLayer.BASE, tier());
             } else if (loadedFromSave) {
-                node = grid.loadPipe(tileX, tileY, PipeLayer.BASE, tier(), links, savedFluid, savedAmount, true,
-                        savedHintDests, savedHintCodes);
+                node = grid.loadPipe(tileX, tileY, PipeLayer.BASE, tier(), links, savedFluid, savedAmount,
+                        savedHintTable, savedHintNumbers, savedHintCodes);
             } else {
                 // No saved state: as when it was placed, but loaded (not a structure change).
                 int startLinks = grid.getPipe(tileX, tileY, PipeLayer.UNDERGROUND) != null
@@ -141,7 +143,8 @@ public class BasicPipeObjectEntity extends ObjectEntity {
             links = left.getLinks();
             savedFluid = left.getFluid();
             savedAmount = left.getAmount();
-            savedHintDests = left.getHintDestinations();
+            savedHintTable = left.getHintTableId();
+            savedHintNumbers = left.getHintNumbers();
             savedHintCodes = left.getHintCodes();
         }
     }
@@ -193,10 +196,13 @@ public class BasicPipeObjectEntity extends ObjectEntity {
             save.addEnum("fluid", fluid);
             save.addInt("amount", amount);
         }
-        long[] dests = node != null ? node.getHintDestinations() : savedHintDests;
+        // Hints: numbers in the group's table, saved with the table's id (N28-15).
+        int table = node != null ? node.getHintTableId() : savedHintTable;
+        int[] numbers = node != null ? node.getHintNumbers() : savedHintNumbers;
         byte[] codes = node != null ? node.getHintCodes() : savedHintCodes;
-        if (dests != null && dests.length > 0) {
-            save.addLongArray("hintDests", dests);
+        if (table >= 0 && numbers != null && numbers.length > 0) {
+            save.addInt("hintTable", table);
+            save.addIntArray("hintNumbers", numbers);
             save.addByteArray("hintCodes", codes);
         }
     }
@@ -211,7 +217,8 @@ public class BasicPipeObjectEntity extends ObjectEntity {
         if (savedAmount == 0) {
             savedFluid = null;
         }
-        savedHintDests = save.getLongArray("hintDests", null, false);
+        savedHintTable = save.getInt("hintTable", -1, false);
+        savedHintNumbers = save.getIntArray("hintNumbers", null, false);
         savedHintCodes = save.getByteArray("hintCodes", null, false);
     }
 

@@ -570,7 +570,8 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         PipeNode node;
         if (target.isFromSave()) {
             node = grid.loadPipe(x, y, PipeLayer.UNDERGROUND, tier, target.getSavedLinks(), target.getSavedFluid(),
-                    target.getSavedAmount(), true, target.getSavedHintDests(), target.getSavedHintCodes());
+                    target.getSavedAmount(), target.getSavedHintTable(), target.getSavedHintNumbers(),
+                    target.getSavedHintCodes());
         } else {
             PipeRecord old = record != null && record.tier == tier ? record : legacyMirror.get(mirrorKey(x, y, PipeLayer.UNDERGROUND));
             if (old != null && old.tier == tier) {
@@ -658,7 +659,8 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
 
     @Override
     public boolean shouldSave() {
-        return !grid.getSummaries().isEmpty() || !legacyMirror.isEmpty() || grid.getNextInstallNumber() > 0;
+        return !grid.getSummaries().isEmpty() || !legacyMirror.isEmpty() || grid.getNextInstallNumber() > 0
+                || !grid.getHintTables().isEmpty();
     }
 
     @Override
@@ -669,6 +671,18 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         }
         // N28-17: the next install number of the level's pumps.
         save.addLong("NEXTINSTALL", grid.getNextInstallNumber());
+        // N28-15: the pipe groups' destination number tables some pipe refers to.
+        save.addInt("NEXTHINTTABLE", grid.getNextHintTableId());
+        for (devp0tion.mechanics.core.HintTable table : grid.getHintTables()) {
+            SaveData entry = new SaveData("HINTTABLE");
+            entry.addInt("id", table.id);
+            entry.addInt("refs", table.getReferences());
+            if (table.isRetired()) {
+                entry.addInt("successor", table.getSuccessor());
+            }
+            entry.addLongArray("dests", table.getDestinations());
+            save.addSaveData(entry);
+        }
         Map<Long, Integer> regionChanges = grid.getSavedRegionChanges();
         if (!regionChanges.isEmpty()) {
             // N28-1: region x, region y, number, for every region a summary passes.
@@ -695,6 +709,12 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
     public void applyLoadData(LoadData save) {
         super.applyLoadData(save);
         grid.setNextInstallNumber(save.getLong("NEXTINSTALL", 0L, false));
+        grid.setNextHintTableId(save.getInt("NEXTHINTTABLE", 0, false));
+        for (LoadData entry : save.getLoadDataByName("HINTTABLE")) {
+            int successor = entry.getInt("successor", -1, false);
+            grid.loadHintTable(entry.getInt("id", -1, false), entry.getLongArray("dests", new long[0], false),
+                    entry.getInt("refs", 0, false), successor >= 0, successor);
+        }
         int[] regionChanges = save.getIntArray("REGIONCHANGES", new int[0], false);
         for (int i = 0; i + 2 < regionChanges.length; i += 3) {
             grid.loadRegionChange(PipeGrid.key(regionChanges[i], regionChanges[i + 1]), regionChanges[i + 2]);

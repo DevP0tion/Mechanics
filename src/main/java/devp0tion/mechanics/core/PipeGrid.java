@@ -57,7 +57,7 @@ import java.util.Set;
  * pipe whose region unloads leaves its network without a rebuild, and joins the networks around it
  * again when it loads.
  *
- * <h2>Cell hints (N22-3, N24-2, N25-1, N25-4, N25-6, N28-12, N28-13)</h2>
+ * <h2>Cell hints (N22-3, N24-2, N25-1, N25-4, N25-6, N28-12, N28-13, N28-15)</h2>
  * Instead of a route cache per pump, each pipe keeps, per destination valve, the direction of the
  * next step toward it ({@link PipeNode#getHint}), no distance. A pump steps along them from its
  * output cells; the step count, when needed, is counted while stepping.
@@ -87,6 +87,9 @@ import java.util.Set;
  *     (N25-1). A direction toward a tile that is not loaded cannot be checked and stays. There are no
  *     save numbers per region, so a region file older than the rest (a crash, a restored backup)
  *     goes unnoticed, by the summary check too (N28-1).</li>
+ *     <li>A destination in a pipe's hints is a number in the table of its group of linked pipes
+ *     ({@link HintTable}, N28-15): merges and splits renumber the loaded pipes, a pipe of an unloaded
+ *     region keeps its table's id and is renumbered when it loads.</li>
  *     <li>TODO(confirm): the hint codes are the four directions plus one for the other layer on the
  *     same tile (basic to underground pipe, underground pipe to the valve on its tile), so a code
  *     takes 3 bits rather than 2 (N24-2).</li>
@@ -260,6 +263,9 @@ public final class PipeGrid implements PumpHost {
     private long tick;
 
     // Hints (derived data, saved by the pipes' holders, N25-6).
+    /** The destination number tables of the pipe groups, by id (N28-15); saved with the level. */
+    private final Map<Integer, HintTable> hintTables = new LinkedHashMap<>();
+    private int nextTableId;
     private final Map<Long, Set<PipeNode>> hintCells = new HashMap<>();
     private final Set<Long> staleDestinations = new LinkedHashSet<>();
     private final Set<Long> checkDestinations = new LinkedHashSet<>();
@@ -389,13 +395,12 @@ public final class PipeGrid implements PumpHost {
      *     <li>Clock (cycle windows, N14-2).</li>
      *     <li>Sources: a liquid tile source not judged yet is judged with the loaded cells (N20-7).</li>
      *     <li>Timers: lit logs burn down (N18-4), cycle counters advance (N6-1, N3-3), wire state is
-     *     the pump's {@code enabled} (N11-3). The log-fueled pumps' cycles are aligned (N28-16): due
-     *     on the engine's cycle ticks only (the first tick and every cycle after), so the pumps of a
-     *     network push in the same tick. TODO(confirm) G13 phase: one phase for every pump of the
-     *     level is the simplest reading of "the same tick" (nothing to settle when networks merge or
-     *     a pump joins); which tick a network uses is being asked. TODO(confirm): manual pumps keep
-     *     their click timing (a click runs in the next tick, N22-5), not aligned. The compatibility
-     *     mode keeps each pump's own phase (TODO(confirm) G17).</li>
+     *     the pump's {@code enabled} (N11-3). Every log-fueled pump of the level pushes on the same
+     *     ticks (N28-16): one global phase, every cycle, when the engine tick is a multiple of the
+     *     cycle (20 ticks); a pump placed or loaded in between waits for the next one, and merges or
+     *     splits need no realignment. TODO(confirm): manual pumps keep their click timing (a click
+     *     runs in the next tick, N22-5), not aligned. The compatibility mode keeps each pump's own
+     *     phase (TODO(confirm) G17).</li>
      *     <li>Clicks queued since the last tick (manual pumps).</li>
      *     <li>Push: the pumps due now, ordered for the shared caps (N26-4; connection order in the
      *     compatibility mode). Hints are repaired as the pumps use them (N25-4).</li>
@@ -414,7 +419,7 @@ public final class PipeGrid implements PumpHost {
                 ((LiquidTileSource) tile).judgeArea();
             }
             PumpResult timers = compatMode ? pump.advanceTimers()
-                    : pump.advanceTimersAligned(Math.floorMod(tick - 1, pump.getTier().getCycleTicks()) == 0);
+                    : pump.advanceTimersAligned(Math.floorMod(tick, pump.getTier().getCycleTicks()) == 0);
             if (timers == null) {
                 due.add(pump);
             }
@@ -764,6 +769,7 @@ public final class PipeGrid implements PumpHost {
         }
         unloadedTiles.remove(key(x, y));
         putCell(node);
+        joinGroup(node, null);
         onPipePlaced(node);
         structureChanged(x, y);
         return node;
@@ -773,6 +779,32 @@ public final class PipeGrid implements PumpHost {
     public PipeNode loadPipe(int x, int y, PipeLayer layer, MineralTier tier, int links, FluidType fluid, int amount,
                              boolean loaded) {
         return loadPipe(x, y, layer, tier, links, fluid, amount, loaded, null, null);
+    }
+
+    /**
+     * {@link #loadPipe(int, int, PipeLayer, MineralTier, int, FluidType, int, boolean, long[], byte[])}
+     * with hints as saved by the game (N28-15): numbers in the table {@code hintTable}. The pipe is
+     * renumbered into its group's table; a number the table no longer knows (it was dropped) gives
+     * no hint, repaired when used (N25-1).
+     */
+    public PipeNode loadPipe(int x, int y, PipeLayer layer, MineralTier tier, int links, FluidType fluid, int amount,
+                             int hintTable, int[] hintNumbers, byte[] hintCodes) {
+        HintTable saved = hintTables.get(hintTable);
+        long[] dests = null;
+        if (hintNumbers != null) {
+            dests = new long[hintNumbers.length];
+            for (int i = 0; i < dests.length; i++) {
+                dests[i] = saved == null ? Long.MIN_VALUE : saved.destinationOf(hintNumbers[i]);
+            }
+        }
+        PipeNode before = getPipe(x, y, layer);
+        PipeNode node = loadPipe(x, y, layer, tier, links, fluid, amount, true, dests, hintCodes, saved);
+        if (saved != null && node != before) {
+            // One pipe of an unloaded region less refers to it.
+            saved.unloadedRefs = Math.max(0, saved.unloadedRefs - 1);
+            dropIfUnused(saved);
+        }
+        return node;
     }
 
     /**
@@ -786,6 +818,11 @@ public final class PipeGrid implements PumpHost {
      */
     public PipeNode loadPipe(int x, int y, PipeLayer layer, MineralTier tier, int links, FluidType fluid, int amount,
                              boolean loaded, long[] hintDests, byte[] hintCodes) {
+        return loadPipe(x, y, layer, tier, links, fluid, amount, loaded, hintDests, hintCodes, null);
+    }
+
+    private PipeNode loadPipe(int x, int y, PipeLayer layer, MineralTier tier, int links, FluidType fluid, int amount,
+                              boolean loaded, long[] hintDests, byte[] hintCodes, HintTable savedTable) {
         Objects.requireNonNull(tier, "tier");
         if (!loaded) {
             unloadPipe(x, y, layer);
@@ -839,9 +876,10 @@ public final class PipeGrid implements PumpHost {
         if (contents != null) {
             node.setContents(contents, contentsAmount);
         }
-        node.setHints(hintDests, hintCodes);
         unloadedTiles.remove(key);
         putCell(node);
+        joinGroup(node, savedTable);
+        node.setHints(hintDests, hintCodes);
         indexHints(node);
         if (node.isReached()) {
             attachReached(node);
@@ -870,6 +908,11 @@ public final class PipeGrid implements PumpHost {
         }
         unindexHints(node);
         loadedToCheck.remove(node);
+        if (node.hintTable != null) {
+            // It keeps its table's id in its save (N28-15).
+            node.hintTable.cells.remove(node);
+            node.hintTable.unloadedRefs++;
+        }
         node.loaded = false;
         return node;
     }
@@ -886,11 +929,14 @@ public final class PipeGrid implements PumpHost {
             return null;
         }
         Set<Long> affected = destinationsThrough(existing);
+        List<PipeNode> sides = linkedPipes(existing);
         PipeNode node = takeCell(x, y, layer);
         node.removed = true;
         structureChanged(x, y);
         unindexHints(node);
         loadedToCheck.remove(node);
+        leaveGroup(node);
+        splitIfApart(sides);
         PipeNetwork network = node.network;
         if (network != null) {
             network.nodes.remove(node);
@@ -1609,6 +1655,12 @@ public final class PipeGrid implements PumpHost {
         if (pipe1 && pipe2) {
             PipeNode a = getPipe(x1, y1, part1 == Part.BASIC_PIPE ? PipeLayer.BASE : PipeLayer.UNDERGROUND);
             PipeNode b = getPipe(x2, y2, part2 == Part.BASIC_PIPE ? PipeLayer.BASE : PipeLayer.UNDERGROUND);
+            // The groups of linked pipes (N28-15): a new link merges, a cut may split.
+            if (wasLinked) {
+                splitIfApart(java.util.Arrays.asList(a, b));
+            } else if (a.hintTable != b.hintTable) {
+                merge(new LinkedHashSet<>(java.util.Arrays.asList(a.hintTable, b.hintTable)));
+            }
             if (wasLinked) {
                 addCrossing(a, b, stale);
                 addCrossing(b, a, stale);
@@ -1745,6 +1797,178 @@ public final class PipeGrid implements PumpHost {
             return !isTileLoaded(x + d.dx, y + d.dy);
         }
         return linked(node, next, code);
+    }
+
+    // ---------------------------------------------------------------- number tables (N28-15)
+
+    /**
+     * A pipe entered the engine: it joins the group of the pipes it is linked to (merging their
+     * groups when there are several), else the live table its save refers to, else a new group.
+     */
+    private void joinGroup(PipeNode node, HintTable saved) {
+        Set<HintTable> around = new LinkedHashSet<>();
+        for (PipeNode next : linkedPipes(node)) {
+            if (next.hintTable != null) {
+                around.add(next.hintTable);
+            }
+        }
+        HintTable table;
+        if (around.isEmpty()) {
+            table = live(saved);
+            if (table == null) {
+                table = newTable();
+            }
+        } else {
+            table = merge(around);
+        }
+        node.hintTable = table;
+        table.cells.add(node);
+    }
+
+    /** The table that holds what {@code table} held: itself, or the one its pipes were renumbered into. */
+    private HintTable live(HintTable table) {
+        for (int guard = 0; table != null && table.retired && guard < 64; guard++) {
+            table = hintTables.get(table.successor);
+        }
+        return table == null || table.retired ? null : table;
+    }
+
+    private HintTable newTable() {
+        HintTable table = new HintTable(nextTableId++);
+        hintTables.put(table.id, table);
+        return table;
+    }
+
+    /**
+     * Groups that became linked merge (N28-15): the one with the most loaded pipes stays, the others'
+     * loaded pipes are renumbered into it, and their tables stay read only for their unloaded pipes.
+     */
+    private HintTable merge(Set<HintTable> tables) {
+        HintTable survivor = null;
+        for (HintTable table : tables) {
+            if (survivor == null || table.cells.size() > survivor.cells.size()
+                    || table.cells.size() == survivor.cells.size() && table.id < survivor.id) {
+                survivor = table;
+            }
+        }
+        for (HintTable table : tables) {
+            if (table == survivor) {
+                continue;
+            }
+            for (PipeNode cell : new ArrayList<>(table.cells)) {
+                cell.renumber(survivor);
+                survivor.cells.add(cell);
+            }
+            table.cells.clear();
+            table.retired = true;
+            table.successor = survivor.id;
+            dropIfUnused(table);
+        }
+        return survivor;
+    }
+
+    /**
+     * After a cut or a removal: when the pipes on its sides no longer reach each other through loaded
+     * linked pipes, the group split (N28-15). The largest part keeps the table; every other part gets
+     * a table of its own, its pipes renumbered into it. Pipes of unloaded regions keep the old table;
+     * when they load, they join the group around them.
+     */
+    private void splitIfApart(List<PipeNode> sides) {
+        if (sides.size() < 2) {
+            return;
+        }
+        Set<PipeNode> seen = Collections.newSetFromMap(new IdentityHashMap<PipeNode, Boolean>());
+        List<List<PipeNode>> parts = new ArrayList<>();
+        for (PipeNode side : sides) {
+            if (seen.contains(side) || side.removed || getPipe(side.getTileX(), side.getTileY(), side.getLayer()) != side) {
+                continue;
+            }
+            List<PipeNode> part = new ArrayList<>();
+            ArrayDeque<PipeNode> queue = new ArrayDeque<>();
+            seen.add(side);
+            queue.add(side);
+            while (!queue.isEmpty()) {
+                PipeNode cell = queue.poll();
+                part.add(cell);
+                for (PipeNode next : linkedPipes(cell)) {
+                    if (seen.add(next)) {
+                        queue.add(next);
+                    }
+                }
+            }
+            parts.add(part);
+        }
+        if (parts.size() < 2) {
+            return;
+        }
+        parts.sort((a, b) -> Integer.compare(b.size(), a.size()));
+        for (int i = 1; i < parts.size(); i++) {
+            HintTable own = newTable();
+            for (PipeNode cell : parts.get(i)) {
+                HintTable old = cell.hintTable;
+                if (old != null) {
+                    old.cells.remove(cell);
+                    cell.renumber(own);
+                    dropIfUnused(old);
+                } else {
+                    cell.hintTable = own;
+                }
+                own.cells.add(cell);
+            }
+        }
+    }
+
+    /** A pipe left for good (removed or broken). */
+    private void leaveGroup(PipeNode node) {
+        if (node.hintTable != null) {
+            node.hintTable.cells.remove(node);
+            dropIfUnused(node.hintTable);
+        }
+    }
+
+    /** A table no pipe refers to any more is dropped (N28-15). */
+    private void dropIfUnused(HintTable table) {
+        if (table.cells.isEmpty() && table.unloadedRefs <= 0) {
+            hintTables.remove(table.id);
+        }
+    }
+
+    /** The tables the game saves with the level (N28-15): those some pipe refers to. */
+    public List<HintTable> getHintTables() {
+        List<HintTable> result = new ArrayList<>();
+        for (HintTable table : hintTables.values()) {
+            if (table.getReferences() > 0) {
+                result.add(table);
+            }
+        }
+        return result;
+    }
+
+    /** Restores a saved table (level load, N28-15): every pipe that refers to it is unloaded now. */
+    public void loadHintTable(int id, long[] destinations, int references, boolean retired, int successor) {
+        if (id < 0) {
+            return;
+        }
+        HintTable table = new HintTable(id);
+        table.restore(destinations);
+        table.unloadedRefs = Math.max(0, references);
+        table.retired = retired;
+        table.successor = successor;
+        hintTables.put(id, table);
+        nextTableId = Math.max(nextTableId, id + 1);
+    }
+
+    /** The table of an id (tests, diagnostics), or {@code null}. */
+    public HintTable getHintTable(int id) {
+        return hintTables.get(id);
+    }
+
+    public int getNextHintTableId() {
+        return nextTableId;
+    }
+
+    public void setNextHintTableId(int next) {
+        nextTableId = Math.max(nextTableId, next);
     }
 
     private void indexHints(PipeNode node) {

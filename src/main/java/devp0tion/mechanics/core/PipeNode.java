@@ -11,10 +11,11 @@ package devp0tion.mechanics.core;
  *     is reached exactly while it holds fluid.</li>
  *     <li>Link flags ({@link LinkFlags}): one per side and one vertical, toggled by the wrench (12-8,
  *     13-4, 13-5) and kept when the other side is removed (N16-4).</li>
- *     <li>Hints (N22-3, N24-2, N25-6): per destination valve, the direction of the next step toward
- *     it ({@link #HINT_VERTICAL} for the other layer on the tile, or the valve on the tile under an
- *     underground pipe). No distance is kept. The pipe engine writes them, the holder of the pipe's
- *     state saves them.</li>
+ *     <li>Hints (N22-3, N24-2, N25-6, N28-15): per destination valve, the direction of the next
+ *     step toward it ({@link #HINT_VERTICAL} for the other layer on the tile, or the valve on the
+ *     tile under an underground pipe). No distance is kept. A destination is a number in its group's
+ *     table ({@link HintTable}). The pipe engine writes them, the holder of the pipe's state saves
+ *     them with the table's id.</li>
  *     <li>Loaded: the pipe engine only holds pipes of loaded regions ({@link PipeGrid}); the
  *     engine before the ECS restructure kept unloaded ones as read-only mirrors (N14-3).</li>
  * </ul>
@@ -72,9 +73,11 @@ public final class PipeNode extends LiquidStorage {
     /** Hint code of the step to the other layer on the same tile (or to the valve on it). */
     public static final int HINT_VERTICAL = 4;
 
-    private static final long[] NO_DESTS = new long[0];
+    private static final int[] NO_NUMBERS = new int[0];
     private static final byte[] NO_CODES = new byte[0];
-    private long[] hintDests = NO_DESTS;
+    /** The number table of its group (N28-15); set when it enters the engine, kept when it leaves. */
+    HintTable hintTable;
+    private int[] hintNumbers = NO_NUMBERS;
     private byte[] hintCodes = NO_CODES;
     private int hintCount;
 
@@ -163,9 +166,9 @@ public final class PipeNode extends LiquidStorage {
         return hintCount;
     }
 
-    /** The destination (valve tile, {@link PipeGrid#key}) of hint {@code i}. */
+    /** The destination (valve tile, {@link PipeGrid#key}) of hint {@code i}, through its group's table. */
     public long getHintDestination(int i) {
-        return hintDests[i];
+        return hintTable.destinationOf(hintNumbers[i]);
     }
 
     /** The direction code of hint {@code i}: a {@link Direction} ordinal or {@link #HINT_VERTICAL}. */
@@ -175,46 +178,65 @@ public final class PipeNode extends LiquidStorage {
 
     /** The hint toward {@code dest}, or -1 when there is none. */
     public int getHint(long dest) {
+        int number = hintTable == null ? -1 : hintTable.numberOf(dest);
+        if (number < 0) {
+            return -1;
+        }
         for (int i = 0; i < hintCount; i++) {
-            if (hintDests[i] == dest) {
+            if (hintNumbers[i] == number) {
                 return hintCodes[i];
             }
         }
         return -1;
     }
 
-    /** The saved hints: destination tile keys (copy). */
+    /** The hints' destinations (valve tile keys), read through the table (copy). */
     public long[] getHintDestinations() {
         long[] result = new long[hintCount];
-        System.arraycopy(hintDests, 0, result, 0, hintCount);
+        for (int i = 0; i < hintCount; i++) {
+            result[i] = getHintDestination(i);
+        }
         return result;
     }
 
-    /** The saved hints: direction codes in the order of {@link #getHintDestinations} (copy). */
+    /** The saved hints: direction codes in the order of {@link #getHintNumbers} (copy). */
     public byte[] getHintCodes() {
         byte[] result = new byte[hintCount];
         System.arraycopy(hintCodes, 0, result, 0, hintCount);
         return result;
     }
 
+    /** The saved hints: destination numbers in its group's table (copy, N28-15). */
+    public int[] getHintNumbers() {
+        int[] result = new int[hintCount];
+        System.arraycopy(hintNumbers, 0, result, 0, hintCount);
+        return result;
+    }
+
+    /** The id of its group's number table, saved with the hints (N28-15); -1 when it has none. */
+    public int getHintTableId() {
+        return hintTable == null ? -1 : hintTable.id;
+    }
+
     /** Sets the hint toward {@code dest}; returns true when the pipe had none for it before. */
     boolean setHint(long dest, int code) {
+        int number = hintTable.numberFor(dest);
         for (int i = 0; i < hintCount; i++) {
-            if (hintDests[i] == dest) {
+            if (hintNumbers[i] == number) {
                 hintCodes[i] = (byte) code;
                 return false;
             }
         }
-        if (hintCount == hintDests.length) {
+        if (hintCount == hintNumbers.length) {
             int size = Math.max(4, hintCount * 2);
-            long[] dests = new long[size];
+            int[] numbers = new int[size];
             byte[] codes = new byte[size];
-            System.arraycopy(hintDests, 0, dests, 0, hintCount);
+            System.arraycopy(hintNumbers, 0, numbers, 0, hintCount);
             System.arraycopy(hintCodes, 0, codes, 0, hintCount);
-            hintDests = dests;
+            hintNumbers = numbers;
             hintCodes = codes;
         }
-        hintDests[hintCount] = dest;
+        hintNumbers[hintCount] = number;
         hintCodes[hintCount] = (byte) code;
         hintCount++;
         return true;
@@ -222,10 +244,11 @@ public final class PipeNode extends LiquidStorage {
 
     /** Drops the hint toward {@code dest}; returns true when there was one. */
     boolean removeHint(long dest) {
-        for (int i = 0; i < hintCount; i++) {
-            if (hintDests[i] == dest) {
+        int number = hintTable == null ? -1 : hintTable.numberOf(dest);
+        for (int i = 0; number >= 0 && i < hintCount; i++) {
+            if (hintNumbers[i] == number) {
                 hintCount--;
-                hintDests[i] = hintDests[hintCount];
+                hintNumbers[i] = hintNumbers[hintCount];
                 hintCodes[i] = hintCodes[hintCount];
                 return true;
             }
@@ -233,17 +256,28 @@ public final class PipeNode extends LiquidStorage {
         return false;
     }
 
-    /** Replaces every hint (saved hints, before the pipe enters the engine); invalid codes are skipped. */
+    /**
+     * Replaces every hint (saved hints, after the pipe got its group's table); invalid codes and
+     * unknown destinations ({@link Long#MIN_VALUE}) are skipped.
+     */
     void setHints(long[] dests, byte[] codes) {
         hintCount = 0;
         if (dests == null || codes == null) {
             return;
         }
         for (int i = 0; i < Math.min(dests.length, codes.length); i++) {
-            if (codes[i] >= 0 && codes[i] <= HINT_VERTICAL) {
+            if (codes[i] >= 0 && codes[i] <= HINT_VERTICAL && dests[i] != Long.MIN_VALUE) {
                 setHint(dests[i], codes[i]);
             }
         }
+    }
+
+    /** Moves its hints into another table: its group merged or split (N28-15). */
+    void renumber(HintTable to) {
+        for (int i = 0; i < hintCount; i++) {
+            hintNumbers[i] = to.numberFor(hintTable.destinationOf(hintNumbers[i]));
+        }
+        hintTable = to;
     }
 
     /** How many times this pipe's contents were written (to check that full pipes are left alone). */

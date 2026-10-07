@@ -35,7 +35,8 @@ public class UndergroundPipeHolder extends ObjectEntity {
     private int links = LinkFlags.ALL_OPEN;
     private FluidType savedFluid;
     private int savedAmount;
-    private long[] savedHintDests;
+    private int savedHintTable = -1;
+    private int[] savedHintNumbers;
     private byte[] savedHintCodes;
 
     public UndergroundPipeHolder(Level level, int tileX, int tileY) {
@@ -68,8 +69,12 @@ public class UndergroundPipeHolder extends ObjectEntity {
         return savedAmount;
     }
 
-    long[] getSavedHintDests() {
-        return savedHintDests;
+    int getSavedHintTable() {
+        return savedHintTable;
+    }
+
+    int[] getSavedHintNumbers() {
+        return savedHintNumbers;
     }
 
     byte[] getSavedHintCodes() {
@@ -86,10 +91,13 @@ public class UndergroundPipeHolder extends ObjectEntity {
             save.addEnum("fluid", fluid);
             save.addInt("amount", amount);
         }
-        long[] dests = node != null ? node.getHintDestinations() : savedHintDests;
+        // Hints: numbers in the group's table, saved with the table's id (N28-15).
+        int table = node != null ? node.getHintTableId() : savedHintTable;
+        int[] numbers = node != null ? node.getHintNumbers() : savedHintNumbers;
         byte[] codes = node != null ? node.getHintCodes() : savedHintCodes;
-        if (dests != null && dests.length > 0) {
-            save.addLongArray("hintDests", dests);
+        if (table >= 0 && numbers != null && numbers.length > 0) {
+            save.addInt("hintTable", table);
+            save.addIntArray("hintNumbers", numbers);
             save.addByteArray("hintCodes", codes);
         }
     }
@@ -104,7 +112,8 @@ public class UndergroundPipeHolder extends ObjectEntity {
         if (savedAmount == 0) {
             savedFluid = null;
         }
-        savedHintDests = save.getLongArray("hintDests", null, false);
+        savedHintTable = save.getInt("hintTable", -1, false);
+        savedHintNumbers = save.getIntArray("hintNumbers", null, false);
         savedHintCodes = save.getByteArray("hintCodes", null, false);
     }
 
