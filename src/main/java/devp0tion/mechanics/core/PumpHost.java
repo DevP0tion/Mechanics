@@ -4,8 +4,7 @@ import java.util.Set;
 
 /**
  * What a {@link Pump} needs from the pipe engine it is placed in: its output cells, its linked
- * valves and the push. The game's engine is {@link PipeGrid}; the engine before the ECS restructure
- * implements it too, so tests can run the same pump on both and compare them (N22-6, N26-1).
+ * valves and the push. The engine is {@link PipeGrid}.
  */
 interface PumpHost {
 
@@ -22,8 +21,5 @@ interface PumpHost {
 
     /** The pump is about to push {@code fluid} (its network may change, N17-3, N18-2). */
     void onPumpPushing(Pump pump, FluidType fluid);
-
-    /** One game tick of the engine clock (the cycle windows of the transport cap, N14-2). */
-    void tick();
 
 }

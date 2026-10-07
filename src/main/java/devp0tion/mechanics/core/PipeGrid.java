@@ -131,8 +131,9 @@ import java.util.Set;
  *     (N14-2, N23-1). Pumps pushing through the same pipe add up and share it (N18-1): among pumps
  *     whose cycles run in the same tick, the pump nearer to the shared pipe (fewer steps) goes
  *     first, equal ones by connection order: the pumps' placement order (N26-4, N28-17). The
- *     log-fueled pumps' cycles are aligned to the same ticks (N28-16, {@link #runTick}).
- *     TODO(confirm): a manual pump's click runs in its own tick and takes the cap in time order.</li>
+ *     log-fueled pumps' cycles are aligned to the same ticks (N28-16, {@link #runTick}). A manual
+ *     pump's click pushes in the next tick (N28-21): within a cycle window, whoever pushes first takes
+ *     a cell's cap first.</li>
  *     <li>When the fluid reaches a new pipe, the tier conditions are judged against the lowest tier
  *     of the network it comes from and that pipe (N12-4, N14-1); if they fail, only that pipe breaks
  *     and only the share headed into it is lost.</li>
@@ -169,13 +170,8 @@ import java.util.Set;
  *     goes to the other destinations; with none left the pump stops (N7-4).</li>
  * </ul>
  *
- * <h2>Compatibility mode (N26-1)</h2>
- * {@link #setCompatMode} switches to the old rules, for comparison tests only: the remainder of a
- * split goes one unit each to the nearest destinations over all of them (N7-2), empty pipes fill
- * without the speed limit, and pumps take shared caps in the order they run (connection order).
- * TODO(confirm) G17: it also keeps the old fill of the destinations' paths only (no dead-end
- * branches, N28-6 left out), so the exact comparison with the old engine holds; the dead-end fill
- * is tested apart.
+ * <p>The engine is verified by tests of its own rules only (N28-20, replacing the comparison with
+ * the engine before the ECS restructure, N26-1).
  */
 public final class PipeGrid implements PumpHost {
 
@@ -243,7 +239,6 @@ public final class PipeGrid implements PumpHost {
 
     private final PipeTierRules tierRules;
     private Listener listener = NO_LISTENER;
-    private boolean compatMode;
     private TileLoadedLookup loadedLookup;
 
     // World: the cell index and the references to the components (N22-2).
@@ -337,19 +332,6 @@ public final class PipeGrid implements PumpHost {
     }
 
     /**
-     * The comparison-only compatibility mode (N26-1): the old rules (remainder to the nearest over
-     * all destinations, N7-2; empty pipes fill without the speed limit; pumps take shared caps in
-     * the order they run). Never set by the game.
-     */
-    public void setCompatMode(boolean compatMode) {
-        this.compatMode = compatMode;
-    }
-
-    public boolean isCompatMode() {
-        return compatMode;
-    }
-
-    /**
      * Where the engine asks whether a tile's region is loaded (the game's region manager). Without
      * one, a tile counts as unloaded from the moment a part on it unloads until a part on it loads.
      */
@@ -365,7 +347,6 @@ public final class PipeGrid implements PumpHost {
     // ---------------------------------------------------------------- clock and systems
 
     /** One game tick of the clock only (the cycle windows of the transport cap, N14-2). */
-    @Override
     public void tick() {
         tick++;
     }
@@ -395,12 +376,11 @@ public final class PipeGrid implements PumpHost {
      *     the pump's {@code enabled} (N11-3). Every log-fueled pump of the level pushes on the same
      *     ticks (N28-16): one global phase, every cycle, when the engine tick is a multiple of the
      *     cycle (20 ticks); a pump placed or loaded in between waits for the next one, and merges or
-     *     splits need no realignment. TODO(confirm): manual pumps keep their click timing (a click
-     *     runs in the next tick, N22-5), not aligned. The compatibility mode keeps each pump's own
-     *     phase (TODO(confirm) G17).</li>
-     *     <li>Clicks queued since the last tick (manual pumps).</li>
-     *     <li>Push: the pumps due now, ordered for the shared caps (N26-4; connection order in the
-     *     compatibility mode). Hints are repaired as the pumps use them (N25-4).</li>
+     *     splits need no realignment.</li>
+     *     <li>Clicks queued since the last tick: a manual pump's click pushes in the next tick, not
+     *     on the global push tick (N28-21, N22-5).</li>
+     *     <li>Push: the pumps due now, ordered for the shared caps (N26-4). Hints are repaired as the
+     *     pumps use them (N25-4).</li>
      * </ol>
      *
      * @return the results of the cycles that ran, by pump tile
@@ -410,8 +390,7 @@ public final class PipeGrid implements PumpHost {
         List<Pump> due = new ArrayList<>();
         Set<Pump> clicked = Collections.newSetFromMap(new IdentityHashMap<Pump, Boolean>());
         for (Pump pump : new ArrayList<>(pumps.values())) {
-            PumpResult timers = compatMode ? pump.advanceTimers()
-                    : pump.advanceTimersAligned(Math.floorMod(tick, pump.getTier().getCycleTicks()) == 0);
+            PumpResult timers = pump.advanceTimers(Math.floorMod(tick, pump.getTier().getCycleTicks()) == 0);
             if (timers == null) {
                 due.add(pump);
             }
@@ -439,12 +418,11 @@ public final class PipeGrid implements PumpHost {
      * The order of the pumps whose cycles run in this tick (N26-4): where two of them push through
      * the same pipe, the one with fewer steps to it goes first, equal ones by connection order; the
      * pipe compared is the shared one nearest to both. Pumps sharing nothing keep connection order.
-     * The compatibility mode keeps connection order (the old engine: the pump that runs first).
      */
     List<Pump> orderForCaps(List<Pump> due) {
         List<Pump> byConnection = new ArrayList<>(due);
         byConnection.sort(Comparator.comparingLong(this::connectionOf));
-        if (compatMode || byConnection.size() < 2) {
+        if (byConnection.size() < 2) {
             return byConnection;
         }
         if (byConnection.equals(lastDue) && lastOrderChanges == changes) {
@@ -803,8 +781,8 @@ public final class PipeGrid implements PumpHost {
      * Adds a pipe with saved state, its region being loaded, or updates the pipe there with it (a
      * pipe of the same tier keeps its object, its network is regrouped). Saved hints are kept
      * (N25-6); where they disagree with the pipes around, the destinations concerned are searched
-     * again when used. {@code loaded} false (the old engine's mirror of an unloaded region) adds
-     * nothing: this engine holds no mirror (N23-2); it unloads the pipe there, if any.
+     * again when used. {@code loaded} false adds nothing: this engine holds no mirror of unloaded
+     * regions (N23-2); it unloads the pipe there, if any.
      *
      * @return the pipe, or {@code null} when {@code loaded} is false
      */
@@ -2802,8 +2780,7 @@ public final class PipeGrid implements PumpHost {
     /**
      * The destinations of one push from {@code pump} with {@code fluid}: valves reached along the
      * hints through pipes that can carry it, excluding the tanks the pump is linked to for pulling.
-     * With at least one destination, the ends of the dead-end branches are filled too (N28-6), except
-     * in the compatibility mode (TODO(confirm) G17, see the class comment).
+     * With at least one destination, the ends of the dead-end branches are filled too (N28-6).
      */
     @Override
     public PushPlan planPush(Pump pump, FluidType fluid) {
@@ -2822,7 +2799,7 @@ public final class PipeGrid implements PumpHost {
                 destinations.add(route);
             }
         }
-        List<Route> branches = compatMode || destinations.isEmpty() ? Collections.<Route>emptyList()
+        List<Route> branches = destinations.isEmpty() ? Collections.<Route>emptyList()
                 : branchRoutes(pump, fluid, destinations);
         return new GridPushPlan(pump, fluid, destinations, branches);
     }
@@ -2996,8 +2973,7 @@ public final class PipeGrid implements PumpHost {
             }
             int remaining = amount;
             while (remaining > 0 && !active.isEmpty()) {
-                Map<Route, Integer> shares = compatMode ? nearestFirst(remaining, active)
-                        : splitAtJunctions(remaining, active, ledger);
+                Map<Route, Integer> shares = splitAtJunctions(remaining, active, ledger);
                 int used = 0;
                 int held = 0;
                 List<Route> saturated = new ArrayList<>();
@@ -3039,18 +3015,6 @@ public final class PipeGrid implements PumpHost {
             }
             int frontier = advance(route, ledger);
             return frontier >= 0 && frontier < route.path.length ? 1 : 0;
-        }
-
-        /** The old rule (compatibility mode, N7-2): equal shares, the remainder one unit each to the nearest. */
-        private Map<Route, Integer> nearestFirst(int amount, List<Route> active) {
-            Map<Route, Integer> shares = new IdentityHashMap<>();
-            int count = active.size();
-            int base = amount / count;
-            int extra = amount % count;
-            for (int i = 0; i < count; i++) {
-                shares.put(active.get(i), base + (i < extra ? 1 : 0));
-            }
-            return shares;
         }
 
         /**
@@ -3162,7 +3126,7 @@ public final class PipeGrid implements PumpHost {
                 if (frontier < path.length) {
                     PipeNode node = (PipeNode) path[frontier];
                     if (ledger.amount(node) == 0) {
-                        if (!compatMode && !mayReach(route, frontier, node, ledger)) {
+                        if (!mayReach(route, frontier, node, ledger)) {
                             // The front advanced as far as the speed allows in this cycle (N28-7).
                             heldBySpeed = true;
                             break;

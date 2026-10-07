@@ -17,7 +17,7 @@ final class PumpPushTest {
 
     public static void testOnlyFrontierPipesAreUpdated() {
         // Pump at (0,0), five pipes (1..5, 0) holding 20 each, valve at (6, 0).
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 5, 0, MineralTier.COPPER);
         TankValve valve = Fluids.valve(1000);
@@ -45,7 +45,7 @@ final class PumpPushTest {
     }
 
     public static void testPartlyFilledFrontierPipe() {
-        EngineApi grid = Engines.create(Fluids.uniform(30));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(30));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 4, 0, MineralTier.COPPER);
         grid.placeValve(5, 0, Fluids.valve(1000));
@@ -59,22 +59,28 @@ final class PumpPushTest {
         Check.equal(2, grid.getPipe(1, 0, PipeLayer.BASE).getWriteCount(), "full pipe untouched");
     }
 
-    public static void testDeadEndBranchesAreNotFilled() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+    public static void testDeadEndBranchesFillToo() {
+        // N28-6: the empty dead-end branch (1,1), (1,2) fills along with the path to the valve; while
+        // filling, (1,0) gives each direction one equal amount (N28-8).
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 2, 0, MineralTier.COPPER);
         Fluids.baseLine(grid, 1, 1, 1, MineralTier.COPPER);
         Fluids.baseLine(grid, 1, 1, 2, MineralTier.COPPER);
         grid.placeValve(3, 0, Fluids.valve(1000));
         Fluids.cycle(pump);
+        Check.equal(20, grid.getPipe(1, 0, PipeLayer.BASE).getAmount(), "both directions' amounts fill (1,0) first");
         Fluids.cycle(pump);
-        Check.equal(0, grid.getPipe(1, 1, PipeLayer.BASE).getAmount(), "branch without destination");
-        Check.equal(0, grid.getPipe(1, 2, PipeLayer.BASE).getAmount(), "branch without destination");
-        Check.isNull(grid.getNetwork(1, 2, PipeLayer.BASE), "not reached: no network (N13-1)");
+        Check.equal(10, grid.getPipe(2, 0, PipeLayer.BASE).getAmount(), "toward the valve");
+        Check.equal(10, grid.getPipe(1, 1, PipeLayer.BASE).getAmount(), "into the dead end");
+        Fluids.cycle(pump);
+        Fluids.cycle(pump);
+        Check.equal(10, grid.getPipe(1, 2, PipeLayer.BASE).getAmount(), "its end reached");
+        Check.isTrue(grid.getNetwork(1, 2, PipeLayer.BASE) == pump.getNetwork(), "reached: in the pump's network (N13-1)");
     }
 
     public static void testRemovingAPipeRecomputesThePaths() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 3, 0, MineralTier.COPPER);
         TankValve valve = Fluids.valve(1000);
@@ -92,7 +98,7 @@ final class PumpPushTest {
 
     public static void testPushThroughUndergroundPipes() {
         // Pump -> basic pipe (1,0) -> underground (1,0)..(3,0) -> valve above (3,0).
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         Fluids.line(grid, 1, 3, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
@@ -110,7 +116,7 @@ final class PumpPushTest {
     // ---------- distribution (N7-2) ----------
 
     /** Pump (0,0), full pipes (1..4, 0), valves at distance 1, 3 and 4. */
-    private static TankValve[] threeDestinations(EngineApi grid, Pump[] pumpOut, PumpTier tier) {
+    private static TankValve[] threeDestinations(PipeGrid grid, Pump[] pumpOut, PumpTier tier) {
         pumpOut[0] = Fluids.fueledPump(grid, 0, 0, tier, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 4, 0, MineralTier.COPPER);
         Fluids.fill(grid, 1, 4, 0, PipeLayer.BASE, FluidType.FRESHWATER);
@@ -123,33 +129,36 @@ final class PumpPushTest {
         return new TankValve[]{near, middle, far};
     }
 
-    public static void testEqualSplitWithRemainderToTheNearest() {
-        EngineApi grid = Engines.create(Fluids.uniform(40));
+    public static void testRemainderGoesByDirectionAtTheJunction() {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
         Pump[] pump = new Pump[1];
         TankValve[] valves = threeDestinations(grid, pump, PumpTier.FIRE);
         Check.equal(1, grid.getPathDistance(pump[0], valves[0], FluidType.FRESHWATER));
         Check.equal(3, grid.getPathDistance(pump[0], valves[1], FluidType.FRESHWATER));
         Check.equal(4, grid.getPathDistance(pump[0], valves[2], FluidType.FRESHWATER));
         PumpResult result = Fluids.cycle(pump[0]);
-        Check.equal(7, result.getDelivered(valves[0]), "20 / 3 = 6 r 2: nearest +1");
-        Check.equal(7, result.getDelivered(valves[1]), "second nearest +1");
-        Check.equal(6, result.getDelivered(valves[2]), "farthest");
+        // (1,0): 20 / 3 = 6 r 2 by destinations (N24-3); east (middle, far) comes before south (near),
+        // one unit per destination (N27-1): east 14, near 6. (3,0): 14 / 2 = 7 each.
+        Check.equal(6, result.getDelivered(valves[0]), "near: the south direction, after east");
+        Check.equal(7, result.getDelivered(valves[1]), "middle");
+        Check.equal(7, result.getDelivered(valves[2]), "far");
         Check.equal(0, result.getPipesUpdated(), "full paths");
     }
 
-    public static void testSingleRemainderUnitGoesToTheNearest() {
-        EngineApi grid = Engines.create(Fluids.uniform(40));
+    public static void testSingleRemainderUnitGoesByDirection() {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
         Pump[] pump = new Pump[1];
         TankValve[] valves = threeDestinations(grid, pump, PumpTier.ADVANCED_FIRE);
         PumpResult result = Fluids.cycle(pump[0]);
-        Check.equal(14, result.getDelivered(valves[0]), "40 / 3 = 13 r 1");
-        Check.equal(13, result.getDelivered(valves[1]));
-        Check.equal(13, result.getDelivered(valves[2]));
+        // (1,0): 40 / 3 = 13 r 1: east first, 27; (3,0): 27 / 2 = 13 r 1: east (far) first.
+        Check.equal(13, result.getDelivered(valves[0]), "near");
+        Check.equal(13, result.getDelivered(valves[1]), "middle");
+        Check.equal(14, result.getDelivered(valves[2]), "far: east at both junctions");
     }
 
     public static void testEqualDistanceTieBreaksByTile() {
         // Three valves around the pump's only pipe (1,0): all at distance 1.
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         Fluids.fill(grid, 1, 1, 0, PipeLayer.BASE, FluidType.FRESHWATER);
@@ -166,20 +175,21 @@ final class PumpPushTest {
     }
 
     public static void testShareAFullTankCannotTakeGoesToTheOthers() {
-        EngineApi grid = Engines.create(Fluids.uniform(40));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
         Pump[] pump = new Pump[1];
         TankValve[] valves = threeDestinations(grid, pump, PumpTier.ADVANCED_FIRE);
         valves[0].getTank().insert(FluidType.FRESHWATER, 998);
         PumpResult result = Fluids.cycle(pump[0]);
         Check.equal(2, result.getDelivered(valves[0]), "only room for 2");
-        Check.equal(19, result.getDelivered(valves[1]), "13, then 6 of the 12 the near tank could not take");
-        Check.equal(19, result.getDelivered(valves[2]));
+        // 13 / 13 / 14 first; the 11 the near tank could not take split again: 5 and 6 (east first).
+        Check.equal(18, result.getDelivered(valves[1]), "13, then 5");
+        Check.equal(20, result.getDelivered(valves[2]), "14, then 6");
         Check.equal(40, result.getMoved(), "everything delivered");
     }
 
     public static void testEachShareFillsItsOwnPathFirst() {
         // Near valve (distance 1) has a full path; the far valve's path is not full yet.
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 3, 0, MineralTier.COPPER);
         Fluids.fill(grid, 1, 1, 0, PipeLayer.BASE, FluidType.FRESHWATER);
@@ -198,7 +208,7 @@ final class PumpPushTest {
 
     public static void testLowestTransportAmountCapsThePathPerCycle() {
         // Gold (30), copper (10), gold (30): the advanced pump's 40 is capped at 10 per cycle.
-        EngineApi grid = Engines.create(Fluids.TIERS);
+        PipeGrid grid = new PipeGrid(Fluids.TIERS);
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.ADVANCED_FIRE, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.GOLD);
         grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.COPPER);
@@ -215,7 +225,7 @@ final class PumpPushTest {
 
     public static void testPumpsOnOnePathShareTheCap() {
         // Two fire pumps push into the same copper (10) path: together at most 10 per cycle (N18-1).
-        EngineApi grid = Engines.create(Fluids.TIERS);
+        PipeGrid grid = new PipeGrid(Fluids.TIERS);
         Pump a = Fluids.fueledPump(grid, 1, 0, PumpTier.FIRE, FluidType.LAVA);
         Pump b = Fluids.fueledPump(grid, 1, 2, PumpTier.FIRE, FluidType.LAVA);
         Fluids.baseLine(grid, 1, 3, 1, MineralTier.COPPER);
@@ -223,27 +233,27 @@ final class PumpPushTest {
         TankValve valve = Fluids.valve(10000);
         grid.placeValve(4, 1, valve);
         int before = valve.getTank().getAmount();
-        PumpResult[] results = Fluids.tickAll(grid, a, b);
-        Check.equal(10, results[0].getDelivered(valve), "the first pump takes the cap");
+        PumpResult[] results = Fluids.push(grid, a, b);
+        Check.equal(10, results[0].getDelivered(valve), "the first pump takes the cap (equal steps: placed first, N28-17)");
         Check.equal(Status.NO_DESTINATION, results[1].getStatus(), "nothing left for the second this cycle");
         Check.equal(before + 10, valve.getTank().getAmount(), "10 per cycle in total");
     }
 
     public static void testPumpsAddUpUnderTheCap() {
-        EngineApi grid = Engines.create(Fluids.uniform(80));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(80));
         Pump a = Fluids.fueledPump(grid, 1, 0, PumpTier.FIRE, FluidType.LAVA);
         Pump b = Fluids.fueledPump(grid, 1, 2, PumpTier.FIRE, FluidType.LAVA);
         Fluids.baseLine(grid, 1, 3, 1, MineralTier.COPPER);
         Fluids.fill(grid, 1, 3, 1, PipeLayer.BASE, FluidType.LAVA);
         TankValve valve = Fluids.valve(10000);
         grid.placeValve(4, 1, valve);
-        Fluids.tickAll(grid, a, b);
+        Fluids.push(grid, a, b);
         Check.equal(40, valve.getTank().getAmount(), "two fire pumps: 20 + 20 (N18-1)");
     }
 
     public static void testIronPathCarriesFourFirePumps() {
         // Five fire pumps feed one iron line; iron's 80 (N19-8) caps the last pipe at four pumps' worth.
-        EngineApi grid = Engines.create(PipeTierRules.TABLE);
+        PipeGrid grid = new PipeGrid(PipeTierRules.TABLE);
         Fluids.baseLine(grid, 0, 5, 0, MineralTier.IRON);
         Fluids.fill(grid, 0, 5, 0, PipeLayer.BASE, FluidType.FRESHWATER);
         Pump[] pumps = new Pump[5];
@@ -252,16 +262,14 @@ final class PumpPushTest {
         }
         TankValve valve = Fluids.valve(100000);
         grid.placeValve(6, 0, valve);
-        Fluids.tickAll(grid, pumps);
+        Fluids.push(grid, pumps);
         Check.equal(80, valve.getTank().getAmount(), "4 x 20 = 80 per cycle");
-        for (int i = 0; i < 20; i++) {
-            Fluids.tickAll(grid, pumps);
-        }
+        Fluids.push(grid, pumps);
         Check.equal(160, valve.getTank().getAmount(), "again 80 the next cycle");
     }
 
     public static void testSpeedDoesNotDependOnTheNumberOfSources() {
-        EngineApi grid = Engines.create(Fluids.uniform(80));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(80));
         TankStorage tank = Fluids.tank(1000);
         tank.insert(FluidType.FRESHWATER, 500);
         grid.placeValve(0, 1, Fluids.valveOf(tank));
@@ -283,7 +291,7 @@ final class PumpPushTest {
     public static void testOnlyTheNewlyReachedPipeBreaksAndOnlyItsShareIsLost() {
         // Copper and iron cannot carry lava here. Valve A next to the full gold entry pipe; valve B
         // behind a copper pipe that the lava has not reached yet.
-        EngineApi grid = Engines.create(Fluids.breaking(20, FluidType.LAVA, MineralTier.GOLD));
+        PipeGrid grid = new PipeGrid(Fluids.breaking(20, FluidType.LAVA, MineralTier.GOLD));
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.LAVA);
         Fluids.Logs logs = new Fluids.Logs(5);
         pump.setFuelSupply(logs);
@@ -313,7 +321,7 @@ final class PumpPushTest {
     public static void testTheCheckUsesTheNetworksLowestTier() {
         // A copper pipe already holds lava (saved from earlier); the gold pipe after it is judged by
         // the network's lowest tier, copper (N12-4), and breaks.
-        EngineApi grid = Engines.create(Fluids.breaking(20, FluidType.LAVA, MineralTier.GOLD));
+        PipeGrid grid = new PipeGrid(Fluids.breaking(20, FluidType.LAVA, MineralTier.GOLD));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.LAVA);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.GOLD);
@@ -325,7 +333,7 @@ final class PumpPushTest {
     }
 
     public static void testCarriedFluidDoesNotBreak() {
-        EngineApi grid = Engines.create(Fluids.breaking(20, FluidType.LAVA, MineralTier.GOLD));
+        PipeGrid grid = new PipeGrid(Fluids.breaking(20, FluidType.LAVA, MineralTier.GOLD));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 2, 0, MineralTier.COPPER);
         grid.placeValve(3, 0, Fluids.valve(1000));
@@ -336,8 +344,8 @@ final class PumpPushTest {
 
     // ---------- unloaded regions (N14-3, N15-1) ----------
 
-    private static EngineApi unloadedSetup(Pump[] pumpOut, TankValve[] valveOut) {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+    private static PipeGrid unloadedSetup(Pump[] pumpOut, TankValve[] valveOut) {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         pumpOut[0] = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 5, 0, MineralTier.COPPER);
         valveOut[0] = Fluids.valve(1000);
@@ -345,59 +353,10 @@ final class PumpPushTest {
         return grid;
     }
 
-    public static void testUnloadedPipeThatIsNotFullIsADeadEnd() {
-        if (!Engines.isLegacy()) {
-            // The legacy engine's level mirror; the new engine uses the network summary (N23-2,
-            // tested in NetworkSummaryTest).
-            return;
-        }
-        Pump[] pump = new Pump[1];
-        TankValve[] valve = new TankValve[1];
-        EngineApi grid = unloadedSetup(pump, valve);
-        Fluids.fill(grid, 1, 2, 0, PipeLayer.BASE, FluidType.FRESHWATER);
-        grid.unloadPipe(3, 0, PipeLayer.BASE);
-        Check.equal(Status.NO_DESTINATION, Fluids.cycle(pump[0]).getStatus(), "N14-3");
-        Check.equal(0, grid.getPipe(3, 0, PipeLayer.BASE).getWriteCount(), "never written");
-    }
-
-    public static void testFullUnloadedRegionIsSkipped() {
-        if (!Engines.isLegacy()) {
-            // The legacy engine's level mirror; the new engine uses the network summary (N23-2,
-            // tested in NetworkSummaryTest).
-            return;
-        }
-        Pump[] pump = new Pump[1];
-        TankValve[] valve = new TankValve[1];
-        EngineApi grid = unloadedSetup(pump, valve);
-        Fluids.fill(grid, 1, 5, 0, PipeLayer.BASE, FluidType.FRESHWATER);
-        grid.unloadPipe(2, 0, PipeLayer.BASE);
-        grid.unloadPipe(3, 0, PipeLayer.BASE);
-        int writes = grid.getPipe(2, 0, PipeLayer.BASE).getWriteCount();
-        Check.equal(20, Fluids.cycle(pump[0]).getDelivered(valve[0]), "every pipe of the path there is full (N15-1)");
-        Check.equal(writes, grid.getPipe(2, 0, PipeLayer.BASE).getWriteCount(), "not written");
-    }
-
-    public static void testSeveralUnloadedRegionsInARowAreSkipped() {
-        if (!Engines.isLegacy()) {
-            // The legacy engine's level mirror; the new engine uses the network summary (N23-2,
-            // tested in NetworkSummaryTest).
-            return;
-        }
-        Pump[] pump = new Pump[1];
-        TankValve[] valve = new TankValve[1];
-        EngineApi grid = unloadedSetup(pump, valve);
-        Fluids.fill(grid, 1, 4, 0, PipeLayer.BASE, FluidType.FRESHWATER);
-        grid.unloadPipe(2, 0, PipeLayer.BASE);
-        grid.unloadPipe(4, 0, PipeLayer.BASE);
-        PumpResult result = Fluids.cycle(pump[0]);
-        Check.equal(20, result.getPipeFill(), "continues in the next loaded pipe (N15-1 ②)");
-        Check.equal(20, grid.getPipe(5, 0, PipeLayer.BASE).getAmount());
-    }
-
     // ---------- stop rule (N7-4) and dead ends ----------
 
     public static void testNoDestinationStopsThePumpWithoutLightingALog() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.Logs logs = new Fluids.Logs(3);
         pump.setFuelSupply(logs);
@@ -414,7 +373,7 @@ final class PumpPushTest {
     }
 
     public static void testAllDestinationsFullStopsThePump() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.Logs logs = new Fluids.Logs(3);
         pump.setFuelSupply(logs);
@@ -431,7 +390,7 @@ final class PumpPushTest {
     }
 
     public static void testUnusableDestinationsCountAsNone() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 2, 0, MineralTier.COPPER);
         TankValve disabled = Fluids.valve(100);
@@ -452,7 +411,7 @@ final class PumpPushTest {
     }
 
     public static void testPipeWithAnotherFluidIsADeadEnd() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.baseLine(grid, 1, 2, 0, MineralTier.COPPER);
         Fluids.set(grid, 2, 0, PipeLayer.BASE, FluidType.LAVA, 3);
@@ -461,7 +420,7 @@ final class PumpPushTest {
     }
 
     public static void testUndergroundPipeNextToPumpIsNoDestination() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         grid.placeValve(1, 0, Fluids.valve(100));
@@ -471,7 +430,7 @@ final class PumpPushTest {
     // ---------- tier restrictions (12-1, 12-5, 12-6, N17-5) ----------
 
     private static PumpResult pumpOnce(PumpTier tier, FluidType fluid) {
-        EngineApi grid = Engines.create(Fluids.uniform(40));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
         Pump pump = Fluids.fueledPump(grid, 0, 0, tier, fluid);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placeValve(2, 0, Fluids.valve(100));
@@ -497,7 +456,7 @@ final class PumpPushTest {
     }
 
     public static void testTierRestrictionWhenPullingFromATank() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankStorage sourceTank = Fluids.tank(100);
         sourceTank.insert(FluidType.SLIME, 50);
         grid.placeValve(-1, 0, Fluids.valveOf(sourceTank));
@@ -515,7 +474,7 @@ final class PumpPushTest {
     // ---------- tank sources ----------
 
     public static void testPumpingOutOfALinkedTank() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankStorage sourceTank = Fluids.tank(100);
         sourceTank.insert(FluidType.LAVA, 25);
         grid.placeValve(0, 1, Fluids.valveOf(sourceTank));
@@ -543,7 +502,7 @@ final class PumpPushTest {
         // The controller breaks in a tick in which the pump runs before the valve looks its tank up
         // again: the valve still points at the old storage, which is released (N19-2: the fluid in it
         // is lost, nothing more goes in).
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         TankStorage tank = Fluids.tank(1000);
@@ -559,7 +518,7 @@ final class PumpPushTest {
     }
 
     public static void testNothingIsPulledFromARemovedControllersTank() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankStorage source = Fluids.tank(100);
         source.insert(FluidType.FRESHWATER, 100);
         grid.placeValve(0, 1, Fluids.valveOf(source));
@@ -576,7 +535,7 @@ final class PumpPushTest {
     }
 
     public static void testPumpWithoutSource() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = new Pump(PumpTier.FIRE);
         pump.setFuelSupply(new Fluids.Logs(5));
         grid.placePump(0, 0, pump);
@@ -588,7 +547,7 @@ final class PumpPushTest {
     // ---------- fuel (N6, N18-4) and timing (N3) ----------
 
     private static int pumpUntilOutOfFuel(PumpTier tier) {
-        EngineApi grid = Engines.create(Fluids.uniform(40));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
         Pump pump = Fluids.pump(grid, 0, 0, tier, FluidType.LAVA);
         Fluids.Logs logs = new Fluids.Logs(1);
         pump.setFuelSupply(logs);
@@ -619,7 +578,7 @@ final class PumpPushTest {
     }
 
     public static void testALitLogBurnsOnTimeEvenWhenThePumpStops() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         Fluids.Logs logs = new Fluids.Logs(5);
         pump.setFuelSupply(logs);
@@ -644,7 +603,7 @@ final class PumpPushTest {
     }
 
     public static void testFirePumpRunsEveryTwentyTicks() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placeValve(2, 0, Fluids.valve(10000));
@@ -656,25 +615,26 @@ final class PumpPushTest {
                 pumpedAt = tick;
             }
         }
-        Check.equal(61, pumpedAt, "cycles at ticks 1, 21, 41, 61");
-        Check.equal(41, previous);
+        Check.equal(60, pumpedAt, "cycles on the global push ticks 20, 40, 60 (N28-16)");
+        Check.equal(40, previous);
     }
 
     public static void testWireSwitchesTheFirePumpOff() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placeValve(2, 0, Fluids.valve(10000));
         pump.setEnabled(false);
         for (int i = 0; i < 40; i++) {
-            Check.equal(Status.DISABLED, Fluids.tickAll(grid, pump)[0].getStatus());
+            Check.equal(Status.WAITING, Fluids.tickAll(grid, pump)[0].getStatus(), "no cycle while off");
         }
+        Check.equal(0, grid.getPipe(1, 0, PipeLayer.BASE).getAmount(), "nothing pushed");
         pump.setEnabled(true);
-        Check.equal(Status.PUMPED, Fluids.tickAll(grid, pump)[0].getStatus(), "on again (11-3)");
+        Check.equal(Status.PUMPED, Fluids.push(grid, pump)[0].getStatus(), "on again (11-3)");
     }
 
     public static void testManualPumpClickCooldown() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.MANUAL, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         TankValve valve = Fluids.valve(1000);

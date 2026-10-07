@@ -45,9 +45,10 @@ import java.util.Set;
  *     N7-4 conditions hold).</li>
  *     <li>Pull up to one cycle's amount (N3-2, N6-1, N6-3) and push it ({@link PipeGrid}).</li>
  * </ol>
- * The manual pump runs a cycle per {@link #click}, at most every 20 ticks (N3-3); the log-fueled
- * pumps run one every 20 ticks from {@link #tick} (N6-1, N6-3); a cycle that cannot run is tried
- * again at the next interval. The game calls {@link #tick} once per game tick for every pump.
+ * The manual pump runs a cycle per {@link #click}, at most every 20 ticks (N3-3), in the engine's
+ * next tick (N28-21); the log-fueled pumps run one every 20 ticks, on the engine's global push tick
+ * (N6-1, N6-3, N28-16; {@link #advanceTimers}); a cycle that cannot run is tried again at the next
+ * one. The pipe engine's systems drive every pump ({@link PipeGrid#runTick}, N22-5).
  * A pump's speed does not depend on how many sources it has (N18-1).
  *
  * <p>Wire (11-3, N11-3): from tier 2 up a wire signal switches the pump off; the game maps the
@@ -449,47 +450,12 @@ public class Pump extends LiquidStorage {
     // ------------------------------------------------------------------ running
 
     /**
-     * One game tick. A lit log burns down every tick (N18-4). Log-fueled pumps run a cycle every
-     * {@link PumpTier#getCycleTicks()} ticks while enabled; for the manual pump this only counts down
-     * the click cooldown.
+     * The timer part of one game tick (the pipe engine's timer system, N22-5): the lit log burns down
+     * (N18-4) and the click cooldown counts (N3-3). A log-fueled pump's cycle is due only on the
+     * engine's global push tick, {@code cycleTick} (N28-16). Returns {@code null} when a cycle is due
+     * now (the engine runs it, {@link #runCycle}), else what the tick did instead.
      */
-    public PumpResult tick() {
-        PumpResult timers = advanceTimers();
-        return timers != null ? timers : runCycle();
-    }
-
-    /**
-     * The timer part of {@link #tick} (the pipe engine's timer system, N22-5): the lit log burns
-     * down (N18-4) and the cycle counter advances. Returns {@code null} when a cycle is due now
-     * (the counter starts over and the engine runs the cycle, {@link #runCycle}), else what the
-     * tick did instead.
-     */
-    PumpResult advanceTimers() {
-        if (burnTicksLeft > 0) {
-            burnTicksLeft--;
-        }
-        if (ticksSinceCycle < tier.getCycleTicks()) {
-            ticksSinceCycle++;
-        }
-        if (tier.getPower() == PumpTier.Power.HAND_CLICK) {
-            return PumpResult.WAITING;
-        }
-        if (!enabled) {
-            return PumpResult.DISABLED;
-        }
-        if (ticksSinceCycle < tier.getCycleTicks()) {
-            return PumpResult.WAITING;
-        }
-        ticksSinceCycle = 0;
-        return null;
-    }
-
-    /**
-     * The timer part with the cycles aligned (N28-16): as {@link #advanceTimers}, but a log-fueled
-     * pump's cycle is due only when {@code cycleTick} (the engine's shared cycle tick), so the pumps
-     * of a network push in the same tick.
-     */
-    PumpResult advanceTimersAligned(boolean cycleTick) {
+    PumpResult advanceTimers(boolean cycleTick) {
         if (burnTicksLeft > 0) {
             burnTicksLeft--;
         }

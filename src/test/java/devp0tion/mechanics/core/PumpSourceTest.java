@@ -40,7 +40,7 @@ final class PumpSourceTest {
     }
 
     public static void testPlacementIsRejectedOnlyWhenFluidsWouldMix() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         grid.placeValve(1, 0, valveWith(FluidType.LAVA, 10));
         grid.placeValve(-1, 0, valveWith(null, 0));
         Check.equal(PipeGrid.Check.OK, grid.checkPumpPlacement(0, 0, null), "lava tank and empty tank");
@@ -55,7 +55,7 @@ final class PumpSourceTest {
     // ---------- pull order (N19-1) and later fluids (N17-3) ----------
 
     public static void testFirstConnectedSourceFirstThenTheNext() {
-        EngineApi grid = Engines.create(Fluids.uniform(40));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
         TankValve first = valveWith(FluidType.FRESHWATER, 30);
         TankValve second = valveWith(FluidType.FRESHWATER, 100);
         grid.placeValve(0, -1, first);
@@ -77,7 +77,7 @@ final class PumpSourceTest {
     }
 
     public static void testEmptySourceFilledWithAnotherFluidStaysConnected() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve water = valveWith(FluidType.FRESHWATER, 40);
         TankValve empty = valveWith(null, 0);
         grid.placeValve(0, -1, water);
@@ -281,7 +281,7 @@ final class PumpSourceTest {
 
     public static void testPumpKeepsItsInfiniteSourceWhileTheAreaUnloads() {
         Fluids.Liquids lake = uniformLake();
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = new Pump(PumpTier.FIRE);
         pump.setFuelSupply(new Fluids.Logs(10));
         LiquidTileSource tile = new LiquidTileSource(lake, 2, 2);
@@ -318,7 +318,7 @@ final class PumpSourceTest {
     public static void testDeepSeaNeverRunsOut() {
         // N27-5: a small patch of deep seawater (crude oil) with land around it: the 5x5 is not one
         // fluid, but the deep sea is inexhaustible and never turns into dirt.
-        EngineApi grid = Engines.create(Fluids.uniform(40));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
         Fluids.Liquids sea = new Fluids.Liquids(
                 ".....",
                 ".ooo.",
@@ -362,7 +362,7 @@ final class PumpSourceTest {
     }
 
     public static void testPumpOnAShrinkingPond() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Fluids.Liquids pond = new Fluids.Liquids("fff");
         Pump pump = new Pump(PumpTier.MANUAL);
         pump.setTileSource(new LiquidTileSource(pond, 0, 0));
@@ -393,7 +393,7 @@ final class PumpSourceTest {
     }
 
     public static void testStaleSlotOfACutValveGivesNothing() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve valve = cutValveWith(FluidType.FRESHWATER, 100);
         grid.loadValve(0, -1, valve);
         Pump pump = new Pump(PumpTier.FIRE);
@@ -411,7 +411,7 @@ final class PumpSourceTest {
     }
 
     public static void testRelinkedValveBecomesTheLastSource() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         grid.loadValve(0, -1, cutValveWith(FluidType.FRESHWATER, 100));
         Pump pump = new Pump(PumpTier.FIRE);
         pump.setTileSource(LiquidTileSource.infinite(FluidType.FRESHWATER));
@@ -424,7 +424,7 @@ final class PumpSourceTest {
     }
 
     public static void testLoadDropsSlotsBehindTheCutSidesOfThePump() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         grid.loadValve(0, -1, valveWith(FluidType.FRESHWATER, 100));
         grid.loadValve(0, 1, valveWith(FluidType.FRESHWATER, 100));
         Pump pump = new Pump(PumpTier.FIRE);
@@ -490,7 +490,7 @@ final class PumpSourceTest {
                 "ffffffffffff.",
                 ".............");
         CountingLiquids lookup = new CountingLiquids(strip);
-        EngineApi grid = Engines.create(Fluids.uniform(100));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(100));
         Pump pump = new Pump(PumpTier.ADVANCED_FIRE);
         pump.setFuelSupply(new Fluids.Logs(10));
         pump.setTileSource(new LiquidTileSource(lookup, 0, 1));

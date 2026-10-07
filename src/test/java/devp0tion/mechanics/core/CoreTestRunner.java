@@ -30,25 +30,7 @@ public final class CoreTestRunner {
             PumpSourceTest.class,
             PumpBaselineTest.class,
             TileBucketsTest.class,
-            ComparisonTest.class,
             NewEngineTest.class
-    };
-
-    /**
-     * The semantic tests of the pipe engine: run on the engine before the ECS restructure and on the
-     * new one in its compatibility mode (N22-6, N26-1). Tests of what only one of them has check
-     * {@link Engines#current} themselves.
-     */
-    private static final Class<?>[] ENGINE_TEST_CLASSES = {
-            PipeLinkTest.class,
-            PipeNetworkTest.class,
-            PumpPushTest.class,
-            PumpSourceTest.class,
-            PumpBaselineTest.class
-    };
-
-    /** Tests of the new engine only. */
-    private static final Class<?>[] NEW_ENGINE_TEST_CLASSES = {
     };
 
     private CoreTestRunner() {
@@ -57,13 +39,7 @@ public final class CoreTestRunner {
     public static void main(String[] args) {
         int[] passed = {0};
         List<String> failures = new ArrayList<>();
-        Engines.current = Engines.Kind.LEGACY;
         run(TEST_CLASSES, "", passed, failures);
-        Engines.current = Engines.Kind.NEW_COMPAT;
-        run(ENGINE_TEST_CLASSES, "[new engine, compat] ", passed, failures);
-        Engines.current = Engines.Kind.NEW;
-        run(NEW_ENGINE_TEST_CLASSES, "[new engine] ", passed, failures);
-        Engines.current = Engines.Kind.LEGACY;
         System.out.println();
         System.out.println(passed[0] + " passed, " + failures.size() + " failed");
         if (!failures.isEmpty()) {

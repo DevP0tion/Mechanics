@@ -20,7 +20,7 @@ final class PumpBaselineTest {
     }
 
     /** A fire pump at (0,0) whose sources are the valves north and south of it, connected while empty. */
-    private static Pump pumpWithNorthAndSouth(EngineApi grid, PumpTier tier, TankValve north, TankValve south) {
+    private static Pump pumpWithNorthAndSouth(PipeGrid grid, PumpTier tier, TankValve north, TankValve south) {
         grid.placeValve(0, -1, north);
         grid.placeValve(0, 1, south);
         Pump pump = new Pump(tier);
@@ -35,7 +35,7 @@ final class PumpBaselineTest {
 
     public static void testSourceOfAnotherFluidThanTheOutputCellIsDormant() {
         // QA F5: sources [A north, B south], water already in the pipe; A fills with lava, B with water.
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve a = emptyValve();
         TankValve b = emptyValve();
         Pump pump = pumpWithNorthAndSouth(grid, PumpTier.FIRE, a, b);
@@ -63,7 +63,7 @@ final class PumpBaselineTest {
     public static void testOnlySourcesOfTheBaselineAreSummed() {
         // Water in the output cell; sources [water 10, lava 100, water 100]: a cycle of 20 takes the
         // first water source's 10 and 10 from the other water source, nothing from the lava (N17-2).
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve water1 = emptyValve();
         TankValve lava = emptyValve();
         TankValve water2 = emptyValve();
@@ -90,7 +90,7 @@ final class PumpBaselineTest {
     }
 
     public static void testEmptyOutputCellTakesTheFirstSourceAndItsFluidBecomesTheBaseline() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve lava = emptyValve();
         TankValve water = emptyValve();
         Pump pump = pumpWithNorthAndSouth(grid, PumpTier.FIRE, lava, water);
@@ -115,7 +115,7 @@ final class PumpBaselineTest {
         // The output cell (1,0) is empty, the pipe after it holds water and the pump last pushed
         // water: the baseline is still the first source's lava, which enters the empty cell and the
         // valve linked to it.
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve lava = emptyValve();
         TankValve water = emptyValve();
         grid.placeValve(0, -1, lava);
@@ -144,7 +144,7 @@ final class PumpBaselineTest {
     public static void testOutputCellsOfDifferentFluidsKeepTheFirstSourcesFluid() {
         // N27-2: output cells east (water) and west (lava), and the pump never pushed: it chooses as
         // with empty output cells (first source in pull order) and pushes only where that fluid can go.
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve lava = emptyValve();
         TankValve water = emptyValve();
         Pump pump = pumpWithNorthAndSouth(grid, PumpTier.FIRE, lava, water);
@@ -166,7 +166,7 @@ final class PumpBaselineTest {
 
     public static void testOutputCellsOfDifferentFluidsKeepTheLastPushedFluid() {
         // N27-2: the fluid the pump last pushed stays the baseline while an output cell holds it.
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve lava = emptyValve();
         TankValve water = emptyValve();
         grid.placeValve(0, -1, lava);
@@ -205,7 +205,7 @@ final class PumpBaselineTest {
 
     public static void testLastPushedFluidNotInAnyOutputCellChoosesTheFirstSource() {
         // N27-2: the last pushed fluid (slime) is in no output cell: chosen as with empty output cells.
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve lava = emptyValve();
         TankValve water = emptyValve();
         grid.placeValve(0, -1, lava);
@@ -228,7 +228,7 @@ final class PumpBaselineTest {
     // ---------- N27-4: a valve switched off by wire is no source ----------
 
     public static void testWireDisabledValveBlocksPulling() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve source = Fluids.valve(1000);
         source.getTank().insert(FluidType.FRESHWATER, 100);
         grid.placeValve(0, -1, source);
@@ -257,7 +257,7 @@ final class PumpBaselineTest {
 
     public static void testWireDisabledValveLeavesTheOtherSources() {
         // N27-4: the switched-off valve is skipped like a dormant tank; the next source is used.
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve first = Fluids.valve(1000);
         TankValve second = Fluids.valve(1000);
         first.getTank().insert(FluidType.FRESHWATER, 100);
@@ -276,7 +276,7 @@ final class PumpBaselineTest {
     public static void testManualPumpOnLavaPullsTheWaterSource() {
         // A manual pump standing on lava, with a tank connected while empty and filled with water
         // later: the lava tile is dormant (12-6, N20-4), the water is pulled.
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve water = emptyValve();
         grid.placeValve(0, 1, water);
         Pump pump = new Pump(PumpTier.MANUAL);
@@ -307,7 +307,7 @@ final class PumpBaselineTest {
     }
 
     public static void testFirePumpSkipsASlimeTankAndPullsWater() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve slime = emptyValve();
         TankValve water = emptyValve();
         Pump pump = pumpWithNorthAndSouth(grid, PumpTier.FIRE, slime, water);
@@ -323,7 +323,7 @@ final class PumpBaselineTest {
     }
 
     public static void testOnlyFluidsTheTierCannotMoveLeftStopsWithoutFuel() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve slime = emptyValve();
         TankValve water = emptyValve();
         grid.placeValve(0, -1, slime);
@@ -344,7 +344,7 @@ final class PumpBaselineTest {
     public static void testOutputCellOfAFluidTheTierCannotMove() {
         // Lava from elsewhere in the manual pump's output cell: the baseline is lava, which the manual
         // pump cannot move, so its water source is dormant too (N20-4, N20-5).
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.MANUAL, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         Fluids.set(grid, 1, 0, PipeLayer.BASE, FluidType.LAVA, 5);

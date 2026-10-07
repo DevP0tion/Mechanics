@@ -5,7 +5,7 @@ import devp0tion.mechanics.core.PumpResult.Status;
 import java.util.Map;
 
 /**
- * The new engine's own rules, which the compatibility comparison leaves out on purpose (N26-1):
+ * The new engine's own rules:
  * the split at junctions (N24-3, N25-5, N27-1, N28-5, N28-8, N28-14), the fill speed (N25-1~N25-3,
  * N28-7, N28-9~N28-11), dead-end branches filling (N28-6), the cap order by distance (N26-4) and
  * the network summary for unloaded regions (N23-2, N28-1~N28-4); and its structure: cell hints
@@ -19,12 +19,6 @@ final class NewEngineTest {
 
     private static PipeGrid grid(PipeTierRules rules) {
         return new PipeGrid(rules);
-    }
-
-    private static PipeGrid compat(PipeTierRules rules) {
-        PipeGrid grid = new PipeGrid(rules);
-        grid.setCompatMode(true);
-        return grid;
     }
 
     private static Pump pump(PipeGrid grid, int x, int y, PumpTier tier) {
@@ -109,44 +103,24 @@ final class NewEngineTest {
         Check.equal(7, result.getDelivered(v[2]), "C: east face of J2, before south");
     }
 
-    public static void testCompatModeKeepsTheGlobalNearestFirstRemainder() {
-        PipeGrid grid = compat(Fluids.uniform(1000));
-        TankValve[] v = twoJunctions(grid);
-        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
-        PumpResult result = cycle(grid, pump);
-        // N7-2: 6 each, the remainder to the nearest: B (5), then C (6); A (10) gets none.
-        Check.equal(6, result.getDelivered(v[0]), "A: farthest");
-        Check.equal(7, result.getDelivered(v[1]), "B: nearest");
-        Check.equal(7, result.getDelivered(v[2]), "C: second nearest");
-    }
-
     public static void testPumpFacesTakeTheRemainderNorthEastSouthWest() {
         // Output pipes north, east and west of the pump, each to its own valve at distance 1.
-        for (boolean compatMode : new boolean[]{false, true}) {
-            PipeGrid grid = compatMode ? compat(Fluids.uniform(1000)) : grid(Fluids.uniform(1000));
-            grid.placePipe(0, -1, PipeLayer.BASE, MineralTier.IRON);
-            grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.IRON);
-            grid.placePipe(-1, 0, PipeLayer.BASE, MineralTier.IRON);
-            TankValve north = Fluids.valve(1000);
-            TankValve east = Fluids.valve(1000);
-            TankValve west = Fluids.valve(1000);
-            grid.placeValve(0, -2, north);
-            grid.placeValve(2, 0, east);
-            grid.placeValve(-2, 0, west);
-            fillAll(grid);
-            Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
-            PumpResult result = cycle(grid, pump);
-            if (compatMode) {
-                // Equal distances: smaller y, then x (N7-2): north, west, east.
-                Check.equal(7, result.getDelivered(north), "compat: north");
-                Check.equal(7, result.getDelivered(west), "compat: west before east (x)");
-                Check.equal(6, result.getDelivered(east), "compat: east last");
-            } else {
-                Check.equal(7, result.getDelivered(north), "north first (N25-5, N27-1)");
-                Check.equal(7, result.getDelivered(east), "then east");
-                Check.equal(6, result.getDelivered(west), "west last");
-            }
-        }
+        PipeGrid grid = grid(Fluids.uniform(1000));
+        grid.placePipe(0, -1, PipeLayer.BASE, MineralTier.IRON);
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.IRON);
+        grid.placePipe(-1, 0, PipeLayer.BASE, MineralTier.IRON);
+        TankValve north = Fluids.valve(1000);
+        TankValve east = Fluids.valve(1000);
+        TankValve west = Fluids.valve(1000);
+        grid.placeValve(0, -2, north);
+        grid.placeValve(2, 0, east);
+        grid.placeValve(-2, 0, west);
+        fillAll(grid);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        PumpResult result = cycle(grid, pump);
+        Check.equal(7, result.getDelivered(north), "north first (N25-5, N27-1)");
+        Check.equal(7, result.getDelivered(east), "then east");
+        Check.equal(6, result.getDelivered(west), "west last");
     }
 
     public static void testFullTanksDoNotCountAtJunctions() {
@@ -177,24 +151,22 @@ final class NewEngineTest {
 
     public static void testFrontReachesOnePipePerCycleAndFullPathsPassAtFullRate() {
         // The cap (N14-2) lets a path reach at most one new pipe per cycle window: a pipe filled from
-        // empty used its whole cap. Any speed of one pipe per cycle or more therefore fills like the
-        // compatibility mode (no speed limit); a full path passes at full rate (N25-3).
-        for (boolean compatMode : new boolean[]{false, true}) {
-            PipeGrid grid = compatMode ? compat(SLOW) : grid(SLOW);
-            line(grid, 1, 0, 5, 0);
-            TankValve valve = Fluids.valve(100000);
-            grid.placeValve(6, 0, valve);
-            Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
-            for (int cycle = 1; cycle <= 5; cycle++) {
-                cycle(grid, pump);
-                Check.isTrue(grid.getPipe(cycle, 0, PipeLayer.BASE).isFull(), compatMode + ": pipe " + cycle + " in cycle " + cycle);
-                if (cycle < 5) {
-                    Check.isFalse(grid.getPipe(cycle + 1, 0, PipeLayer.BASE).isReached(), compatMode + ": not further");
-                }
+        // empty used its whole cap. Any speed of one pipe per cycle or more therefore fills one pipe
+        // per cycle here; a full path passes at full rate (N25-3).
+        PipeGrid grid = grid(SLOW);
+        line(grid, 1, 0, 5, 0);
+        TankValve valve = Fluids.valve(100000);
+        grid.placeValve(6, 0, valve);
+        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
+        for (int cycle = 1; cycle <= 5; cycle++) {
+            cycle(grid, pump);
+            Check.isTrue(grid.getPipe(cycle, 0, PipeLayer.BASE).isFull(), "pipe " + cycle + " in cycle " + cycle);
+            if (cycle < 5) {
+                Check.isFalse(grid.getPipe(cycle + 1, 0, PipeLayer.BASE).isReached(), "not further");
             }
-            for (int cycle = 6; cycle <= 8; cycle++) {
-                Check.equal(20, cycle(grid, pump).getDelivered(valve), "a full path passes at full rate (N25-3)");
-            }
+        }
+        for (int cycle = 6; cycle <= 8; cycle++) {
+            Check.equal(20, cycle(grid, pump).getDelivered(valve), "a full path passes at full rate (N25-3)");
         }
     }
 
@@ -281,19 +253,6 @@ final class NewEngineTest {
         Check.equal(10, second.getDelivered(a), "the next cycle pushes no more because of it (N28-9)");
         Check.equal(10, pump.getAmount(), "the pump pulled only what it pushed");
         Check.isFalse(grid.getPipe(2, -1, PipeLayer.BASE).isReached(), "the front never entered the copper pipe");
-
-        // The compatibility mode has no speed limit: everything goes on.
-        PipeGrid old = compat(NO_COPPER_FRONT);
-        line(old, 1, 0, 3, 0);
-        TankValve oldA = Fluids.valve(100000);
-        old.placeValve(4, 0, oldA);
-        fillAll(old);
-        old.placePipe(2, -1, PipeLayer.BASE, MineralTier.COPPER);
-        old.placeValve(2, -2, Fluids.valve(100000));
-        Pump oldPump = pump(old, 0, 0, PumpTier.FIRE);
-        cycle(old, oldPump);
-        Check.isTrue(old.getPipe(2, -1, PipeLayer.BASE).isReached(), "compat: no speed limit");
-        Check.equal(0, oldPump.getAmount());
     }
 
     // ---------------------------------------------------------------- N26-4
@@ -323,12 +282,6 @@ final class NewEngineTest {
         Check.equal(20, b.getDelivered(valve[0]));
         Check.equal(Status.NO_DESTINATION, a.getStatus(), "the cap is used up");
         Check.equal(0, pumps[0].getAmount(), "nothing pulled");
-
-        PipeGrid old = compat(Fluids.uniform(20));
-        sharedTrunk(old, 1, valve);
-        Map<Long, PumpResult> oldResults = pushTick(old);
-        Check.equal(Status.PUMPED, oldResults.get(PipeGrid.key(0, 0)).getStatus(), "compat: the first to run");
-        Check.equal(Status.NO_DESTINATION, oldResults.get(PipeGrid.key(3, -2)).getStatus());
     }
 
     public static void testEqualDistanceGoesByConnectionOrder() {
@@ -342,39 +295,32 @@ final class NewEngineTest {
     }
 
     public static void testPumpsPushInTheSameTick() {
-        // N28-16: pumps placed at different ticks push in the same tick (the cycles are aligned);
-        // the compatibility mode keeps each pump's own phase.
-        for (boolean compatMode : new boolean[]{false, true}) {
-            PipeGrid grid = compatMode ? compat(Fluids.uniform(20)) : grid(Fluids.uniform(20));
-            TankValve[] valve = new TankValve[1];
-            line(grid, 1, 0, 9, 0);
-            valve[0] = Fluids.valve(100000);
-            grid.placeValve(10, 0, valve[0]);
-            grid.placePipe(3, -1, PipeLayer.BASE, MineralTier.IRON);
-            fillAll(grid);
-            Pump a = pump(grid, 0, 0, PumpTier.FIRE);
-            for (int i = 0; i < 7; i++) {
-                grid.runTick();
+        // N28-16: pumps placed at different ticks push in the same tick (one global phase).
+        PipeGrid grid = grid(Fluids.uniform(20));
+        TankValve[] valve = new TankValve[1];
+        line(grid, 1, 0, 9, 0);
+        valve[0] = Fluids.valve(100000);
+        grid.placeValve(10, 0, valve[0]);
+        grid.placePipe(3, -1, PipeLayer.BASE, MineralTier.IRON);
+        fillAll(grid);
+        pump(grid, 0, 0, PumpTier.FIRE);
+        for (int i = 0; i < 7; i++) {
+            grid.runTick();
+        }
+        pump(grid, 3, -2, PumpTier.FIRE);
+        java.util.List<Long> ticksA = new java.util.ArrayList<>();
+        java.util.List<Long> ticksB = new java.util.ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            Map<Long, PumpResult> results = grid.runTick();
+            if (results.containsKey(PipeGrid.key(0, 0))) {
+                ticksA.add(grid.getTick());
             }
-            Pump b = pump(grid, 3, -2, PumpTier.FIRE);
-            java.util.List<Long> ticksA = new java.util.ArrayList<>();
-            java.util.List<Long> ticksB = new java.util.ArrayList<>();
-            for (int i = 0; i < 60; i++) {
-                Map<Long, PumpResult> results = grid.runTick();
-                if (results.containsKey(PipeGrid.key(0, 0))) {
-                    ticksA.add(grid.getTick());
-                }
-                if (results.containsKey(PipeGrid.key(3, -2))) {
-                    ticksB.add(grid.getTick());
-                }
-            }
-            if (compatMode) {
-                Check.isFalse(ticksA.equals(ticksB), "compat: each pump's own phase");
-            } else {
-                Check.equal(ticksA, ticksB, "the same ticks (N28-16)");
-                Check.equal(java.util.Arrays.asList(20L, 40L, 60L), ticksA, "the global push ticks, every 20 ticks");
+            if (results.containsKey(PipeGrid.key(3, -2))) {
+                ticksB.add(grid.getTick());
             }
         }
+        Check.equal(ticksA, ticksB, "the same ticks (N28-16)");
+        Check.equal(java.util.Arrays.asList(20L, 40L, 60L), ticksA, "the global push ticks, every 20 ticks");
     }
 
     public static void testInstallNumbersAreThePlacementOrder() {
@@ -683,17 +629,6 @@ final class NewEngineTest {
                     + grid.getPipe(3, 2, PipeLayer.BASE).getAmount(), "cycle " + cycle + ": the dead-end direction");
         }
         Check.equal(20, cycle(grid, pump).getDelivered(valve), "the branch is full: everything to the valve");
-
-        // The compatibility mode keeps the old fill of the destinations' paths only (TODO(confirm) G17).
-        PipeGrid old = compat(Fluids.uniform(20));
-        line(old, 1, 0, 5, 0);
-        TankValve oldValve = Fluids.valve(100000);
-        old.placeValve(6, 0, oldValve);
-        fillAll(old);
-        old.placePipe(3, 1, PipeLayer.BASE, MineralTier.IRON);
-        Pump oldPump = pump(old, 0, 0, PumpTier.FIRE);
-        Check.equal(20, cycle(old, oldPump).getDelivered(oldValve));
-        Check.isFalse(old.getPipe(3, 1, PipeLayer.BASE).isReached(), "compat: the dead end stays empty");
     }
 
     public static void testNoDestinationAtAllStopsThePump() {

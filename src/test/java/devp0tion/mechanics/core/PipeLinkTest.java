@@ -14,22 +14,22 @@ final class PipeLinkTest {
     private PipeLinkTest() {
     }
 
-    private static EngineApi grid() {
-        return Engines.create(Fluids.TIERS);
+    private static PipeGrid grid() {
+        return new PipeGrid(Fluids.TIERS);
     }
 
-    private static PipeNode base(EngineApi grid, int x, int y) {
+    private static PipeNode base(PipeGrid grid, int x, int y) {
         return grid.getPipe(x, y, PipeLayer.BASE);
     }
 
-    private static PipeNode under(EngineApi grid, int x, int y) {
+    private static PipeNode under(PipeGrid grid, int x, int y) {
         return grid.getPipe(x, y, PipeLayer.UNDERGROUND);
     }
 
     // ---------- auto-connect and layers ----------
 
     public static void testAdjacentPipesConnectAutomatically() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Fluids.baseLine(grid, 0, 3, 0, MineralTier.COPPER);
         grid.placePipe(3, 1, PipeLayer.BASE, MineralTier.IRON);
         Check.isTrue(grid.areLinked(base(grid, 0, 0), base(grid, 1, 0)), "9-4");
@@ -38,21 +38,21 @@ final class PipeLinkTest {
     }
 
     public static void testDiagonalPipesDoNotConnect() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placePipe(1, 1, PipeLayer.BASE, MineralTier.COPPER);
         Check.isFalse(grid.areLinked(base(grid, 0, 0), base(grid, 1, 1)), "diagonal");
     }
 
     public static void testAdjacentPipesOfDifferentLayersStayApart() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placePipe(1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         Check.isFalse(grid.areLinked(base(grid, 0, 0), under(grid, 1, 0)), "only on the same tile");
     }
 
     public static void testVerticalLinkStartsCutEitherOrder() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placePipe(0, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
         Check.isFalse(grid.areLinked(base(grid, 0, 0), under(grid, 0, 0)), "basic over underground starts cut (N16-4)");
@@ -67,7 +67,7 @@ final class PipeLinkTest {
     }
 
     public static void testUndergroundPipeLinksToTheValveOnItsTileOnly() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         TankValve above = Fluids.valve(100);
         TankValve beside = Fluids.valve(100);
         grid.placeValve(0, 0, above);
@@ -77,7 +77,7 @@ final class PipeLinkTest {
     }
 
     public static void testBasicPipeLinksToAdjacentValves() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placeValve(1, 0, Fluids.valve(100));
         grid.placeValve(0, 1, Fluids.valve(100));
         PipeNode pipe = grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
@@ -85,7 +85,7 @@ final class PipeLinkTest {
     }
 
     public static void testPumpPushesOnlyIntoAdjacentBasicPipes() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.MANUAL, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placePipe(-1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
@@ -95,7 +95,7 @@ final class PipeLinkTest {
     }
 
     public static void testBaseLayerHoldsOneObject() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placeValve(0, 0, Fluids.valve(10));
         Check.equal(PipeGrid.Check.OCCUPIED, grid.checkPipePlacement(0, 0, PipeLayer.BASE), "valve there");
         Check.equal(PipeGrid.Check.OK, grid.checkPipePlacement(0, 0, PipeLayer.UNDERGROUND), "under the valve (10-4)");
@@ -109,7 +109,7 @@ final class PipeLinkTest {
     // ---------- fluids never block placement or links (N13-2) ----------
 
     public static void testPlacingAPipeBetweenDifferentFluidsIsAllowed() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.COPPER);
         Fluids.set(grid, 0, 0, PipeLayer.BASE, FluidType.SEAWATER, 5);
@@ -120,7 +120,7 @@ final class PipeLinkTest {
     }
 
     public static void testLinkingDifferentFluidsIsAllowedButTheyStayApart() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Fluids.baseLine(grid, 0, 1, 0, MineralTier.COPPER);
         grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
         Fluids.set(grid, 0, 0, PipeLayer.BASE, FluidType.FRESHWATER, 5);
@@ -134,7 +134,7 @@ final class PipeLinkTest {
     // ---------- wrench ----------
 
     public static void testWrenchCutsAndRejoinsASide() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Fluids.baseLine(grid, 0, 1, 0, MineralTier.COPPER);
         PipeNode a = base(grid, 0, 0);
         PipeNode b = base(grid, 1, 0);
@@ -147,7 +147,7 @@ final class PipeLinkTest {
     }
 
     public static void testCutSideStaysCutForANewNeighbour() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
@@ -155,7 +155,7 @@ final class PipeLinkTest {
     }
 
     public static void testCutStaysWhenOneSideIsRemovedAndPlacedAgain() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Fluids.baseLine(grid, 0, 1, 0, MineralTier.COPPER);
         grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
         grid.removePipe(1, 0, PipeLayer.BASE);
@@ -172,7 +172,7 @@ final class PipeLinkTest {
     }
 
     public static void testWrenchCutsTheVerticalLink() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placePipe(0, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         grid.toggleVertical(0, 0);
@@ -182,7 +182,7 @@ final class PipeLinkTest {
     }
 
     public static void testVerticalCutStaysWhenTheBasicPipeIsReplaced() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placePipe(0, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         grid.toggleVertical(0, 0);
@@ -192,7 +192,7 @@ final class PipeLinkTest {
     }
 
     public static void testWrenchCutsTheUndergroundValveLink() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placeValve(0, 0, Fluids.valve(100));
         PipeNode pipe = grid.placePipe(0, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         Check.equal(PipeGrid.Check.OK, grid.toggleVertical(0, 0));
@@ -202,7 +202,7 @@ final class PipeLinkTest {
     }
 
     public static void testWrenchCutsPipeToValveAndPipeToPump() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.MANUAL, FluidType.FRESHWATER);
         PipeNode pipe = grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placeValve(2, 0, Fluids.valve(100));
@@ -215,56 +215,14 @@ final class PipeLinkTest {
     }
 
     public static void testWrenchOnNothing() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Check.equal(PipeGrid.Check.NOTHING_THERE, grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.NORTH));
         Check.equal(PipeGrid.Check.NOTHING_THERE, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH));
         Check.equal(PipeGrid.Check.NOTHING_THERE, grid.toggleVertical(0, 0));
     }
 
-    public static void testWrenchNeverChangesAnUnloadedPipe() {
-        // N14-3: a mirror of an unloaded region is read-only; the region's own state replaces it when
-        // it loads, so a change there would be undone. The game loads the region first.
-        if (!Engines.isLegacy()) {
-            // The legacy engine's mirror; the new engine keeps none (N23-2), see
-            // NewEngineTest.testWrenchNeverChangesAnUnloadedTile.
-            return;
-        }
-        EngineApi grid = grid();
-        final List<String> heard = new ArrayList<>();
-        grid.setListener((x, y, part) -> heard.add(part + "@" + x + "," + y));
-        Fluids.baseLine(grid, 0, 1, 0, MineralTier.COPPER);
-        Fluids.line(grid, 0, 1, 1, PipeLayer.UNDERGROUND, MineralTier.COPPER);
-        grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST);
-        grid.toggleSide(0, 1, PipeGrid.Part.UNDERGROUND_PIPE, Direction.EAST);
-        grid.placePipe(1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
-        grid.unloadPipe(1, 0, PipeLayer.BASE);
-        grid.unloadPipe(1, 1, PipeLayer.UNDERGROUND);
-        grid.unloadPipe(1, 0, PipeLayer.UNDERGROUND);
-        heard.clear();
-
-        Check.equal(PipeGrid.Check.NOT_LOADED, grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST),
-                "toward an unloaded basic pipe");
-        Check.equal(PipeGrid.Check.NOT_LOADED, grid.toggleSide(0, 1, PipeGrid.Part.UNDERGROUND_PIPE, Direction.EAST),
-                "toward an unloaded underground pipe");
-        Check.equal(PipeGrid.Check.NOT_LOADED, grid.toggleSide(1, 0, PipeGrid.Part.BASIC_PIPE, Direction.WEST),
-                "from an unloaded pipe");
-        Check.equal(PipeGrid.Check.NOT_LOADED, grid.toggleVertical(1, 0), "an unloaded tile");
-        Check.isFalse(base(grid, 0, 0).isSideOpen(Direction.EAST), "own flag unchanged");
-        Check.isFalse(base(grid, 1, 0).isSideOpen(Direction.WEST), "mirror unchanged");
-        Check.isFalse(under(grid, 1, 1).isSideOpen(Direction.WEST), "underground mirror unchanged");
-        Check.isFalse(under(grid, 1, 0).isVerticalOpen(), "vertical flag of the mirror unchanged");
-        Check.equal("[]", heard.toString(), "nothing to save or sync");
-
-        // Its region loaded again with its own state: the wrench links both sides.
-        PipeNode mirror = base(grid, 1, 0);
-        grid.loadPipe(1, 0, PipeLayer.BASE, MineralTier.COPPER, mirror.getLinks(), null, 0, true);
-        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST));
-        Check.isTrue(grid.areLinked(base(grid, 0, 0), base(grid, 1, 0)), "linked once loaded");
-        Check.equal("[BASIC_PIPE@0,0, BASIC_PIPE@1,0]", heard.toString(), "both flags saved and synced");
-    }
-
     public static void testListenerHearsEveryFlagChange() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         final List<String> heard = new ArrayList<>();
         grid.setListener((x, y, part) -> heard.add(part + "@" + x + "," + y));
         Fluids.baseLine(grid, 0, 1, 0, MineralTier.COPPER);
@@ -275,7 +233,7 @@ final class PipeLinkTest {
     // ---------- pump and valve links (N13-3, N16-3) ----------
 
     public static void testPumpPlacedNextToAValveConnectsIt() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         TankValve valve = Fluids.valve(100);
         grid.placeValve(0, 1, valve);
         Pump pump = new Pump(PumpTier.FIRE);
@@ -285,7 +243,7 @@ final class PipeLinkTest {
     }
 
     public static void testValvePlacedLaterNextToAPumpStartsCut() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         TankValve valve = Fluids.valve(100);
         grid.placeValve(1, 0, valve);
@@ -295,7 +253,7 @@ final class PipeLinkTest {
     }
 
     public static void testWrenchLinksAValveOfTheSameFluidOrEmpty() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
         TankValve same = Fluids.valve(100);
         same.getTank().insert(FluidType.FRESHWATER, 10);
@@ -312,7 +270,7 @@ final class PipeLinkTest {
     }
 
     public static void testWrenchRefusesAValveOfAnotherFluid() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.ADVANCED_FIRE, FluidType.FRESHWATER);
         TankValve lava = Fluids.valve(100);
         lava.getTank().insert(FluidType.LAVA, 10);
@@ -324,7 +282,7 @@ final class PipeLinkTest {
     }
 
     public static void testRemovedValveIsNoSourceButAnUnloadedOneStays() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         grid.placeValve(1, 0, Fluids.valve(100));
         grid.placeValve(-1, 0, Fluids.valve(100));
         Pump pump = new Pump(PumpTier.FIRE);
@@ -341,7 +299,7 @@ final class PipeLinkTest {
     // ---------- faces between two fluids (N13-2) ----------
 
     public static void testFacesBetweenTwoFluidsAreBlocked() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Fluids.baseLine(grid, 0, 2, 0, MineralTier.COPPER);
         grid.placePipe(1, 1, PipeLayer.BASE, MineralTier.COPPER);
         grid.placePipe(1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
@@ -363,7 +321,7 @@ final class PipeLinkTest {
     }
 
     public static void testUndergroundFacesBetweenTwoFluidsAreBlocked() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         Fluids.line(grid, 0, 2, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         grid.placePipe(1, -1, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.COPPER);
@@ -391,7 +349,7 @@ final class PipeLinkTest {
     }
 
     public static void testBlockedFacesAreSentOnlyWhenTheyChange() {
-        EngineApi grid = grid();
+        PipeGrid grid = grid();
         BlockedFaceSync sync = new BlockedFaceSync(grid::getFluidBlockedSides, PipeLayer.UNDERGROUND);
         Fluids.line(grid, 0, 2, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         Fluids.set(grid, 0, 0, PipeLayer.UNDERGROUND, FluidType.FRESHWATER, 5);
@@ -427,7 +385,7 @@ final class PipeLinkTest {
     }
 
     public static void testListenerHearsWhenAPipeStartsOrStopsHoldingFluid() {
-        EngineApi grid = Engines.create(Fluids.uniform(20));
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         final List<String> heard = new ArrayList<>();
         grid.setListener(new PipeGrid.Listener() {
             @Override

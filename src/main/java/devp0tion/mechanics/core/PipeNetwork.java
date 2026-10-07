@@ -1,9 +1,7 @@
 package devp0tion.mechanics.core;
 
 import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -31,7 +29,6 @@ public final class PipeNetwork {
     final Set<Pump> pumps = new LinkedHashSet<>();
     FluidType fluid;
     MineralTier lowestTier;
-    final Map<Pump, Object> routeCache = new IdentityHashMap<>();
 
     PipeNetwork() {
     }
