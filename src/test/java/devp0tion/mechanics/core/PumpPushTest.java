@@ -342,6 +342,84 @@ final class PumpPushTest {
         Check.equal(20, result.getPipeFill());
     }
 
+    // ---------- pipe breaks with the game's table (N32-5) ----------
+
+    public static void testLavaIntoCopperBreaksTheCopperPipe() {
+        // N32-5: copper carries water only; the lava breaks the copper pipe it newly reaches (N12-4).
+        PipeGrid grid = new PipeGrid(PipeTierRules.TABLE);
+        Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.LAVA);
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
+        TankValve valve = Fluids.valve(1000);
+        grid.placeValve(2, 0, valve);
+        PumpResult result = Fluids.cycle(pump);
+        Check.equal(1, result.getBroken().size(), "the copper pipe breaks");
+        Check.equal(1, result.getBroken().get(0).getTileX());
+        Check.isNull(grid.getPipe(1, 0, PipeLayer.BASE), "gone (N12-5)");
+        Check.equal(PumpTier.FIRE.getUnitsPerCycle(), result.getLost(), "its share is lost (N14-1)");
+        Check.equal(0, valve.getTank().getAmount(), "nothing delivered");
+    }
+
+    public static void testLavaIntoIronIsCarried() {
+        // N32-5: iron carries lava (the fire pump's material).
+        PipeGrid grid = new PipeGrid(PipeTierRules.TABLE);
+        Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.LAVA);
+        Fluids.baseLine(grid, 1, 2, 0, MineralTier.IRON);
+        grid.placeValve(3, 0, Fluids.valve(1000));
+        for (int i = 0; i < 8; i++) {
+            PumpResult result = Fluids.cycle(pump);
+            Check.equal(0, result.getBroken().size(), "iron carries lava, cycle " + i);
+            Check.equal(0, result.getLost());
+        }
+        Check.equal(FluidType.LAVA, grid.getPipe(2, 0, PipeLayer.BASE).getFluid(), "reached the second pipe");
+        Check.equal(PipeTierRules.TABLE.getTransportAmount(MineralTier.IRON), grid.getPipe(1, 0, PipeLayer.BASE).getAmount(),
+                "the first pipe is full");
+    }
+
+    public static void testLavaThroughIronBreaksTheCopperPipeItReaches() {
+        // The iron pipe fills; the copper pipe after it breaks when the lava reaches it, judged by the
+        // network's lowest tier with the new pipe (N12-4, N14-1); the iron pipe stays (no chain).
+        PipeGrid grid = new PipeGrid(PipeTierRules.TABLE);
+        Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.LAVA);
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.IRON);
+        grid.placePipe(2, 0, PipeLayer.BASE, MineralTier.COPPER);
+        grid.placeValve(3, 0, Fluids.valve(1000));
+        int cycles = PipeTierRules.TABLE.getTransportAmount(MineralTier.IRON) / PumpTier.FIRE.getUnitsPerCycle();
+        for (int i = 0; i < cycles; i++) {
+            Check.equal(0, Fluids.cycle(pump).getBroken().size(), "filling the iron pipe, cycle " + i);
+        }
+        PumpResult result = Fluids.cycle(pump);
+        Check.equal(1, result.getBroken().size(), "the copper pipe breaks");
+        Check.equal(2, result.getBroken().get(0).getTileX());
+        Check.isNull(grid.getPipe(2, 0, PipeLayer.BASE), "gone (N12-5)");
+        Check.isTrue(grid.getPipe(1, 0, PipeLayer.BASE) != null, "the iron pipe stays (no chain, N14-1)");
+    }
+
+    public static void testCrudeOilBreaksGoldButNotDemonic() {
+        PipeGrid grid = new PipeGrid(PipeTierRules.TABLE);
+        Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.ADVANCED_FIRE, FluidType.CRUDE_OIL);
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.GOLD);
+        grid.placeValve(2, 0, Fluids.valve(1000));
+        Check.equal(1, Fluids.cycle(pump).getBroken().size(), "gold carries up to lava (N32-5)");
+
+        PipeGrid other = new PipeGrid(PipeTierRules.TABLE);
+        Pump oil = Fluids.fueledPump(other, 0, 0, PumpTier.ADVANCED_FIRE, FluidType.CRUDE_OIL);
+        other.placePipe(1, 0, PipeLayer.BASE, MineralTier.DEMONIC);
+        other.placeValve(2, 0, Fluids.valve(1000));
+        PumpResult result = Fluids.cycle(oil);
+        Check.equal(0, result.getBroken().size(), "demonic carries every fluid (N32-5)");
+        Check.equal(PumpTier.ADVANCED_FIRE.getUnitsPerCycle(), result.getPipeFill());
+    }
+
+    public static void testWaterIntoCopperIsCarried() {
+        PipeGrid grid = new PipeGrid(PipeTierRules.TABLE);
+        Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.SEAWATER);
+        Fluids.baseLine(grid, 1, 2, 0, MineralTier.COPPER);
+        grid.placeValve(3, 0, Fluids.valve(1000));
+        PumpResult result = Fluids.cycle(pump);
+        Check.equal(0, result.getBroken().size(), "copper carries water (N32-5)");
+        Check.equal(PumpTier.FIRE.getUnitsPerCycle(), result.getPipeFill());
+    }
+
     // ---------- unloaded regions (N14-3, N15-1) ----------
 
     private static PipeGrid unloadedSetup(Pump[] pumpOut, TankValve[] valveOut) {

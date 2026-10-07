@@ -10,17 +10,36 @@ import java.util.Set;
 final class Fluids {
 
     /**
-     * Test pipe transport amounts (only iron's 80 is decided, numbers.md table 2):
-     * COPPER 10, IRON 20, GOLD 30, ... (tier order x 10).
+     * Test pipe transport amounts: COPPER 10, IRON 20, GOLD 30, ... (tier order x 10). Every tier
+     * carries every fluid.
      */
-    static final PipeTierRules TIERS = tier -> (tier.ordinal() + 1) * 10;
+    static final PipeTierRules TIERS = carryingAll(tier -> (tier.ordinal() + 1) * 10);
 
     private Fluids() {
     }
 
-    /** Every tier carries the same amount per cell (and per cycle). */
+    /**
+     * Every tier carries the same amount per cell (and per cycle), and every fluid: the tests of
+     * other rules do not depend on the game's transportable kinds (N32-5), which
+     * {@link PipeTierRules#TABLE} and {@link #breaking} test.
+     */
     static PipeTierRules uniform(final int amount) {
-        return tier -> amount;
+        return carryingAll(tier -> amount);
+    }
+
+    /** The given transport amounts; every tier carries every fluid. */
+    static PipeTierRules carryingAll(final java.util.function.ToIntFunction<MineralTier> amounts) {
+        return new PipeTierRules() {
+            @Override
+            public int getTransportAmount(MineralTier tier) {
+                return amounts.applyAsInt(tier);
+            }
+
+            @Override
+            public boolean canCarry(MineralTier lowestTier, FluidType type) {
+                return type != null;
+            }
+        };
     }
 
     /** Uniform amounts; tiers below {@code minTier} cannot carry {@code fluid} (N12-4). */

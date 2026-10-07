@@ -31,13 +31,40 @@ final class PipeNetworkTest {
         }
     }
 
-    public static void testTheOtherColumnsAreProvisional() {
+    public static void testTemperatureAndStateAreProvisional() {
         for (MineralTier tier : MineralTier.values()) {
             Check.equal(PipeTierRules.NO_TEMPERATURE_LIMIT, PipeTierRules.Row.of(tier).getMaxTemperature(),
-                    tier + ": placeholder without a temperature limit");
-            for (FluidType fluid : FluidType.values()) {
-                Check.isTrue(PipeTierRules.TABLE.canCarry(tier, fluid), tier + " " + fluid + ": placeholder carries all");
+                    tier + ": placeholder without a temperature limit (N32-3)");
+            Check.equal(PipeTierRules.State.LIQUID, PipeTierRules.Row.of(tier).getState(), tier + ": liquid");
+        }
+    }
+
+    public static void testTransportableKindsFollowThePumpMaterials() {
+        // N32-5: copper water only, iron and gold up to lava, demonic and up every fluid.
+        for (FluidType fluid : FluidType.values()) {
+            Check.equal(fluid.isWater(), PipeTierRules.TABLE.canCarry(MineralTier.COPPER, fluid), "copper " + fluid);
+            boolean upToLava = fluid.isWater() || fluid == FluidType.LAVA;
+            Check.equal(upToLava, PipeTierRules.TABLE.canCarry(MineralTier.IRON, fluid), "iron " + fluid);
+            Check.equal(upToLava, PipeTierRules.TABLE.canCarry(MineralTier.GOLD, fluid), "gold " + fluid);
+            for (MineralTier tier : MineralTier.values()) {
+                if (tier.isAtLeast(MineralTier.DEMONIC)) {
+                    Check.isTrue(PipeTierRules.TABLE.canCarry(tier, fluid), tier + " " + fluid);
+                }
             }
+        }
+        Check.isFalse(PipeTierRules.TABLE.canCarry(MineralTier.GOLD, FluidType.CRUDE_OIL), "crude oil from demonic");
+        Check.isTrue(PipeTierRules.TABLE.canCarry(MineralTier.DEMONIC, FluidType.CRUDE_OIL), "crude oil included");
+        Check.isFalse(PipeTierRules.TABLE.canCarry(MineralTier.COPPER, null), "no fluid");
+    }
+
+    public static void testTransportableKindsMatchThePumpOfTheMaterial() {
+        // N32-5: the highest material of the pump recipes; the manual pump's fluids for copper, the
+        // fire pump counts as iron, the advanced fire pump as demonic (12-1).
+        for (FluidType fluid : FluidType.values()) {
+            Check.equal(PumpTier.MANUAL.canPump(fluid), PipeTierRules.TABLE.canCarry(MineralTier.COPPER, fluid), "copper " + fluid);
+            Check.equal(PumpTier.FIRE.canPump(fluid), PipeTierRules.TABLE.canCarry(MineralTier.IRON, fluid), "iron " + fluid);
+            Check.equal(PumpTier.ADVANCED_FIRE.canPump(fluid), PipeTierRules.TABLE.canCarry(MineralTier.DEMONIC, fluid),
+                    "demonic " + fluid);
         }
     }
 

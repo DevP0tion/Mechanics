@@ -12,8 +12,9 @@ package devp0tion.mechanics.core;
  * other liquids are unaffected by depth.
  *
  * <p>Each fluid has a fixed temperature (12-4).
- * TODO(design): temperature values per fluid are undecided (numbers.md table 4); no value exists
- * in code, and the pipe tier conditions that would use them are placeholders ({@link PipeTierRules}).
+ * TODO(design): temperature values per fluid are undecided (numbers.md table 4, N32-3); no value
+ * exists in code, and the pipe tiers' maximum temperature that would use them is a placeholder
+ * ({@link PipeTierRules}). The pipe tiers' transportable kinds are set (N32-5).
  *
  * <p>Gases are out of scope (12-3, TODO).
  */

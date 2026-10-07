@@ -15,7 +15,8 @@ import java.util.Set;
  *     wall multiplier (N4-2), the capacity of one tank cell of the tier (N4-4), anchored at iron 80
  *     (N19-8, N32-2).</li>
  *     <li>Maximum temperature, transportable kinds and state: judged when fluid reaches a new pipe,
- *     against the lowest tier of the network it joins (N12-4, N14-1).</li>
+ *     against the lowest tier of the network it joins (N12-4, N14-1). The kinds follow the pump
+ *     recipes' materials for now (N32-5); a fluid outside them breaks the newly reached pipe.</li>
  * </ul>
  * There is no movement speed (N32-1): filling empty pipes is limited only by the transport amount
  * as the per-cycle cap (N14-2). The cap equals a cell's capacity, so a pipe filled from empty uses
@@ -56,29 +57,37 @@ public interface PipeTierRules {
      * iron 80, the throughput of four fire pumps (20 per cycle x 4, N19-8): 40 x the multiplier,
      * the capacity of one tank cell of the tier ({@link TankStructure#BASE_CAPACITY_PER_CELL} x
      * {@link MineralTier#getCapacityMultiplier}, N4-4) (N32-2).
-     * <p>TODO(design): every other value is undecided and only a provisional placeholder, not a
-     * curve: the maximum temperature has no limit ({@link #NO_TEMPERATURE_LIMIT}, the fluid
-     * temperatures are undecided too, 12-4, N32-3); every tier carries every fluid kind; the state
-     * is liquid (gases are TODO, 12-3). With these placeholders no pipe ever breaks in the game
-     * (N12-4); tests use their own rules.
+     * <p>Provisional (N32-5, "for now"): the transportable kinds follow the highest material of the
+     * pump recipes (11-4, N9-3), the fire pump counting as iron and the advanced fire pump as
+     * demonic, so a tier carries what that pump moves (12-1, {@link PumpTier#canPump}): copper water
+     * only ({@link #WATER}, the manual pump's fluids), iron and gold up to lava
+     * ({@link #WATER_AND_LAVA}, the fire pump's), demonic and up every fluid, crude oil included
+     * ({@link #ALL}, the advanced fire pump's). A fluid outside the kinds of the network's lowest
+     * tier breaks the pipe it newly reaches (N12-4, N12-5, N14-1).
+     * <p>TODO(design): the maximum temperature and the state are undecided and only provisional
+     * placeholders, not a curve: the maximum temperature has no limit ({@link #NO_TEMPERATURE_LIMIT},
+     * the fluid temperatures are undecided too, 12-4, N32-3); the state is liquid (gases are TODO,
+     * 12-3).
      */
     enum Row {
 
-        //             transport amount  max temperature        kinds   state
-        COPPER(          40,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        IRON(            80,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        GOLD(           120,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        DEMONIC(        200,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        IVY(            320,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        TUNGSTEN(       480,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        GLACIAL(        680,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        MYCELIUM(       920,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        ANCIENTFOSSIL( 1200,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        NIGHTSTEEL(    1520,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID),
-        SPIDERITE(     1880,             NO_TEMPERATURE_LIMIT,  ALL,    State.LIQUID);
+        //             transport amount  max temperature        transportable kinds  state
+        COPPER(          40,             NO_TEMPERATURE_LIMIT,  WATER,               State.LIQUID),
+        IRON(            80,             NO_TEMPERATURE_LIMIT,  WATER_AND_LAVA,      State.LIQUID),
+        GOLD(           120,             NO_TEMPERATURE_LIMIT,  WATER_AND_LAVA,      State.LIQUID),
+        DEMONIC(        200,             NO_TEMPERATURE_LIMIT,  ALL,                 State.LIQUID),
+        IVY(            320,             NO_TEMPERATURE_LIMIT,  ALL,                 State.LIQUID),
+        TUNGSTEN(       480,             NO_TEMPERATURE_LIMIT,  ALL,                 State.LIQUID),
+        GLACIAL(        680,             NO_TEMPERATURE_LIMIT,  ALL,                 State.LIQUID),
+        MYCELIUM(       920,             NO_TEMPERATURE_LIMIT,  ALL,                 State.LIQUID),
+        ANCIENTFOSSIL( 1200,             NO_TEMPERATURE_LIMIT,  ALL,                 State.LIQUID),
+        NIGHTSTEEL(    1520,             NO_TEMPERATURE_LIMIT,  ALL,                 State.LIQUID),
+        SPIDERITE(     1880,             NO_TEMPERATURE_LIMIT,  ALL,                 State.LIQUID);
 
-        // Sources: transport amount N32-2 (40 x the wall multiplier of N4-2, iron 80 of N19-8).
-        // Everything else: TODO(design), see the enum comment.
+        // Sources: transport amount N32-2 (40 x the wall multiplier of N4-2, iron 80 of N19-8);
+        // transportable kinds N32-5 (provisional: the pump recipes' highest material, fire pump =
+        // iron, advanced fire pump = demonic).
+        // Max temperature and state: TODO(design), see the enum comment (N32-3).
 
         private final int transportAmount;
         private final int maxTemperature;
@@ -133,7 +142,14 @@ public interface PipeTierRules {
     /** TODO(design): provisional "no maximum temperature" (fluid temperatures are undecided, 12-4, N32-3). */
     int NO_TEMPERATURE_LIMIT = Integer.MAX_VALUE;
 
-    /** TODO(design): provisional "every fluid kind". */
+    /** Water only, seawater and freshwater: the manual pump's fluids, carried by copper (N32-5). */
+    Set<FluidType> WATER = Collections.unmodifiableSet(EnumSet.of(FluidType.SEAWATER, FluidType.FRESHWATER));
+
+    /** Water and lava: the fire pump's fluids, carried by iron and gold (N32-5). */
+    Set<FluidType> WATER_AND_LAVA = Collections.unmodifiableSet(
+            EnumSet.of(FluidType.SEAWATER, FluidType.FRESHWATER, FluidType.LAVA));
+
+    /** Every fluid kind, crude oil included: the advanced fire pump's, carried from demonic up (N32-5). */
     Set<FluidType> ALL = Collections.unmodifiableSet(EnumSet.allOf(FluidType.class));
 
 }
