@@ -1,12 +1,55 @@
 """Draws the Mechanics multiblock tank part textures (original pixel art).
 
 Tank controller and tank valve: 1x1 tall objects, one 32x64 sprite each (lower 32 px on the tile,
-upper 32 px above it, like the ExampleMod ExampleObject). Glass block: one 32x32 sprite, partly
-transparent so the tank fluid drawn under it shows through. Item icons: 32x32.
+upper 32 px above it, like the ExampleMod ExampleObject). Item icons: 32x32.
 
-Usage: python3 -I draw_tank_parts.py <resources_dir> <out_preview_png>
-  writes <resources_dir>/objects/{tankcontroller,tankvalve,glassblock}.png
-     and <resources_dir>/items/{tankcontroller,tankvalve,glassblock}.png
+Glass block: two sheets of 16 px quarter sprites, which GlassBlockObject picks by adjacency
+(devp0tion.mechanics.core.GlassBlockSprites; ceiling_pieces / wall_pieces below are copies of its
+selection for the previews). The item icon stays one framed pane.
+
+  objects/glassblock_ceiling.png, 96x64 (6x4 cells): the glass ceiling inside a recognized tank
+  (N34-1..N34-3), a pane drawn 16 px above its tile, joined with the neighbouring ceiling glass
+  into one pane with a border only on its outer edge, in the vanilla modular carpet's quarter
+  scheme, plus a 16 px rim above tiles without ceiling glass to their north:
+         col 0        col 1        col 2          col 3          col 4         col 5
+    row 0 corner TL   corner TR    top edge L     top edge R     inside TL     inside TR
+    row 1 corner BL   corner BR    bottom edge L  bottom edge R  inside BL     inside BR
+    row 2 left edge T right edge T inner TL       inner TR       rim L joined  rim R joined
+    row 3 left edge B right edge B inner BL       inner BR       rim L end     rim R end
+  Left quarters are in even columns, right ones in odd columns; upper quarters (drawn at
+  drawY - 16) in rows 0 and 2, lower quarters (drawY) in rows 1 and 3. The rims sit in the
+  carpet's spare cells (drawY - 32) and are the pane's top border, so the top border cells
+  (0..3, 0), (2, 2), (3, 2) are not used by the game; they keep the sheet a complete carpet sheet.
+  Every cell takes its fill from one pane pattern with a period of 32 px both ways (pane_pixel):
+  left/right quarters take its left/right half, upper quarters its upper half, lower quarters and
+  rims its lower half, so the pane continues seamlessly across quarters and tiles. Glints stay 3+
+  px off the quarter edges. Partly transparent (the old pane colours), so the tank fluid and the
+  fill level band show through.
+
+  objects/glassblock_wall.png, 64x128 (4x8 cells): the glass block outside a recognized tank
+  (N34-5), drawn like a vanilla wall; the vanilla wall sheet layout (as draw_mineral_walls.py):
+    row 0      roof top edge (col 0 corner TL, cols 1-2 edge, col 3 corner TR)
+    rows 1, 2  roof (col 0 left edge, cols 1-2 inside, col 3 right edge); row 1 is the phase drawn
+               16 px above the tile row, row 2 the tile's upper half
+    rows 3, 4  front face, upper/lower half
+    rows 5, 6  cols 0-1: roof beside a joined neighbour's front face (left/right edge)
+    row 7      cols 0-1: roof inner corners (top-left / top-right)
+  Cells (2..3, 5..7) are only for a different wall type beside a vanilla wall and stay empty.
+  Inside columns 1 and 2 meet each other in both orders, so their features stay inside the cell.
+  Opaque: the vanilla wall's quarters overdraw each other in places.
+
+Usage:
+  python3 -I draw_tank_parts.py <resources_dir> <out_preview_png>
+      writes <resources_dir>/objects/{tankcontroller,tankvalve,glassblock_ceiling,glassblock_wall}.png
+         and <resources_dir>/items/{tankcontroller,tankvalve,glassblock}.png,
+      and a review mock-up (a 3x2 tank at 50 % with the glass ceiling and the fill level band, and
+      glass walls) to <out_preview_png>
+  python3 -I draw_tank_parts.py --glass-preview <out_dir> <resources_dir>
+      renders the glass review set to <out_dir>: tanks 3x2 and 5x5 at 0 % (empty), 50 % and 100 %,
+      glass walls beside a mineral wall, a rock-like block and furniture, and the two sheets
+      enlarged. Uses objects/copperwall.png from <resources_dir> for the mineral walls.
+  Previews draw in the game's order (tile stage, then sorted objects by row * 32 + sort offset)
+  with flat colours standing in for the liquid shader, no light and no wall outline overlay.
 """
 import math
 import os
@@ -249,9 +292,10 @@ def valve(c, x0, x1, top_y, face_y, bottom_y, big=True):
         c.hline(x0 + 10, x1 - 10, bottom_y - 4, BRASS_SH)
 
 
-# ---------- glass block ----------
+# ---------- glass block: item icon ----------
 
 def glass(c, x0, y0, x1, y1):
+    """The single framed pane of the item icon (the placed block uses the two sheets below)."""
     # pane
     c.rect(x0, y0, x1, y1, GLASS_PANE)
     c.rect(x0 + 2, y1 - 4, x1 - 2, y1 - 2, GLASS_PANE_SH)
@@ -276,6 +320,533 @@ def glass(c, x0, y0, x1, y1):
     c.px(x1 - 2, y1 - 2, GLASS_EDGE)
 
 
+# ---------- glass block: ceiling sheet (inside a recognized tank) ----------
+
+def _pane_glints():
+    """Glints of the ceiling pane, in one 32x32 period of the pane (kept 3+ px off quarter edges)."""
+    g = {}
+    for i in range(6):  # upper left quarter: the bright streak of the old frame
+        g[(4 + i, 10 - i)] = GLASS_SHINE
+        g[(5 + i, 10 - i)] = GLASS_SHINE
+    for i in range(4):
+        g[(5 + i, 13 - i)] = GLASS_SHINE_SOFT
+    for i in range(5):  # lower right quarter: a soft streak
+        g[(21 + i, 26 - i)] = GLASS_SHINE_SOFT
+    return g
+
+
+PANE_GLINTS = _pane_glints()
+
+
+def pane_pixel(px, py):
+    """The pane fill at a pane position. Every ceiling cell takes its fill from this one pattern
+    (period 32 both ways, see ceiling_cell), so joined quarters continue each other seamlessly."""
+    return PANE_GLINTS.get((px % 32, py % 32), GLASS_PANE)
+
+
+def ceiling_cell(hx, hy, top=False, bottom=False, left=False, right=False, inner=None):
+    """One 16 px quarter of the ceiling pane.
+
+    hx, hy: the quarter's phase in the pane pattern: hx 0 for left quarters (even sheet columns),
+    1 for right ones; hy 0 for upper quarters (drawn at drawY - 16), 1 for lower quarters (drawY)
+    and for the rim (drawY - 32, right above an upper quarter). top/bottom/left/right: the pane's
+    outer border on that side (the old frame: outline, then a lit or shaded edge, the shaded band
+    above the bottom edge). inner: "tl", "tr", "bl" or "br", the concave corner of an inner corner.
+    """
+    c = Canvas(16, 16)
+    for y in range(16):
+        for x in range(16):
+            c.px(x, y, pane_pixel(hx * 16 + x, hy * 16 + y))
+    if bottom:
+        c.rect(2 if left else 0, 11, 13 if right else 15, 13, GLASS_PANE_SH)
+        c.hline(2 if left else 0, 14 if right else 15, 14, GLASS_EDGE_SH)
+        c.hline(0, 15, 15, OUTLINE)
+    if right:
+        c.vline(14, 2 if top else 0, 14 if bottom else 15, GLASS_EDGE_SH)
+        c.vline(15, 0, 15, OUTLINE)
+    if top:
+        c.hline(1 if left else 0, 14 if right else 15, 1, GLASS_EDGE_HI)
+        c.hline(0, 15, 0, OUTLINE)
+    if left:
+        c.vline(1, 1 if top else 0, 14 if bottom else 15, GLASS_EDGE_HI)
+        c.vline(0, 0, 15, OUTLINE)
+    if top and left:
+        c.px(2, 2, GLASS_SHINE)
+    if bottom and right:
+        c.px(13, 13, GLASS_EDGE)
+    # inner corners: close the two neighbours' borders where they meet
+    if inner == "tl":
+        c.px(0, 0, OUTLINE)
+        for x, y in ((1, 0), (0, 1), (1, 1)):
+            c.px(x, y, GLASS_EDGE_HI)
+    elif inner == "tr":
+        c.px(15, 0, OUTLINE)
+        c.px(14, 0, GLASS_EDGE_SH)
+        c.px(15, 1, GLASS_EDGE_HI)
+        c.px(14, 1, GLASS_EDGE)
+    elif inner == "bl":
+        c.px(0, 15, OUTLINE)
+        c.px(0, 14, GLASS_EDGE_SH)
+        c.px(1, 15, GLASS_EDGE_HI)
+        c.px(1, 14, GLASS_EDGE)
+    elif inner == "br":
+        c.px(15, 15, OUTLINE)
+        for x, y in ((14, 15), (15, 14), (14, 14)):
+            c.px(x, y, GLASS_EDGE_SH)
+    return c
+
+
+# (column, row) -> cell; the layout is documented in the module docstring and in
+# devp0tion.mechanics.core.GlassBlockSprites.
+CEILING_CELLS = {
+    (0, 0): dict(hx=0, hy=0, top=True, left=True),       # corner TL
+    (1, 0): dict(hx=1, hy=0, top=True, right=True),      # corner TR
+    (2, 0): dict(hx=0, hy=0, top=True),                  # top edge L
+    (3, 0): dict(hx=1, hy=0, top=True),                  # top edge R
+    (4, 0): dict(hx=0, hy=0),                            # inside TL
+    (5, 0): dict(hx=1, hy=0),                            # inside TR
+    (0, 1): dict(hx=0, hy=1, bottom=True, left=True),    # corner BL
+    (1, 1): dict(hx=1, hy=1, bottom=True, right=True),   # corner BR
+    (2, 1): dict(hx=0, hy=1, bottom=True),               # bottom edge L
+    (3, 1): dict(hx=1, hy=1, bottom=True),               # bottom edge R
+    (4, 1): dict(hx=0, hy=1),                            # inside BL
+    (5, 1): dict(hx=1, hy=1),                            # inside BR
+    (0, 2): dict(hx=0, hy=0, left=True),                 # left edge T
+    (1, 2): dict(hx=1, hy=0, right=True),                # right edge T
+    (2, 2): dict(hx=0, hy=0, inner="tl"),                # inner corner TL
+    (3, 2): dict(hx=1, hy=0, inner="tr"),                # inner corner TR
+    (4, 2): dict(hx=0, hy=1, top=True),                  # rim L, joined
+    (5, 2): dict(hx=1, hy=1, top=True),                  # rim R, joined
+    (0, 3): dict(hx=0, hy=1, left=True),                 # left edge B
+    (1, 3): dict(hx=1, hy=1, right=True),                # right edge B
+    (2, 3): dict(hx=0, hy=1, inner="bl"),                # inner corner BL
+    (3, 3): dict(hx=1, hy=1, inner="br"),                # inner corner BR
+    (4, 3): dict(hx=0, hy=1, top=True, left=True),       # rim L, end
+    (5, 3): dict(hx=1, hy=1, top=True, right=True),      # rim R, end
+}
+
+
+def glass_ceiling_sheet():
+    c = Canvas(96, 64)
+    for (col, row), spec in CEILING_CELLS.items():
+        c.img.paste(ceiling_cell(**spec).img, (col * 16, row * 16))
+    return c
+
+
+# ---------- glass block: wall sheet (outside a recognized tank) ----------
+
+# Opaque: the vanilla wall's quarters overdraw each other in places (a 2x2 block draws the same
+# roof quarter twice), which partly transparent pixels would show.
+WALL_ROOF = (176, 218, 234, 255)
+WALL_FACE_HI = (150, 198, 220, 255)
+WALL_FACE = (122, 172, 200, 255)
+WALL_FACE_SH = (98, 144, 174, 255)
+WALL_GLINT = (236, 250, 254, 255)
+WALL_GLINT_SOFT = (204, 234, 246, 255)
+
+
+def wall_roof(phase):
+    """Roof inside; phase 0 is drawn above a tile row, phase 1 on the tile's upper half. Features
+    stay inside the cell: inside columns 1 and 2 meet each other in both orders."""
+    c = Canvas(16, 16)
+    c.rect(0, 0, 15, 15, WALL_ROOF)
+    if phase == 0:
+        for i in range(5):
+            c.px(5 + i, 11 - i, WALL_GLINT_SOFT)
+            c.px(6 + i, 11 - i, WALL_GLINT_SOFT)
+        c.px(6, 10, WALL_GLINT)
+    else:
+        for x, y in ((9, 7), (10, 6), (8, 8)):
+            c.px(x, y, WALL_GLINT_SOFT)
+    return c
+
+
+def wall_roof_edges(cell, top=False, left=False, right=False):
+    c = Canvas(16, 16)
+    c.img = cell.img.copy()
+    if top:
+        c.hline(0, 15, 0, OUTLINE)
+        c.hline(0, 15, 1, GLASS_EDGE_HI)
+        c.hline(0, 15, 2, GLASS_EDGE)
+    if left:
+        c.vline(0, 0, 15, OUTLINE)
+        c.vline(1, 1 if top else 0, 15, GLASS_EDGE_HI)
+        c.vline(2, 2 if top else 0, 15, GLASS_EDGE)
+    if right:
+        c.vline(15, 0, 15, OUTLINE)
+        c.vline(14, 1 if top else 0, 15, GLASS_EDGE_SH)
+    return c
+
+
+def wall_roof_inner_corner(cell, side):
+    c = Canvas(16, 16)
+    c.img = cell.img.copy()
+    if side == "left":
+        c.px(0, 0, OUTLINE)
+        for x, y in ((1, 0), (0, 1), (1, 1)):
+            c.px(x, y, GLASS_EDGE_HI)
+        for x, y in ((2, 0), (2, 1), (2, 2), (1, 2), (0, 2)):
+            c.px(x, y, GLASS_EDGE)
+    else:
+        c.px(15, 0, OUTLINE)
+        c.px(14, 0, GLASS_EDGE_SH)
+        c.px(14, 1, GLASS_EDGE_SH)
+        c.px(15, 1, GLASS_EDGE_HI)
+        c.px(15, 2, GLASS_EDGE)
+    return c
+
+
+def wall_face(left=False, right=False):
+    """The 32 px front face of one 16 px column (rows 3 and 4 of the sheet are its halves)."""
+    c = Canvas(16, 32)
+    c.rect(0, 0, 15, 31, WALL_FACE)
+    c.rect(0, 2, 15, 6, WALL_FACE_HI)
+    c.rect(0, 25, 15, 29, WALL_FACE_SH)
+    c.hline(0, 15, 0, OUTLINE)
+    c.hline(0, 15, 1, GLASS_EDGE_HI)
+    c.hline(0, 15, 30, GLASS_EDGE_SH)
+    c.hline(0, 15, 31, OUTLINE)
+    for i in range(5):  # a glint streak, inside the column
+        c.px(4 + i, 21 - 2 * i, WALL_GLINT_SOFT)
+        c.px(4 + i, 20 - 2 * i, WALL_GLINT_SOFT)
+    c.px(8, 12, WALL_GLINT)
+    for i in range(3):
+        c.px(10 + i, 24 - 2 * i, WALL_FACE_HI)
+        c.px(10 + i, 23 - 2 * i, WALL_FACE_HI)
+    if left:
+        c.vline(0, 0, 31, OUTLINE)
+        c.vline(1, 2, 29, GLASS_EDGE)
+    if right:
+        c.vline(15, 0, 31, OUTLINE)
+        c.vline(14, 2, 29, GLASS_EDGE_SH)
+    return c
+
+
+def glass_wall_sheet():
+    """64x128, the vanilla wall sheet layout (see the module docstring)."""
+    roof = {0: wall_roof(0), 1: wall_roof(1)}
+    cells = {}
+    for col in range(4):
+        left, right = col == 0, col == 3
+        cells[(col, 0)] = wall_roof_edges(roof[0], top=True, left=left, right=right)
+        cells[(col, 1)] = wall_roof_edges(roof[0], left=left, right=right)
+        cells[(col, 2)] = wall_roof_edges(roof[1], left=left, right=right)
+        face = wall_face(left=left, right=right)
+        upper, lower = Canvas(16, 16), Canvas(16, 16)
+        upper.img = face.img.crop((0, 0, 16, 16))
+        lower.img = face.img.crop((0, 16, 16, 32))
+        cells[(col, 3)] = upper
+        cells[(col, 4)] = lower
+    # roof beside a joined neighbour's front face (tile upper half, then the half below it)
+    cells[(0, 5)] = wall_roof_edges(roof[1], left=True)
+    cells[(1, 5)] = wall_roof_edges(roof[1], right=True)
+    cells[(0, 6)] = wall_roof_edges(roof[0], left=True)
+    cells[(1, 6)] = wall_roof_edges(roof[0], right=True)
+    # roof inner corners
+    cells[(0, 7)] = wall_roof_inner_corner(roof[0], "left")
+    cells[(1, 7)] = wall_roof_inner_corner(roof[0], "right")
+    # (2..3, 5..7): only for a different wall type next to the wall; never used by the glass.
+    c = Canvas(64, 128)
+    for (col, row), cell in cells.items():
+        c.img.paste(cell.img, (col * 16, row * 16))
+    return c
+
+
+# ---------- piece selection (copy of devp0tion.mechanics.core.GlassBlockSprites) ----------
+
+ADJ = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+TL, T, TR, L, R, BL, B, BR = range(8)
+
+
+def ceiling_pieces(n):
+    """[(sheet x, sheet y, offset x, offset y)] of a ceiling glass with ceiling neighbours n."""
+    pieces = []
+    if not n[T]:
+        pieces.append((4, 2 if n[L] or n[TL] else 3, 0, -32))
+        pieces.append((5, 2 if n[R] or n[TR] else 3, 16, -32))
+    pieces.append((4, 0, 0, -16) if n[L] else (0, 2, 0, -16))
+    pieces.append((5, 0, 16, -16) if n[R] else (1, 2, 16, -16))
+    for side, diag, dx in ((n[L] or n[BL], n[BL], 0), (n[R] or n[BR], n[BR], 1)):
+        below = n[B]
+        if side and below:
+            col, row = (4, 1) if diag else (2, 3)
+        elif side:
+            col, row = 2, 1
+        elif below:
+            col, row = 0, 3
+        else:
+            col, row = 0, 1
+        pieces.append((col + dx, row, dx * 16, 0))
+    return pieces
+
+
+def wall_pieces(j, force_top=False, force_remove_bot=False):
+    """[(sheet x, sheet y, offset x, offset y)]: WallObject's quarters for one wall type."""
+    if all(j):
+        return [(1, 1, 0, -16), (2, 1, 16, -16), (1, 2, 0, 0), (2, 2, 16, 0)]
+    top, left, right, bot_left, bot, bot_right = j[T], j[L], j[R], j[BL], j[B], j[BR]
+    top_left, top_right = j[TL], j[TR]
+    p = []
+    if not top:
+        p.append((2 if left else 0, 0, 0, -16))
+        p.append((1 if right else 3, 0, 16, -16))
+    else:
+        if force_top:
+            if not left:
+                p.append((0, 1, 0, -16))
+            elif not top_left:
+                p.append((0, 7, 0, -16))
+            if not right:
+                p.append((3, 1, 16, -16))
+            elif not top_right:
+                p.append((1, 7, 16, -16))
+        if left and (not bot or not bot_left) and top_left:
+            if right and top_right:
+                p.append((2, 1, 16, -16))
+            p.append((1, 1, 0, -16))
+        if right and (not bot or not bot_right) and top_right:
+            p.append((2, 1, 16, -16))
+            if left and top_left:
+                p.append((1, 1, 0, -16))
+    if bot:
+        if left:
+            if bot_left:
+                p.append((1, 2, 0, 0))
+                if not force_remove_bot:
+                    p.append((1, 1, 0, 16))
+            else:
+                p.append((0, 5, 0, 0))
+                if not force_remove_bot:
+                    p.append((0, 6, 0, 16))
+        else:
+            p.append((0, 2, 0, 0))
+            if not force_remove_bot:
+                p.append((0, 7 if bot_left else 1, 0, 16))
+        if right:
+            if bot_right:
+                p.append((2, 2, 16, 0))
+                if not force_remove_bot:
+                    p.append((2, 1, 16, 16))
+            else:
+                p.append((1, 5, 16, 0))
+                if not force_remove_bot:
+                    p.append((1, 6, 16, 16))
+        else:
+            p.append((3, 2, 16, 0))
+            if not force_remove_bot:
+                p.append((1, 7, 16, 16) if bot_right else (3, 1, 16, 16))
+    else:
+        p.append((2 if left else 0, 3, 0, 0))
+        p.append((2 if left else 0, 4, 0, 16))
+        p.append((1 if right else 3, 3, 16, 0))
+        p.append((1 if right else 3, 4, 16, 16))
+    return p
+
+
+# ---------- previews (the game's drawing order, flat colours for the shader) ----------
+
+GROUND_A = (60, 120, 70, 255)
+GROUND_B = (64, 126, 74, 255)
+TANK_FLOOR = (112, 104, 96, 255)
+FLUID_STANDIN = (54, 126, 196, 255)
+FLUID_STANDIN_HI = (90, 160, 222, 255)
+BAND_STANDIN = (58, 132, 204, 235)
+ROCK_TOP = (150, 146, 140, 255)
+ROCK_FACE = (104, 100, 96, 255)
+TABLE_TOP = (176, 120, 70, 255)
+TABLE_SH = (120, 78, 44, 255)
+
+
+def quarter(sheet, sx, sy):
+    return sheet.crop((sx * 16, sy * 16, sx * 16 + 16, sy * 16 + 16))
+
+
+class Scene:
+    """A preview canvas: tile (x, y) is drawn at (x * 32, y * 32 + 32): one spare row on top for
+    roofs and tall sprites. Sorted drawables are drawn by their sort key (row * 32 + sort y)."""
+
+    def __init__(self, cols, rows):
+        self.img = Image.new("RGBA", (cols * 32, rows * 32 + 32), CLEAR)
+        for y in range(self.img.height):
+            for x in range(self.img.width):
+                self.img.putpixel((x, y), GROUND_B if (x // 8 + y // 8) % 2 else GROUND_A)
+        self.sorted = []
+
+    def at(self, tx, ty):
+        return tx * 32, ty * 32 + 32
+
+    def add_sorted(self, key, draw):
+        self.sorted.append((key, len(self.sorted), draw))
+
+    def paste(self, sprite, x, y):
+        self.img.alpha_composite(sprite, (x, y))
+
+    def rect(self, x0, y0, x1, y1, color):
+        layer = Image.new("RGBA", (x1 - x0, y1 - y0), color)
+        self.img.alpha_composite(layer, (x0, y0))
+
+    def finish(self, scale=3):
+        for _, _, draw in sorted(self.sorted, key=lambda e: (e[0], e[1])):
+            draw()
+        return self.img.resize((self.img.width * scale, self.img.height * scale), Image.NEAREST)
+
+
+def draw_wall_like(scene, sheet, tx, ty, joined):
+    x, y = scene.at(tx, ty)
+    for sx, sy, ox, oy in wall_pieces(joined):
+        scene.paste(quarter(sheet, sx, sy), x + ox, y + oy)
+
+
+def draw_rock(scene, tx, ty):
+    """A stand-in for a rock object (full-tile collision): top face above the tile, front face."""
+    x, y = scene.at(tx, ty)
+    scene.rect(x + 1, y - 14, x + 31, y + 6, ROCK_TOP)
+    scene.rect(x + 1, y + 6, x + 31, y + 30, ROCK_FACE)
+    for px, py in ((x + 6, y - 8), (x + 20, y - 4), (x + 12, y + 14), (x + 24, y + 20)):
+        scene.rect(px, py, px + 3, py + 2, (80, 76, 72, 255))
+
+
+def draw_table(scene, tx, ty):
+    """A stand-in for furniture (collision smaller than the tile, like a table's (4, 4, 24, 24))."""
+    x, y = scene.at(tx, ty)
+    scene.rect(x + 4, y + 2, x + 28, y + 16, TABLE_TOP)
+    scene.rect(x + 4, y + 16, x + 28, y + 20, TABLE_SH)
+    scene.rect(x + 5, y + 20, x + 8, y + 28, TABLE_SH)
+    scene.rect(x + 24, y + 20, x + 27, y + 28, TABLE_SH)
+
+
+def tank_scene(ceiling, mineral_wall, controller_img, valve_img, iw, ih, fill):
+    """A recognized tank (interior iw x ih) of mineral walls with a valve in the north border and a
+    controller in the south one, all interior cells glass, at fill 0..1 (0: empty, no fluid)."""
+    x0, y0 = 1, 1
+    x1, y1 = x0 + iw + 1, y0 + ih + 1
+    scene = Scene(iw + 4, ih + 4)
+    interior = {(x, y) for x in range(x0 + 1, x1) for y in range(y0 + 1, y1)}
+    border = {(x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)} - interior
+    mid = x0 + 1 + iw // 2
+    special = {(mid, y0): valve_img, (mid, y1): controller_img}
+    walls = border - set(special)
+    # tile stage: the floor, or the shader fluid (flat stand-in)
+    for (x, y) in interior:
+        px, py = scene.at(x, y)
+        if fill > 0:
+            for yy in range(32):
+                for xx in range(32):
+                    scene.img.putpixel((px + xx, py + yy), FLUID_STANDIN if (xx + yy) % 9 else FLUID_STANDIN_HI)
+        else:
+            scene.rect(px, py, px + 32, py + 32, TANK_FLOOR)
+    # sorted stage
+    for (x, y) in walls:
+        joined = [(x + dx, y + dy) in walls for dx, dy in ADJ]
+        scene.add_sorted(y * 32 + 20, lambda x=x, y=y, j=joined: draw_wall_like(scene, mineral_wall, x, y, j))
+    for (x, y), img in special.items():
+        px, py = scene.at(x, y)
+        scene.add_sorted(y * 32 + 16, lambda img=img, px=px, py=py: scene.paste(img, px, py - 32))
+    height = int((fill * 32 * 2 + 1) // 2) if fill > 0 else 0  # TankFillBand.height
+    if height > 0:
+        def band():
+            for x in range(x0 + 1, x1):
+                px, py = scene.at(x, y0)
+                scene.rect(px, py + 32 - height, px + 32, py + 32, BAND_STANDIN)
+        scene.add_sorted(y0 * 32 + 24, band)
+    for (x, y) in interior:
+        n = [(x + dx, y + dy) in interior for dx, dy in ADJ]
+
+        def glass_tile(x=x, y=y, n=n):
+            px, py = scene.at(x, y)
+            for sx, sy, ox, oy in ceiling_pieces(n):
+                scene.paste(quarter(ceiling, sx, sy), px + ox, py + oy)
+        scene.add_sorted(y * 32 + 20, glass_tile)
+    return scene.finish()
+
+
+GLASS_WALL_LAYOUT = [
+    "...........",
+    ".CCGGGR.GT.",
+    "...G.G.....",
+    "...GTG..G..",
+    "...GGG..G..",
+    "...........",
+]
+
+
+def glass_wall_scene(wall_sheet, mineral_wall, layout=GLASS_WALL_LAYOUT):
+    """Glass walls outside a tank: G glass, C a mineral wall, R a rock-like solid block, T furniture.
+    The glass joins toward C, R and G (they block the whole tile), not toward T; the mineral wall
+    is vanilla and does not join toward the glass."""
+    cells = {(x, y): ch for y, row in enumerate(layout) for x, ch in enumerate(row) if ch != "."}
+    scene = Scene(len(layout[0]), len(layout))
+    full = {p for p, ch in cells.items() if ch in "GCR"}
+    for (x, y), ch in cells.items():
+        if ch == "G":
+            joined = [(x + dx, y + dy) in full for dx, dy in ADJ]
+            scene.add_sorted(y * 32 + 20, lambda x=x, y=y, j=joined: draw_wall_like(scene, wall_sheet, x, y, j))
+        elif ch == "C":
+            joined = [cells.get((x + dx, y + dy)) == "C" for dx, dy in ADJ]
+            scene.add_sorted(y * 32 + 20, lambda x=x, y=y, j=joined: draw_wall_like(scene, mineral_wall, x, y, j))
+        elif ch == "R":
+            scene.add_sorted(y * 32 + 16, lambda x=x, y=y: draw_rock(scene, x, y))
+        elif ch == "T":
+            scene.add_sorted(y * 32 + 16, lambda x=x, y=y: draw_table(scene, x, y))
+    return scene.finish()
+
+
+def labelled(images, labels, gap=12):
+    from PIL import ImageDraw
+    w = sum(i.width for i in images) + gap * (len(images) + 1)
+    h = max(i.height for i in images) + 28
+    out = Image.new("RGBA", (w, h), (30, 30, 36, 255))
+    draw = ImageDraw.Draw(out)
+    x = gap
+    for img, text in zip(images, labels):
+        draw.text((x, 8), text, fill=(235, 235, 235, 255))
+        out.alpha_composite(img, (x, 24))
+        x += img.width + gap
+    return out
+
+
+def enlarged_sheet(sheet, scale=8):
+    big = sheet.resize((sheet.width * scale, sheet.height * scale), Image.NEAREST)
+    out = Image.new("RGBA", big.size, (90, 90, 96, 255))
+    out.alpha_composite(big)
+    from PIL import ImageDraw
+    draw = ImageDraw.Draw(out)
+    for x in range(0, big.width, 16 * scale):
+        draw.line([(x, 0), (x, big.height)], fill=(255, 0, 255, 255))
+    for y in range(0, big.height, 16 * scale):
+        draw.line([(0, y), (big.width, y)], fill=(255, 0, 255, 255))
+    return out
+
+
+def mineral_wall_sheet(resources):
+    return Image.open(os.path.join(resources, "objects", "copperwall.png")).convert("RGBA")
+
+
+def preview(objects, resources):
+    """Review mock-up: a 3x2 tank at 50 % with the glass ceiling, rim and band, and glass walls."""
+    ctrl, vlv, ceiling, wall = (o.img for o in objects)
+    mineral = mineral_wall_sheet(resources)
+    return labelled([tank_scene(ceiling, mineral, ctrl, vlv, 3, 2, 0.5), glass_wall_scene(wall, mineral)],
+                    ["tank 3x2, 50 %", "glass walls: copper wall, rock, furniture"])
+
+
+def glass_previews(out_dir, resources):
+    """The review set: tanks 3x2 and 5x5 at 0 % (empty), 50 % and 100 %, glass walls, the sheets."""
+    os.makedirs(out_dir, exist_ok=True)
+    ctrl, vlv = controller_object().img, valve_object().img
+    ceiling, wall = glass_ceiling_sheet().img, glass_wall_sheet().img
+    mineral = mineral_wall_sheet(resources)
+    fills = (0.0, 0.5, 1.0)
+    labels = ["0 % (empty)", "50 % (band 16 px)", "100 % (band 32 px)"]
+    for iw, ih in ((3, 2), (5, 5)):
+        panels = [tank_scene(ceiling, mineral, ctrl, vlv, iw, ih, f) for f in fills]
+        labelled(panels, labels).save(os.path.join(out_dir, "tank_%dx%d.png" % (iw, ih)))
+    labelled([glass_wall_scene(wall, mineral)], ["glass walls: C copper wall, R rock stand-in, T furniture stand-in"]) \
+        .save(os.path.join(out_dir, "glass_walls.png"))
+    enlarged_sheet(ceiling).save(os.path.join(out_dir, "sheet_glassblock_ceiling.png"))
+    enlarged_sheet(wall).save(os.path.join(out_dir, "sheet_glassblock_wall.png"))
+
+
 # ---------- sheets ----------
 
 def controller_object():
@@ -287,12 +858,6 @@ def controller_object():
 def valve_object():
     c = Canvas(32, 64)
     valve(c, 0, 31, 6, 30, 63, big=True)
-    return c
-
-
-def glass_object():
-    c = Canvas(32, 32)
-    glass(c, 0, 0, 31, 31)
     return c
 
 
@@ -314,32 +879,15 @@ def glass_item():
     return c
 
 
-def preview(objects):
-    """Tank mock-up for review: border of controller/valve/walls around glass over water-ish blue."""
-    s = Canvas(7 * 32, 6 * 32)
-    for y in range(s.h):
-        for x in range(s.w):
-            s.px(x, y, (60, 120, 70, 255) if (x // 8 + y // 8) % 2 else (64, 126, 74, 255))
-    ctrl, vlv, gls = objects
-    # interior fluid (flat blue) and glass on 3x2 cells, the bottom wall row: valve, controller
-    for ty in range(2, 4):
-        for tx in range(2, 5):
-            for y in range(32):
-                for x in range(32):
-                    s.px(tx * 32 + x, ty * 32 + y, (54, 126, 196, 255) if (x + y) % 9 else (90, 160, 222, 255))
-            s.img.alpha_composite(gls.img, (tx * 32, ty * 32))
-    s.img.alpha_composite(vlv.img, (1 * 32, 4 * 32 - 32))
-    s.img.alpha_composite(ctrl.img, (3 * 32, 4 * 32 - 32))
-    s.img.alpha_composite(vlv.img, (5 * 32, 4 * 32 - 32))
-    return s.img.resize((s.w * 3, s.h * 3), Image.NEAREST)
-
-
 if __name__ == "__main__":
+    if len(sys.argv) == 4 and sys.argv[1] == "--glass-preview":
+        glass_previews(sys.argv[2], sys.argv[3])
+        sys.exit(0)
     resources, out_preview = sys.argv[1:3]
-    objects = (controller_object(), valve_object(), glass_object())
-    for name, canvas in zip(("tankcontroller", "tankvalve", "glassblock"), objects):
+    objects = (controller_object(), valve_object(), glass_ceiling_sheet(), glass_wall_sheet())
+    for name, canvas in zip(("tankcontroller", "tankvalve", "glassblock_ceiling", "glassblock_wall"), objects):
         canvas.img.save(os.path.join(resources, "objects", name + ".png"))
     for name, canvas in zip(("tankcontroller", "tankvalve", "glassblock"),
                             (controller_item(), valve_item(), glass_item())):
         canvas.img.save(os.path.join(resources, "items", name + ".png"))
-    preview(objects).save(out_preview)
+    preview(objects, resources).save(out_preview)

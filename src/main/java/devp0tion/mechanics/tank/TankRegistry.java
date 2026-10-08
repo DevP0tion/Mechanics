@@ -139,6 +139,22 @@ public final class TankRegistry {
     }
 
     /**
+     * The bounds of the recognized tank whose interior holds the tile, or {@code null}. The same
+     * match as {@link #findTankWithInterior}, returning the bounds it read: a client's view can
+     * change on the network thread while a draw thread asks, so the caller keeps one consistent
+     * snapshot (the glass block's ceiling drawing, N34-1).
+     */
+    public static TankBounds findInteriorBounds(Level level, int tileX, int tileY) {
+        for (TankControllerObjectEntity controller : getControllers(level)) {
+            TankBounds bounds = controller.getTankBounds();
+            if (bounds != null && bounds.isInterior(tileX, tileY)) {
+                return bounds;
+            }
+        }
+        return null;
+    }
+
+    /**
      * What the valve at ({@code tileX}, {@code tileY}) is for the tanks around it (N33-1,
      * {@link TankValveRole}): the controller of the tank it works for, or a plain wall in a wall
      * shared by two recognized tanks. The candidates are the live controllers whose kept tank
