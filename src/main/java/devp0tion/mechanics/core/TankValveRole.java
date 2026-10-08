@@ -11,9 +11,10 @@ import java.util.function.Predicate;
  *     <li>Shared wall: the valve's tile is in the border of two recognized (valid) tanks. There it
  *     counts as a plain wall for both ({@link #isPlainWall}): no inlet or outlet, neither a
  *     destination nor a source, and pipes and pumps exchange no fluid through it: the pipes linked to
- *     it, the underground pipe on its tile and the pumps next to it ({@link PipeGrid#setValvePlainWall}).
- *     Both tanks are recognized ({@link TankStructure}), and its tier still counts toward their lowest
- *     tier (N13-5).</li>
+ *     it, the underground pipe on its tile and the pumps next to it
+ *     ({@link PipeGrid#setValvePlainWall}; the pumps keep it in their sources and skip it, N35-1).
+ *     Both tanks are recognized ({@link TankStructure}), and its tier still counts toward their
+ *     lowest tier (N13-5).</li>
  *     <li>Otherwise the valve works as a valve of the one recognized tank with it in its border
  *     ({@link #getTank}), also when a rectangle on the other side is no tank yet (for example it has
  *     no controller).</li>

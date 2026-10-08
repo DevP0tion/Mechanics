@@ -28,11 +28,12 @@ import java.util.List;
  * <ul>
  *     <li>Server: a new pump connects its sources (the liquid tile under it when it stands on
  *     liquid, then the valves next to it whose links are open, N17-1) and starts a network of its
- *     own (N18-2); a loaded one restores its sources in their order (N19-1), the sides whose valve
- *     it last saw as a plain wall (N33-16), link flags, burn time, the fluid in the pump and the
- *     liquid tile source's left-over units. While its region loads, the engine's fresh entity
- *     registers nothing: the saved entity replaces it, or the region's loaded event registers it
- *     (A1).</li>
+ *     own (N18-2); a loaded one restores its sources in their order (N19-1), link flags, burn time,
+ *     the fluid in the pump and the liquid tile source's left-over units. A valve that is a plain
+ *     wall (N33-1) keeps its place in the saved sources (N35-1). The key {@code plainWallSides} of
+ *     saves made before N35-1 (N33-16) is no longer read; the game ignores it. While its region
+ *     loads, the engine's fresh entity registers nothing: the saved entity replaces it, or the
+ *     region's loaded event registers it (A1).</li>
  *     <li>It holds data only (N22-5): the pipe system's systems run the pump every tick
  *     ({@link PipeSystem#tick}); pipes that break are removed there without a drop (N12-5).</li>
  *     <li>The liquid tile source's 5x5 judgment (N20-7) is made when a new pump registers, with the
@@ -292,10 +293,6 @@ public class PumpObjectEntity extends InventoryObjectEntity {
             codes[i] = slots.get(i).code();
         }
         save.addIntArray("sources", codes);
-        if (pump.getPlainWallSides() != 0) {
-            // N33-16: the sides whose valve it last saw as a plain wall (not in "sources").
-            save.addInt("plainWallSides", pump.getPlainWallSides());
-        }
         save.addInt("burn", pump.getBurnTicksLeft());
         if (pump.getInstallNumber() >= 0) {
             // N28-17: the level-wide placement order.
@@ -334,8 +331,6 @@ public class PumpObjectEntity extends InventoryObjectEntity {
                 savedSlots.add(slot);
             }
         }
-        // N33-16: a valve that was a plain wall comes back as the last source if it is a valve now.
-        pump.setPlainWallSides(save.getInt("plainWallSides", 0, false));
         pump.setBurnTicksLeft(Math.max(0, save.getInt("burn", 0, false)));
         // A save without an install number gets the next one when the pump registers (N28-17, N28-19).
         pump.setInstallNumber(save.getLong("install", -1L, false));

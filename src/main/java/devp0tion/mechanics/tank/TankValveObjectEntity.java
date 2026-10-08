@@ -33,11 +33,12 @@ import java.util.Objects;
  *     its border. In a wall shared by two recognized tanks it is a plain wall for both
  *     ({@link #isPlainWall}): neither a destination nor a source, and the pipes linked to it, the
  *     underground pipe on its tile and the pumps next to it exchange no fluid through it
- *     ({@link PipeGrid#setValvePlainWall}); the pumps drop it from their sources and take it back as
- *     their last one when it is a valve again (N33-16). It follows the judgments: a valve that tank
- *     A used becomes a plain wall once a tank B next to A is recognized, and works again once the
- *     sharing ends. Looked up every tick, not saved (old saves' owner is ignored); the plain wall
- *     state is synced to clients, which draw and collide with it as a wall. Like a wall it shows
+ *     ({@link PipeGrid#setValvePlainWall}); the pumps keep it in their sources where it is and skip
+ *     it until it is a valve again (N35-1, as a valve switched off by a wire signal, N27-4). It
+ *     follows the judgments: a valve that tank A used becomes a plain wall once a tank B next to A
+ *     is recognized, and works again once the sharing ends. Looked up every tick, not saved (old
+ *     saves' owner is ignored); the plain wall state is synced to clients, which draw and collide
+ *     with it as a wall. Like a wall it shows
  *     nothing about it (decided, as the wrench's N33-15): the valve has no hover tooltip of its own,
  *     and the wrench shows none on it.</li>
  *     <li>In the level's pipe grid (server): a new valve's link toward a pump already next to it

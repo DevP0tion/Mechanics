@@ -116,7 +116,8 @@ public class PumpObject extends GameObject {
     /**
      * The fluids of the sources a pump placed at the tile would connect: the liquid tile under it
      * and the tanks of the valves next to it whose side toward it is not cut. A valve that is a plain
-     * wall (N33-1) works for no tank and would not connect (N33-16): it holds nothing here. Both
+     * wall (N33-1) works for no tank: it holds nothing here, so the pump may be placed whatever it
+     * held, and it connects as a source skipped while it is a plain wall (N35-1). Both
      * sides read the same synced state (valve flags, the controllers' kept tanks, recognition and
      * fluid view); the server's answer is final and a rejected client prediction is corrected
      * ({@code PlacementCorrection}).

@@ -20,9 +20,10 @@ package devp0tion.mechanics.core;
  *     it counts as a plain wall for both (N33-1, {@link #isPlainWall}): no tank, and no link to it
  *     counts while it is one ({@link #linksSide}, {@link #linksVertical}): it is neither a
  *     destination nor a source. Its link flags stay as they are, so it links again as before when
- *     the sharing ends; the pumps next to it drop it from their sources meanwhile and take it back as
- *     their last one (N33-16). Set through {@link PipeGrid#setValvePlainWall} once the valve is in a
- *     grid, which handles the links that appear or disappear.</li>
+ *     the sharing ends; the pumps next to it keep it in their sources where it is and skip it
+ *     meanwhile, as for a valve switched off by a wire signal (N35-1, N27-4). Set through
+ *     {@link PipeGrid#setValvePlainWall} once the valve is in a grid, which handles the links that
+ *     appear or disappear.</li>
  * </ul>
  *
  * <p>TODO(design): automatic output from the valve is TODO (N7-3).
