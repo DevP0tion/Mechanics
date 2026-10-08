@@ -35,9 +35,9 @@ glassblocktip=Inside a recognized tank, only glass blocks can be placed.
 // Pump placement rejection (N17-1) and wire rule (N11-3), in the item descriptions (N11-6).
 pumpsourcestip=Cannot be placed where it would connect sources holding different fluids.
 pumpwiretip=Stops working while it receives a wire signal.
-// Wrench controls (12-8, 13-4, 13-5; wording N33-17), the mode key (N30-5) and the tooltip preview (N30-1, N30-2).
+// Wrench controls (12-8, 13-4, 13-5; wording N33-17, N33-22), the mode key (N30-5) and the tooltip preview (N30-1, N30-2).
 // [input=...] is drawn as the bound key.
-mechanicswrenchtip=Left click: pick up a pipe. Right click near a side: cut or link that side. Right click on the middle area of a tile: cut or link the pipes above and below. [input=mechanicswrenchmode]: switch between basic and underground mode (underground mode picks up and links the underground pipe first). Shows underground pipes, and for the tile it points at, the pipes' fluid and links and why a right click there would be refused.
+mechanicswrenchtip=Left click: pick up a pipe. Right click on the edge area of a tile: cut or link that side. Right click on the middle area of a tile: cut or link the pipes above and below. [input=mechanicswrenchmode]: switch between basic and underground mode (underground mode picks up and links the underground pipe first). Shows underground pipes, and for the tile it points at, the pipes' fluid and links and why a right click there would be refused.
 // Valve tier (N13-5; wording N33-17): <wall> is the mineral wall's name.
 tankvalvetier=Mineral tier: <wall>
 tankvalvetierfromwall=Mineral tier: that of the mineral wall used to craft it

@@ -33,7 +33,9 @@ import java.util.Set;
  * (N13-3, N16-3); the wrench links and cuts valves ({@link PipeGrid#toggleSide}). A valve switched
  * off by a wire signal is no source while it is off: nothing is pulled through it (N27-4).
  * A valve that becomes a plain wall (N33-1) leaves the sources, and comes back as the last one when
- * it is a valve again (N33-16, {@link PipeGrid#setValvePlainWall}, {@link #getPlainWallSides}).
+ * it is a valve again (N33-16, {@link PipeGrid#setValvePlainWall}, {@link #getPlainWallSides}),
+ * whatever its tank holds: while that is another fluid than the baseline it is dormant like any
+ * other source (N33-21).
  *
  * <h2>One cycle</h2>
  * <ol>

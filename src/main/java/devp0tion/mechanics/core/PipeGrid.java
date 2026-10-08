@@ -49,7 +49,8 @@ import java.util.Set;
  *     {@link #setValvePlainWall}): no link to it counts, from pipes, the underground pipe on its tile
  *     or pumps, so it is neither a destination nor a source; its flags stay for when it is a valve
  *     again. The pumps next to it drop it from their sources, and take it back as their last source
- *     when it is a valve again and both flags toward each other are open (N33-16).</li>
+ *     when it is a valve again and both flags toward each other are open (N33-16), also when its tank
+ *     holds another fluid than their other sources: a dormant source then (N33-21, N17-3, N20-3).</li>
  * </ul>
  * Pipes may always be placed and linked: where two fluids meet, the face is simply not used, a
  * dead end (N13-2; {@link #getFluidBlockedSides}, so the game can draw it).
@@ -1033,8 +1034,9 @@ public final class PipeGrid implements PumpHost {
      * or no valve is there.
      * <p>N33-16: the pumps next to it drop it from their sources when it becomes a plain wall, and
      * take it back as their last source (N19-1) when it is a valve again, each pump whose flag and the
-     * valve's flag toward each other are both open then ({@link #followPlainWall}). A pump that is not
-     * loaded follows when it loads ({@link #loadPump}).
+     * valve's flag toward each other are both open then ({@link #followPlainWall}), whatever its tank
+     * holds: a dormant source while that is another fluid (N33-21). A pump that is not loaded follows
+     * when it loads ({@link #loadPump}).
      */
     public void setValvePlainWall(int x, int y, boolean plainWall) {
         TankValve valve = valves.get(key(x, y));
@@ -1101,14 +1103,15 @@ public final class PipeGrid implements PumpHost {
      *     pump's flag and the valve's flag toward each other are both open. A flag cut while it was a
      *     plain wall brings nothing back; the wrench links it later as usual. Flipping the pump's flag
      *     while it is a plain wall adds no source ({@link #toggleSide}).</li>
-     *     <li>The source fluid rule refuses it back as it refuses the wrench's link (N16-3): when its
-     *     tank holds another fluid than the pump's other sources, it does not come back.
-     *     TODO(confirm): no rule covers this automatic return with another fluid; refused as the
-     *     wrench's link is, changing nothing else, so the flags stay open (drawn linked) while the
-     *     valve is no source of the pump, until the wrench cuts and links it again. Not decided
-     *     whether it should cut the pump's side instead (as a pump registering after its placement
-     *     check does) or come back anyway as a dormant source (N17-3). A valve entering the grid
-     *     before the game knows its tank (its controller not loaded yet) is checked as empty.</li>
+     *     <li>N33-21: it comes back last whatever its tank holds; this return checks no fluid. A valve
+     *     whose tank holds another fluid than the pump's other sources is handled as a connected
+     *     source that fills with another fluid later (N17-3, N20-3): it stays connected, dormant while
+     *     its fluid is not the pump's baseline, and pulled once it is ({@link Pump#cycleFluid}). The
+     *     baseline stays as N20-5 has it: the fluid of the output cell, or while that is empty the
+     *     first fluid in pull order, which is the valve's own when no source before it holds anything.
+     *     The wrench's link of a valve holding another fluid stays refused (N16-3,
+     *     {@link #toggleSide}), and the pump's placement check is unchanged (N17-1,
+     *     {@link #checkPumpPlacement}).</li>
      * </ul>
      */
     private void followPlainWall(Pump pump, Direction d, TankValve valve) {
@@ -1122,12 +1125,7 @@ public final class PipeGrid implements PumpHost {
             return;
         }
         pump.setSawPlainWall(d, false);
-        if (!pump.isSideOpen(d) || !valve.isSideOpen(d.opposite())) {
-            return;
-        }
-        List<FluidType> fluids = pump.getSourceFluids(slot);
-        fluids.add(valve.getStoredFluid());
-        if (Pump.canConnectSources(fluids)) {
+        if (pump.isSideOpen(d) && valve.isSideOpen(d.opposite())) {
             pump.addSourceSlot(slot);
         }
     }
