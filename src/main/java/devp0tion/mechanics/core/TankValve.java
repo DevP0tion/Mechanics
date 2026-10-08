@@ -15,10 +15,13 @@ package devp0tion.mechanics.core;
  *     <li>Link flags ({@link LinkFlags}): one per side (basic pipes and pumps next to it) and the
  *     vertical one (the underground pipe on its tile, 9-9, 13-5). Toggled by the wrench and kept
  *     when the other side is removed (N16-4).</li>
- *     <li>It belongs to the tank that recognized it first (N13-3): another tank completed later
- *     around it does not take it, and is no tank while the valve is in its border (N15-3). The game
- *     passes that first tank's storage to {@link #setTank}, see
- *     {@link TankStructure#effectiveValveOwner}.</li>
+ *     <li>It works for the one recognized tank with it in its border; the game passes that tank's
+ *     storage to {@link #setTank} ({@link TankValveRole}). In a wall shared by two recognized tanks
+ *     it counts as a plain wall for both (N33-1, {@link #isPlainWall}): no tank, and no link to it
+ *     counts while it is one ({@link #linksSide}, {@link #linksVertical}): it is neither a
+ *     destination nor a source. Its link flags stay as they are, so it links again as before when
+ *     the sharing ends. Set through {@link PipeGrid#setValvePlainWall} once the valve is in a grid,
+ *     which handles the links that appear or disappear.</li>
  * </ul>
  *
  * <p>TODO(design): automatic output from the valve is TODO (N7-3).
@@ -27,6 +30,7 @@ public final class TankValve {
 
     private TankStorage tank;
     private boolean enabled = true;
+    private boolean plainWall;
     private int links = LinkFlags.ALL_OPEN;
 
     /**
@@ -40,6 +44,19 @@ public final class TankValve {
 
     public void setTank(TankStorage tank) {
         this.tank = tank;
+    }
+
+    /** Whether the valve is in a wall shared by two recognized tanks: a plain wall for both (N33-1). */
+    public boolean isPlainWall() {
+        return plainWall;
+    }
+
+    /**
+     * Sets the shared wall state (N33-1) of a valve that is not in a grid yet (as it is registered);
+     * once it is, {@link PipeGrid#setValvePlainWall}.
+     */
+    public void setPlainWall(boolean plainWall) {
+        this.plainWall = plainWall;
     }
 
     public boolean isEnabled() {
@@ -77,6 +94,19 @@ public final class TankValve {
         return LinkFlags.isVerticalOpen(links);
     }
 
+    /**
+     * Whether the part on side {@code direction} can link to the valve: its flag toward that side is
+     * open and it is no plain wall (N33-1). The part's own flag counts too.
+     */
+    public boolean linksSide(Direction direction) {
+        return !plainWall && isSideOpen(direction);
+    }
+
+    /** Whether the underground pipe on its tile can link to it: its vertical flag open and no plain wall (N33-1). */
+    public boolean linksVertical() {
+        return !plainWall && isVerticalOpen();
+    }
+
     void setSideOpen(Direction direction, boolean open) {
         links = LinkFlags.withSide(links, direction, open);
     }
@@ -105,7 +135,7 @@ public final class TankValve {
 
     @Override
     public String toString() {
-        return "TankValve[" + (enabled ? "on" : "off") + ", " + getTank() + "]";
+        return "TankValve[" + (enabled ? "on" : "off") + (plainWall ? ", plain wall" : "") + ", " + getTank() + "]";
     }
 
 }

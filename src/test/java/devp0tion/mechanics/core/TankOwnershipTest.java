@@ -6,8 +6,9 @@ import devp0tion.mechanics.core.TankValidation.Reason;
 import java.util.List;
 
 /**
- * First come, first served (N13-3), no shared valves (N15-3) and the placement rejections judged
- * against the tanks their controllers hold now (N8-1, N11-1). See {@link Grid} for the map legend.
+ * First come, first served for controllers (N13-3) and the controller placement rejection judged
+ * against the tanks the controllers hold now (N8-1). Valves in shared walls: {@link TankSharedWallTest}
+ * (N33-1). See {@link Grid} for the map legend.
  */
 final class TankOwnershipTest {
 
@@ -70,17 +71,16 @@ final class TankOwnershipTest {
 
     public static void testControllerMovesToARebuiltTank() {
         // The kept 3x3 tank is no longer valid (its right wall is gone); the bigger rectangle is the
-        // one valid for the controller, which takes it. Its own valve on both borders stays its own.
+        // one valid for the controller, which takes it, with the valve on both borders.
         Grid grid = Grid.of(
                 "#C##",
                 "#..#",
                 "#V##")
-                .set(1, 0, TankCell.controller(LEFT))
-                .set(1, 2, TankCell.valve(MineralTier.COPPER, new GridPos(1, 0)));
+                .set(1, 0, TankCell.controller(LEFT));
         TankSearchResult result = TankStructure.findTank(1, 0, grid);
         Check.equal(Status.FOUND, result.getStatus());
         Check.equal(new TankBounds(0, 0, 4, 3), result.getTank().getBounds());
-        Check.equal(1, result.getTank().getValveCount(), "the controller's own valve");
+        Check.equal(1, result.getTank().getValveCount(), "the valve");
     }
 
     public static void testInvalidKeptTankIsStillRemembered() {
@@ -98,78 +98,7 @@ final class TankOwnershipTest {
         Check.equal(RIGHT, TankStructure.findTank(4, 1, rightClosed).getTank().getBounds());
     }
 
-    // ---------- Valves (N13-3, N15-3) ----------
-
-    private static Grid sharedValve(TankCell left, TankCell valve) {
-        return Grid.of(
-                "#####",
-                "CGVGC",
-                "#####").set(0, 1, left).set(2, 1, valve);
-    }
-
-    public static void testValveStaysWithItsFirstTank() {
-        Grid grid = sharedValve(TankCell.controller(LEFT), TankCell.valve(MineralTier.COPPER, new GridPos(0, 1)));
-        TankValidation left = TankStructure.findTank(0, 1, grid).getTank();
-        Check.equal(LEFT, left.getBounds());
-        Check.equal(1, left.getValveCount());
-        Check.equal(new GridPos(2, 1), left.getValves().get(0));
-        // N15-3: the valve is not shared, so the right rectangle is no tank.
-        TankSearchResult right = TankStructure.findTank(4, 1, grid);
-        Check.equal(Status.NOT_FOUND, right.getStatus());
-        Check.equal(Reason.FOREIGN_VALVE, TankStructure.validate(RIGHT, grid, new GridPos(4, 1)).getReason());
-        Check.equal(Reason.FOREIGN_VALVE, TankStructure.validate(RIGHT, grid).getReason());
-    }
-
-    public static void testValveOfABrokenTankStaysWithIt() {
-        Grid grid = Grid.of(
-                "#####",
-                "CGVGC",
-                "##.##")
-                .set(0, 1, TankCell.controller(LEFT))
-                .set(2, 1, TankCell.valve(MineralTier.COPPER, new GridPos(0, 1)));
-        Check.equal(Status.NOT_FOUND, TankStructure.findTank(0, 1, grid).getStatus(), "left is broken");
-        Check.equal(new GridPos(0, 1), TankStructure.effectiveValveOwner(2, 1, grid.getCell(2, 1), grid));
-    }
-
-    public static void testValveIsFreeWhenItsControllerIsGone() {
-        Grid grid = sharedValve(TankCell.mineralWall(MineralTier.COPPER),
-                TankCell.valve(MineralTier.COPPER, new GridPos(0, 1)));
-        Check.isNull(TankStructure.effectiveValveOwner(2, 1, grid.getCell(2, 1), grid), "owner gone");
-        TankValidation right = TankStructure.findTank(4, 1, grid).getTank();
-        Check.equal(RIGHT, right.getBounds());
-        Check.equal(1, right.getValveCount(), "the right tank may take it now");
-    }
-
-    public static void testValveIsFreeWhenItsControllerKeepsAnotherTank() {
-        // The remembered controller now keeps a tank without the valve in its border.
-        Grid grid = sharedValve(TankCell.controller(new TankBounds(-2, 0, 3, 3)),
-                TankCell.valve(MineralTier.COPPER, new GridPos(0, 1)));
-        Check.isNull(TankStructure.effectiveValveOwner(2, 1, grid.getCell(2, 1), grid), "not in its tank");
-        Check.equal(RIGHT, TankStructure.findTank(4, 1, grid).getTank().getBounds());
-    }
-
-    public static void testValveWithAnUnreadableOwnerStaysOwned() {
-        // The remembered controller's tile is not loaded (D5): the valve still counts as owned.
-        Grid grid = sharedValve(TankCell.controller(LEFT), TankCell.valve(MineralTier.COPPER, new GridPos(0, 1)))
-                .set(0, 1, null);
-        Check.equal(new GridPos(0, 1), TankStructure.effectiveValveOwner(2, 1, grid.getCell(2, 1), grid));
-        Check.equal(Status.NOT_FOUND, TankStructure.findTank(4, 1, grid).getStatus());
-    }
-
-    public static void testForeignValveCountsWhereItIsOwnedEvenInAnotherTanksBorder() {
-        // The valve's own tank counts it among its valves and its tier.
-        Grid grid = sharedValve(TankCell.controller(LEFT), TankCell.valve(MineralTier.COPPER, new GridPos(0, 1)));
-        Grid spiderite = Grid.of(
-                "aaaaa",
-                "CGVGC",
-                "aaaaa")
-                .set(0, 1, TankCell.controller(LEFT))
-                .set(2, 1, TankCell.valve(MineralTier.IRON, new GridPos(0, 1)));
-        Check.equal(MineralTier.IRON, TankStructure.findTank(0, 1, spiderite).getTank().getLowestTier());
-        Check.equal(1, TankStructure.findTank(0, 1, grid).getTank().getValveCount());
-    }
-
-    // ---------- Placement checks against the held tanks (N8-1, N11-1) ----------
+    // ---------- Placement checks against the held tanks (N8-1) ----------
 
     public static void testControllerInWallOfTwoExistingTanksIsRejected() {
         // Round 3 allowed this, because the new controller made both tanks invalid. Under
@@ -213,30 +142,6 @@ final class TankOwnershipTest {
                 "#####").set(2, 1, TankCell.controller(LEFT));
         Check.isTrue(TankStructure.canPlaceController(4, 1, grid), "right tank only");
         Check.equal(RIGHT, TankStructure.findTankIfControllerPlaced(4, 1, grid).getTank().getBounds());
-    }
-
-    public static void testValveCompletingTwoTanksIsRejected() {
-        Grid grid = Grid.of(
-                "#####",
-                "CG.GC",
-                "#####").set(0, 1, TankCell.controller(LEFT));
-        Check.isFalse(TankStructure.canPlaceValve(2, 1, grid), "would be part of two tanks (N11-1)");
-    }
-
-    public static void testValveInWallOfOneTankNextToAForeignValveRectangleIsAllowed() {
-        // The right rectangle has a valve of the left tank, so it is no tank (N15-3): a new valve in
-        // its far wall is part of no tank, and one in the left tank's wall is part of one tank only.
-        Grid grid = Grid.of(
-                "#####",
-                "CGVGC",
-                "#####")
-                .set(0, 1, TankCell.controller(LEFT))
-                .set(2, 1, TankCell.valve(MineralTier.COPPER, new GridPos(0, 1)));
-        Check.isTrue(TankStructure.canPlaceValve(3, 0, grid), "right rectangle is no tank");
-        Check.equal(0, TankStructure.findTanksIfValvePlaced(3, 0, grid).size());
-        List<TankValidation> left = TankStructure.findTanksIfValvePlaced(1, 0, grid);
-        Check.equal(1, left.size());
-        Check.equal(2, left.get(0).getValveCount(), "its own valve and the placed one");
     }
 
     public static void testHeldTanksIncludeAForeignControllersWall() {

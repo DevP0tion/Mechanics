@@ -9,8 +9,9 @@ import java.util.Objects;
  *     <li>The base layer object ({@link CellKind}).</li>
  *     <li>Mineral walls and valves carry a {@link MineralTier} (N13-5 ②: a valve has the tier of the
  *     mineral wall it was crafted from).</li>
- *     <li>Ownership (N13-3): a controller carries the tank it keeps ({@link #getKeptTank()}), a valve
- *     the controller it remembers belonging to ({@link #getValveOwner()}).</li>
+ *     <li>Ownership (N13-3): a controller carries the tank it keeps ({@link #getKeptTank()}). A
+ *     valve carries no owner: it may be in the border of two tanks, which are both recognized
+ *     (N33-1, {@link TankValveRole}).</li>
  *     <li>Interior checks (N15-4): whether another object layer holds something
  *     ({@link #hasOtherLayerObject()}), whether the floor is a liquid tile ({@link #isLiquidFloor()})
  *     and whether it is the tank floor tile ({@link #isTankFloor()}). Only interior cells look at
@@ -28,23 +29,21 @@ public final class TankCell {
     private final CellKind kind;
     private final MineralTier mineral;
     private final TankBounds keptTank;
-    private final GridPos valveOwner;
     private final boolean tankFloor;
     private final boolean liquidFloor;
     private final boolean otherLayerObject;
     private final boolean naturalGrowth;
 
-    private TankCell(CellKind kind, MineralTier mineral, TankBounds keptTank, GridPos valveOwner,
+    private TankCell(CellKind kind, MineralTier mineral, TankBounds keptTank,
                      boolean tankFloor, boolean liquidFloor, boolean otherLayerObject) {
-        this(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, false);
+        this(kind, mineral, keptTank, tankFloor, liquidFloor, otherLayerObject, false);
     }
 
-    private TankCell(CellKind kind, MineralTier mineral, TankBounds keptTank, GridPos valveOwner,
+    private TankCell(CellKind kind, MineralTier mineral, TankBounds keptTank,
                      boolean tankFloor, boolean liquidFloor, boolean otherLayerObject, boolean naturalGrowth) {
         this.kind = kind;
         this.mineral = mineral;
         this.keptTank = keptTank;
-        this.valveOwner = valveOwner;
         this.tankFloor = tankFloor;
         this.liquidFloor = liquidFloor;
         this.otherLayerObject = otherLayerObject;
@@ -53,21 +52,13 @@ public final class TankCell {
 
     /** A mineral wall of the given tier. */
     public static TankCell mineralWall(MineralTier tier) {
-        return new TankCell(CellKind.MINERAL_WALL, Objects.requireNonNull(tier, "tier"), null, null,
+        return new TankCell(CellKind.MINERAL_WALL, Objects.requireNonNull(tier, "tier"), null,
                 false, false, false);
     }
 
-    /** A valve of the given tier (N13-5 ②) that belongs to no tank yet. */
+    /** A valve of the given tier (N13-5 ②). */
     public static TankCell valve(MineralTier tier) {
-        return valve(tier, null);
-    }
-
-    /**
-     * A valve of the given tier (N13-5 ②) that remembers belonging to the controller at
-     * {@code owner}, or to none when {@code owner} is {@code null} (N13-3).
-     */
-    public static TankCell valve(MineralTier tier, GridPos owner) {
-        return new TankCell(CellKind.VALVE, Objects.requireNonNull(tier, "tier"), null, owner,
+        return new TankCell(CellKind.VALVE, Objects.requireNonNull(tier, "tier"), null,
                 false, false, false);
     }
 
@@ -78,7 +69,7 @@ public final class TankCell {
 
     /** A controller that keeps {@code keptTank}, or no tank when {@code null} (N13-3). */
     public static TankCell controller(TankBounds keptTank) {
-        return new TankCell(CellKind.CONTROLLER, null, keptTank, null, false, false, false);
+        return new TankCell(CellKind.CONTROLLER, null, keptTank, false, false, false);
     }
 
     /**
@@ -93,25 +84,25 @@ public final class TankCell {
         if (kind == CellKind.VALVE) {
             throw new IllegalArgumentException("Use TankCell.valve(tier) for valves");
         }
-        return new TankCell(kind, null, null, null, false, false, false);
+        return new TankCell(kind, null, null, false, false, false);
     }
 
     /** A copy of this cell with the given tank floor state. */
     public TankCell withTankFloor(boolean tankFloor) {
         return tankFloor == this.tankFloor ? this
-                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
+                : new TankCell(kind, mineral, keptTank, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
     }
 
     /** A copy of this cell with the given liquid floor state (N15-4). */
     public TankCell withLiquidFloor(boolean liquidFloor) {
         return liquidFloor == this.liquidFloor ? this
-                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
+                : new TankCell(kind, mineral, keptTank, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
     }
 
     /** A copy of this cell with the given "object on another layer" state (N15-4). */
     public TankCell withOtherLayerObject(boolean otherLayerObject) {
         return otherLayerObject == this.otherLayerObject ? this
-                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
+                : new TankCell(kind, mineral, keptTank, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
     }
 
     /**
@@ -122,7 +113,7 @@ public final class TankCell {
     public TankCell withNaturalGrowth(boolean naturalGrowth) {
         boolean value = naturalGrowth && kind == CellKind.OTHER;
         return value == this.naturalGrowth ? this
-                : new TankCell(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, value);
+                : new TankCell(kind, mineral, keptTank, tankFloor, liquidFloor, otherLayerObject, value);
     }
 
     /**
@@ -130,7 +121,7 @@ public final class TankCell {
      * layers as they are. A cell without natural growth is returned unchanged.
      */
     public TankCell withNaturalGrowthBroken() {
-        return naturalGrowth ? new TankCell(CellKind.EMPTY, null, null, null, tankFloor, liquidFloor, otherLayerObject, false)
+        return naturalGrowth ? new TankCell(CellKind.EMPTY, null, null, tankFloor, liquidFloor, otherLayerObject, false)
                 : this;
     }
 
@@ -149,15 +140,6 @@ public final class TankCell {
     /** For a controller: the tank it keeps (N13-3), or {@code null}. Always {@code null} otherwise. */
     public TankBounds getKeptTank() {
         return keptTank;
-    }
-
-    /**
-     * For a valve: the controller it remembers belonging to (N13-3), or {@code null}. Whether that
-     * controller still owns it is decided by {@link TankStructure#effectiveValveOwner}. Always
-     * {@code null} for other cells.
-     */
-    public GridPos getValveOwner() {
-        return valveOwner;
     }
 
     /** Whether the floor tile under this cell is the tank floor tile. */
@@ -196,21 +178,20 @@ public final class TankCell {
         }
         TankCell other = (TankCell) o;
         return kind == other.kind && mineral == other.mineral && Objects.equals(keptTank, other.keptTank)
-                && Objects.equals(valveOwner, other.valveOwner) && tankFloor == other.tankFloor
+                && tankFloor == other.tankFloor
                 && liquidFloor == other.liquidFloor && otherLayerObject == other.otherLayerObject
                 && naturalGrowth == other.naturalGrowth;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, mineral, keptTank, valveOwner, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
+        return Objects.hash(kind, mineral, keptTank, tankFloor, liquidFloor, otherLayerObject, naturalGrowth);
     }
 
     @Override
     public String toString() {
         return kind + (mineral != null ? "(" + mineral + ")" : "")
                 + (keptTank != null ? "[keeps " + keptTank + "]" : "")
-                + (valveOwner != null ? "[owner " + valveOwner + "]" : "")
                 + (tankFloor ? "+tankFloor" : "") + (liquidFloor ? "+liquidFloor" : "")
                 + (otherLayerObject ? "+otherLayer" : "") + (naturalGrowth ? "+naturalGrowth" : "");
     }

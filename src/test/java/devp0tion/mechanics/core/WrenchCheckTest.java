@@ -80,4 +80,44 @@ public final class WrenchCheckTest {
         Check.isTrue(LinkFlags.isVerticalOpen(grid.getPipe(2, 0, PipeLayer.BASE).getLinks()), "nothing changed");
     }
 
+    public static void testAPlainWallValveIsNoPartForTheWrench() {
+        // N33-1, TODO(design) reading: a valve in a shared wall is a plain wall for the wrench too.
+        PipeGrid grid = grid();
+        TankValve valve = Fluids.valve(100);
+        grid.placeValve(1, 0, valve);
+        grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER);
+        grid.setValvePlainWall(1, 0, true);
+        int valveLinks = valve.getLinks();
+        Check.equal(PipeGrid.Check.NOTHING_THERE, grid.checkToggleSide(1, 0, PipeGrid.Part.VALVE, Direction.WEST), "on it");
+        Check.equal(PipeGrid.Check.NOTHING_THERE, grid.toggleSide(1, 0, PipeGrid.Part.VALVE, Direction.WEST), "as the click");
+        Check.equal(PipeGrid.Check.NOTHING_THERE, grid.checkToggleVertical(1, 0), "no vertical link on its own");
+        Check.equal(PipeGrid.Check.OK, grid.checkToggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST), "toward it");
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.EAST), "toward it");
+        Check.isFalse(grid.getPipe(0, 0, PipeLayer.BASE).isSideOpen(Direction.EAST), "the pipe's own flag flipped");
+        Check.equal(valveLinks, valve.getLinks(), "the valve's flags stay");
+        grid.placePipe(1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
+        Check.equal(PipeGrid.Check.OK, grid.toggleVertical(1, 0), "the underground pipe there");
+        Check.isFalse(grid.getPipe(1, 0, PipeLayer.UNDERGROUND).isVerticalOpen(), "its own flag only");
+        Check.isTrue(valve.isVerticalOpen(), "the valve's stays");
+    }
+
+    public static void testAPumpCuttingItsSideTowardAPlainWallValveDropsTheSource() {
+        PipeGrid grid = grid();
+        TankValve valve = Fluids.valve(100);
+        grid.placeValve(1, 0, valve);
+        Pump pump = new Pump(PumpTier.FIRE);
+        grid.placePump(0, 0, pump);
+        Check.equal(1, pump.getSourceSlots().size(), "linked at placement");
+        grid.setValvePlainWall(1, 0, true);
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST), "own flag");
+        Check.isFalse(pump.isSideOpen(Direction.EAST), "cut");
+        Check.isTrue(valve.isSideOpen(Direction.WEST), "the valve's flag stays");
+        Check.equal(0, pump.getSourceSlots().size(), "no source behind its cut side");
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST), "open again");
+        Check.equal(1, pump.getSourceSlots().size(), "a source slot again, for when it is a valve again");
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.EAST), "not linked while it is a plain wall");
+        grid.setValvePlainWall(1, 0, false);
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.EAST), "linked once it is a valve again");
+    }
+
 }

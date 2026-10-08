@@ -72,7 +72,9 @@ public final class PipeRendering {
 
     /**
      * The link flags of the base layer part at a tile as the client knows them, or -1 when it is no
-     * part. Also read on the server, for the basic pipe's collision (N31-10): the object entities
+     * part. A valve that is a plain wall (N33-1, {@link TankValveObjectEntity#isPlainWall}) is no part
+     * here, like a wall: no arm or cut mark toward it, no collision part, not linked in the wrench's
+     * tooltip. Also read on the server, for the basic pipe's collision (N31-10): the object entities
      * keep the flags on both sides.
      */
     public static int baseLinks(Level level, int tileX, int tileY) {
@@ -85,7 +87,8 @@ public final class PipeRendering {
             return ((BasicPipeObjectEntity) entity).getLinks();
         }
         if (entity instanceof TankValveObjectEntity) {
-            return ((TankValveObjectEntity) entity).getLinks();
+            TankValveObjectEntity valve = (TankValveObjectEntity) entity;
+            return valve.isPlainWall() ? -1 : valve.getLinks();
         }
         if (entity instanceof PumpObjectEntity) {
             return ((PumpObjectEntity) entity).getLinks();
@@ -166,7 +169,7 @@ public final class PipeRendering {
         return baseLinks(level, tileX, tileY);
     }
 
-    /** Cut marks of a pump's links to the valves next to it (N16-3, N16-4). */
+    /** Cut marks of a pump's links to the valves next to it (N16-3, N16-4); none toward a plain wall (N33-1). */
     public static DrawOptionsList pumpCutOptions(Level level, int tileX, int tileY, int drawX, int drawY, int pumpLinks) {
         GameLight light = level.getLightLevel(tileX, tileY);
         DrawOptionsList options = new DrawOptionsList();
@@ -177,7 +180,10 @@ public final class PipeRendering {
                 continue;
             }
             int valve = baseLinks(level, nx, ny);
-            if (!LinkFlags.isSideOpen(pumpLinks, d) || valve >= 0 && !LinkFlags.isSideOpen(valve, d.opposite())) {
+            if (valve < 0) {
+                continue;
+            }
+            if (!LinkFlags.isSideOpen(pumpLinks, d) || !LinkFlags.isSideOpen(valve, d.opposite())) {
                 options.add(cell(links, d.ordinal(), drawX, drawY, light, 1f));
             }
         }

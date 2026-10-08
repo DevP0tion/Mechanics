@@ -6,7 +6,7 @@ import java.util.List;
 
 /**
  * {@link TankStructure#findTank}: finding the tank around a controller; placement checks for
- * controllers (N8-1) and valves (N11-1).
+ * controllers (N8-1); valves in shared walls (N33-1, no placement check since N11-1 was dropped).
  */
 final class TankSearchTest {
 
@@ -177,7 +177,7 @@ final class TankSearchTest {
         Check.equal(Status.NOT_FOUND, TankStructure.findTankIfControllerPlaced(1, 1, grid).getStatus());
     }
 
-    // ---------- Valves in shared walls (N11-1) ----------
+    // ---------- Valves in shared walls (N33-1) ----------
 
     public static void testWallCellOfTwoTanksBelongsToBoth() {
         Grid grid = Grid.of(
@@ -192,56 +192,33 @@ final class TankSearchTest {
         Check.equal(0, TankStructure.findTanksWithBorderCell(1, 1, grid).size(), "interior cell");
     }
 
-    public static void testValvePlacementInSharedWallIsRejected() {
+    public static void testValveInSharedWallKeepsBothTanks() {
+        // N33-1 (N11-1 dropped): a valve placed in the shared column leaves both tanks valid; each
+        // lists it, a plain wall for both (TankValveRole).
         Grid grid = Grid.of(
                 "#####",
-                "CG#GC",
+                "CGVGC",
                 "#####");
-        Check.isFalse(TankStructure.canPlaceValve(2, 1, grid), "shared wall (N11-1)");
-        Check.equal(2, TankStructure.findTanksIfValvePlaced(2, 1, grid).size());
-        Check.equal(CellKind.MINERAL_WALL, grid.getCell(2, 1).getKind(), "the check places nothing");
+        List<TankValidation> tanks = TankStructure.findTanksWithBorderCell(2, 1, grid);
+        Check.equal(2, tanks.size(), "both tanks");
+        for (TankValidation tank : tanks) {
+            Check.equal(1, tank.getValveCount(), "the valve is in its border: " + tank);
+            Check.equal(new GridPos(2, 1), tank.getValves().get(0));
+        }
     }
 
-    public static void testValvePlacementInUnsharedWallIsAllowed() {
-        Grid grid = Grid.of(
-                "#####",
-                "CG#GC",
-                "#####");
-        Check.isTrue(TankStructure.canPlaceValve(1, 0, grid), "left tank only");
-        List<TankValidation> tanks = TankStructure.findTanksIfValvePlaced(1, 0, grid);
-        Check.equal(1, tanks.size());
-        Check.equal(1, tanks.get(0).getValveCount(), "the placed valve counts");
-    }
-
-    public static void testValvePlacementNextToTankWithoutControllerIsAllowed() {
-        // The right rectangle has no controller, so it is no tank: the column belongs to one tank.
-        Grid grid = Grid.of(
-                "#####",
-                "CG#G#",
-                "#####");
-        Check.isTrue(TankStructure.canPlaceValve(2, 1, grid), "only one tank");
-    }
-
-    public static void testValvePlacementWithoutTankIsAllowed() {
-        Grid grid = Grid.of(
-                "...",
-                ".X.",
-                "...");
-        Check.isTrue(TankStructure.canPlaceValve(1, 1, grid), "no tank at all");
-        Check.equal(0, TankStructure.findTanksIfValvePlaced(1, 1, grid).size());
-    }
-
-    public static void testValveOnTheSharedCornerOfTwoTanksIsAllowed() {
+    public static void testValveOnTheSharedCornerOfTwoTanksBreaksBoth() {
         // A valve may not be on a corner (4-5): on the corner both rectangles share, neither is a
-        // tank once the valve is there, so the valve is not part of two tanks.
+        // tank once the valve is there.
         Grid grid = Grid.of(
                 "C##..",
                 "#G#..",
-                "#####",
+                "##V##",
                 "..#G#",
                 "..##C");
-        Check.isTrue(TankStructure.canPlaceValve(2, 2, grid), "corner of both");
-        Check.equal(0, TankStructure.findTanksIfValvePlaced(2, 2, grid).size());
+        Check.equal(0, TankStructure.findTanksWithBorderCell(2, 2, grid).size(), "corner of both");
+        Check.equal(TankValidation.Reason.VALVE_ON_CORNER,
+                TankStructure.validate(new TankBounds(0, 0, 3, 3), grid).getReason());
     }
 
     public static void testEachTileIsReadOnce() {

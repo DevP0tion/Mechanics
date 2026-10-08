@@ -8,7 +8,7 @@ public enum CellKind {
     MINERAL_WALL,
     /** The tank controller (2-1, 4-3). The cell also carries the tank it keeps (N13-3). */
     CONTROLLER,
-    /** A tank valve (2-1, 4-4). The cell also carries its {@link MineralTier} (N13-5) and owner (N13-3). */
+    /** A tank valve (2-1, 4-4). The cell also carries its {@link MineralTier} (N13-5), no owner (N33-1). */
     VALVE,
     /** A glass block (2-1, 5-5). */
     GLASS,

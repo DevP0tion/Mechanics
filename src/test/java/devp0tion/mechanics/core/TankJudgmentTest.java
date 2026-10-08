@@ -46,15 +46,13 @@ final class TankJudgmentTest {
         }
     }
 
-    /** A copper tank around an empty 3x1 interior that its controller keeps; the valves are its own. */
+    /** A copper tank with two valves around an empty 3x1 interior that its controller keeps. */
     private static Grid tank(String interior) {
         return Grid.of(
                 "##V##",
                 "C" + interior + "#",
                 "##V##")
-                .set(0, 1, TankCell.controller(TANK))
-                .set(2, 0, TankCell.valve(MineralTier.COPPER, CONTROLLER))
-                .set(2, 2, TankCell.valve(MineralTier.COPPER, CONTROLLER));
+                .set(0, 1, TankCell.controller(TANK));
     }
 
     private static TankCell grass() {
@@ -99,8 +97,8 @@ final class TankJudgmentTest {
                 "C...#",
                 "55V55")
                 .set(0, 1, TankCell.controller(TANK))
-                .set(2, 0, TankCell.valve(MineralTier.values()[5], CONTROLLER))
-                .set(2, 2, TankCell.valve(MineralTier.values()[5], CONTROLLER));
+                .set(2, 0, TankCell.valve(MineralTier.values()[5]))
+                .set(2, 2, TankCell.valve(MineralTier.values()[5]));
         int multiplier = MineralTier.values()[5].getCapacityMultiplier();
         int copper = 3 * 40 * MineralTier.COPPER.getCapacityMultiplier();
         Check.equal(copper, TankStructure.validate(TANK, grid, CONTROLLER).getCapacity(), "every cell loaded");
@@ -117,10 +115,11 @@ final class TankJudgmentTest {
     }
 
     public static void testLoadedOnlyKeepsTheOtherRules() {
-        // A valve of another tank in the loaded border still makes it no tank (N15-3).
-        Grid grid = tank("...").set(2, 0, TankCell.valve(MineralTier.COPPER, new GridPos(9, 9)));
-        Check.equal(Reason.FOREIGN_VALVE, TankStructure.validateLoaded(TANK, new Partial(grid, 4), CONTROLLER).getReason());
+        // The size rule still applies with cells left out; a valve on a loaded corner still breaks it (4-5).
+        Grid grid = tank("...");
         Check.equal(Reason.TOO_LARGE, TankStructure.validateLoaded(new TankBounds(0, 0, 8, 3), new Partial(grid, 4), CONTROLLER).getReason());
+        Check.equal(Reason.VALVE_ON_CORNER, TankStructure.validateLoaded(TANK, new Partial(grid.set(0, 0, TankCell.valve(MineralTier.COPPER)), 4),
+                CONTROLLER).getReason());
     }
 
     // ---------- Loading with a saved judgment (N22-7) ----------
@@ -202,9 +201,13 @@ final class TankJudgmentTest {
         Check.equal(TANK, result.getTank().getBounds());
     }
 
-    // ---------- Two tanks at once (N29-8) ----------
+    // ---------- Two tanks sharing a wall with a valve (N33-1) ----------
 
-    /** Two 5x3 tanks sharing the wall x = 4 with a valve (4, 1) that belongs to no tank. */
+    private static final TankBounds LEFT = new TankBounds(0, 0, 5, 3);
+    private static final TankBounds RIGHT = new TankBounds(4, 0, 5, 3);
+    private static final GridPos SHARED_VALVE = new GridPos(4, 1);
+
+    /** Two 5x3 tanks sharing the wall x = 4 with a valve (4, 1). */
     private static Grid twoTanks() {
         return Grid.of(
                 "#########",
@@ -212,38 +215,38 @@ final class TankJudgmentTest {
                 "#########");
     }
 
-    public static void testTwoTanksSharingAFreeValveAreNeitherRecognized() {
+    public static void testTwoTanksSharingAValveAreBothRecognized() {
+        // N33-1 (N29-8, N29-10 replaced): one change makes both valid at once; whichever judges
+        // first, both are recognized, each with the valve in its border (a plain wall for both).
         Grid grid = twoTanks();
         TankJudgment.Result left = TankJudgment.judge(0, 1, grid, Mode.CHANGE, Prior.INACTIVE);
         TankJudgment.Result right = TankJudgment.judge(8, 1, grid, Mode.CHANGE, Prior.INACTIVE);
-        Check.equal(Kind.CONTESTED, left.getKind(), "left");
-        Check.equal(Kind.CONTESTED, right.getKind(), "right: the same, whichever judges first");
-        Check.isNull(left.getTank(), "no tank");
-        Check.isTrue(left.isSettled() && right.isSettled(), "nothing waits: a player's change judges again");
-        // The valve moved off the shared wall (a change): both are tanks again (shared walls, N8-1).
-        Grid moved = twoTanks().set(4, 1, TankCell.mineralWall(MineralTier.COPPER)).set(2, 0, TankCell.valve(MineralTier.COPPER));
-        Check.isTrue(TankStructure.validate(new TankBounds(0, 0, 5, 3), moved).isValid(), "sanity");
-        Check.equal(Kind.SEARCHED, TankJudgment.judge(0, 1, moved, Mode.CHANGE, Prior.INACTIVE).getKind());
-        Check.isTrue(TankJudgment.judge(0, 1, moved, Mode.CHANGE, Prior.INACTIVE).getTank() != null, "left recognized");
-        Check.isTrue(TankJudgment.judge(8, 1, moved, Mode.CHANGE, Prior.INACTIVE).getTank() != null, "right recognized");
+        Check.equal(Kind.SEARCHED, left.getKind(), "left");
+        Check.equal(Kind.SEARCHED, right.getKind(), "right");
+        Check.equal(LEFT, left.getTank().getBounds());
+        Check.equal(RIGHT, right.getTank().getBounds());
+        Check.equal(Collections.singletonList(SHARED_VALVE), left.getTank().getValves());
+        Check.equal(Collections.singletonList(SHARED_VALVE), right.getTank().getValves());
+        Check.isTrue(left.appliesJudgment() && right.appliesJudgment(), "both recognized");
+        Check.isTrue(left.isSettled() && right.isSettled(), "nothing waits");
     }
 
-    public static void testAnOwnedValveKeepsItsTank() {
-        // The valve already belongs to the left tank (N13-3): left keeps it, right has a foreign valve (N15-3).
-        Grid grid = twoTanks().set(0, 1, TankCell.controller(new TankBounds(0, 0, 5, 3)))
-                .set(4, 1, TankCell.valve(MineralTier.COPPER, new GridPos(0, 1)));
+    public static void testAValveOfATankStaysInItWhenASecondTankIsBuilt() {
+        // The left tank has the valve in its border; the right tank built later shares that wall:
+        // the left tank keeps its tank, and the right one is recognized too (N33-1, N15-3 replaced).
+        Grid grid = twoTanks().set(0, 1, TankCell.controller(LEFT));
         TankJudgment.Result left = TankJudgment.judge(0, 1, grid, Mode.CHANGE, Prior.ACTIVE);
         Check.equal(Kind.SEARCHED, left.getKind());
-        Check.equal(new TankBounds(0, 0, 5, 3), left.getTank().getBounds());
-        Check.isNull(TankJudgment.judge(8, 1, grid, Mode.CHANGE, Prior.INACTIVE).getTank(), "right: foreign valve");
+        Check.equal(LEFT, left.getTank().getBounds());
+        TankJudgment.Result right = TankJudgment.judge(8, 1, grid, Mode.CHANGE, Prior.INACTIVE);
+        Check.equal(RIGHT, right.getTank().getBounds(), "the right tank is recognized");
     }
 
-    public static void testACompetitorTouchingUnloadedCellsDoesNotCount() {
-        // The right tank's east part (x >= 6) is not loaded: it cannot be judged valid, so the left
-        // tank is recognized (like a dormant competing controller, see the N29-8 note in TankJudgment).
+    public static void testATankNextToOneTouchingUnloadedCellsIsRecognized() {
+        // The right tank's east part (x >= 6) is not loaded: the left tank is recognized as always.
         TankJudgment.Result left = TankJudgment.judge(0, 1, new Partial(twoTanks(), 6), Mode.CHANGE, Prior.INACTIVE);
         Check.equal(Kind.FOUND_LOADED, left.getKind());
-        Check.equal(new TankBounds(0, 0, 5, 3), left.getTank().getBounds());
+        Check.equal(LEFT, left.getTank().getBounds());
     }
 
     // ---------- Changes: loaded cells only (N20-7, N21-3) ----------
@@ -289,9 +292,7 @@ final class TankJudgmentTest {
                 "##V###",
                 "C....#",
                 "##V###")
-                .set(0, 1, TankCell.controller(TANK))
-                .set(2, 0, TankCell.valve(MineralTier.COPPER, CONTROLLER))
-                .set(2, 2, TankCell.valve(MineralTier.COPPER, CONTROLLER));
+                .set(0, 1, TankCell.controller(TANK));
         TankJudgment.Result result = TankJudgment.judge(0, 1, grid, Mode.CHANGE, Prior.ACTIVE);
         Check.equal(Kind.SEARCHED, result.getKind());
         Check.equal(new TankBounds(0, 0, 6, 3), result.getTank().getBounds());

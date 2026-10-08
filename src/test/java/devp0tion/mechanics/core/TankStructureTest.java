@@ -424,11 +424,10 @@ final class TankStructureTest {
         Check.throwsException(IllegalArgumentException.class, () -> TankCell.of(CellKind.VALVE));
         Check.throwsException(NullPointerException.class, () -> TankCell.mineralWall(null));
         Check.throwsException(NullPointerException.class, () -> TankCell.valve(null));
-        TankCell valve = TankCell.valve(MineralTier.IVY, new GridPos(3, 4));
+        TankCell valve = TankCell.valve(MineralTier.IVY);
         Check.equal(CellKind.VALVE, valve.getKind());
         Check.equal(MineralTier.IVY, valve.getMineral(), "a valve carries its tier (N13-5)");
-        Check.equal(new GridPos(3, 4), valve.getValveOwner());
-        Check.isNull(TankCell.valve(MineralTier.IVY).getValveOwner(), "no owner");
+        Check.isNull(valve.getKeptTank(), "and no owner or kept tank (N33-1)");
         TankBounds kept = new TankBounds(0, 0, 3, 3);
         Check.equal(kept, TankCell.controller(kept).getKeptTank());
         Check.isNull(TankCell.controller().getKeptTank(), "keeps nothing");

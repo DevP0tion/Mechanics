@@ -1,9 +1,8 @@
 package devp0tion.mechanics.tank;
 
-import devp0tion.mechanics.core.GridPos;
 import devp0tion.mechanics.core.TankBounds;
-import devp0tion.mechanics.core.TankStorage;
 import devp0tion.mechanics.core.TankStructure;
+import devp0tion.mechanics.core.TankValveRole;
 import devp0tion.mechanics.core.TileBuckets;
 import necesse.level.maps.Level;
 
@@ -13,7 +12,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
@@ -26,11 +24,11 @@ import java.util.concurrent.CopyOnWriteArraySet;
  *     again on their next tick (5-1).</li>
  *     <li>Both sides: finds the tank whose interior holds a tile (hover tooltip, fluid rendering,
  *     the interior placement rule N16).</li>
- *     <li>Server: the tank a valve belongs to ({@link #findValveTank}, N13-3).</li>
+ *     <li>Both sides: what a valve is for the tanks around it ({@link #valveRole}, N33-1).</li>
  * </ul>
- * Safe to read from the client's draw threads. Two indexes keep the frequent server lookups from
- * scanning every controller: by tile (the owner lookup of every valve, every tick) and by region
- * bucket ({@link TileBuckets}: the controllers near a changed tile).
+ * Safe to read from the client's draw threads. An index by region bucket ({@link TileBuckets})
+ * keeps the frequent server lookups from scanning every controller: the controllers near a changed
+ * tile, and near every valve, every tick.
  */
 public final class TankRegistry {
 
@@ -40,8 +38,6 @@ public final class TankRegistry {
     /** The controllers of one level and their indexes. */
     private static final class LevelControllers {
         final Set<TankControllerObjectEntity> all = new CopyOnWriteArraySet<>();
-        /** By controller tile. */
-        final Map<GridPos, TankControllerObjectEntity> byTile = new ConcurrentHashMap<>();
         /** By region bucket of the controller tile; guarded by itself. */
         final TileBuckets<TankControllerObjectEntity> nearby = new TileBuckets<>();
 
@@ -73,7 +69,6 @@ public final class TankRegistry {
             }
         }
         controllers.all.add(controller);
-        controllers.byTile.put(new GridPos(controller.tileX, controller.tileY), controller);
         synchronized (controllers.nearby) {
             controllers.nearby.add(controller.tileX, controller.tileY, controller);
         }
@@ -85,7 +80,6 @@ public final class TankRegistry {
             return;
         }
         controllers.all.remove(controller);
-        controllers.byTile.remove(new GridPos(controller.tileX, controller.tileY), controller);
         synchronized (controllers.nearby) {
             controllers.nearby.remove(controller.tileX, controller.tileY, controller);
         }
@@ -112,24 +106,9 @@ public final class TankRegistry {
         return result;
     }
 
-    /** The live controller at the tile, or {@code null}. */
-    private static TankControllerObjectEntity controllerAt(Level level, GridPos tile) {
-        LevelControllers controllers = of(level);
-        TankControllerObjectEntity controller = controllers == null ? null : controllers.byTile.get(tile);
-        if (controller != null && isGone(controller)) {
-            remove(controller);
-            return null;
-        }
-        return controller;
-    }
-
     /**
      * An object or the floor tile at ({@code tileX}, {@code tileY}) changed (5-1). On the server,
      * every controller within {@link TankStructure#REACH} searches its tank again on its next tick.
-     * A controller whose tank another controller's contests (N29-8,
-     * {@link TankControllerObjectEntity#isContested}) also does for a change within twice the reach
-     * (REACH x 2, 12 tiles), where the other tank's cells are: the tank still valid is recognized once
-     * the other one is not, for example right after the competing controller is broken (N29-10).
      */
     public static void onTileChanged(Level level, int tileX, int tileY) {
         if (level == null || !level.isServer()) {
@@ -140,12 +119,9 @@ public final class TankRegistry {
             return;
         }
         int reach = TankStructure.REACH;
-        int contestReach = reach * 2;
-        for (TankControllerObjectEntity controller : controllers.near(tileX - contestReach, tileY - contestReach,
-                tileX + contestReach, tileY + contestReach)) {
-            int dx = Math.abs(controller.tileX - tileX);
-            int dy = Math.abs(controller.tileY - tileY);
-            if (dx <= reach && dy <= reach || controller.isContested() && dx <= contestReach && dy <= contestReach) {
+        for (TankControllerObjectEntity controller : controllers.near(tileX - reach, tileY - reach,
+                tileX + reach, tileY + reach)) {
+            if (Math.abs(controller.tileX - tileX) <= reach && Math.abs(controller.tileY - tileY) <= reach) {
                 controller.markStructureChanged();
             }
         }
@@ -163,38 +139,40 @@ public final class TankRegistry {
     }
 
     /**
-     * The storage of the tank the valve at ({@code tileX}, {@code tileY}) belongs to, or
-     * {@code null} when there is none. Server only (clients hold no fluid).
+     * What the valve at ({@code tileX}, {@code tileY}) is for the tanks around it (N33-1,
+     * {@link TankValveRole}): the controller of the tank it works for, or a plain wall in a wall
+     * shared by two recognized tanks. The candidates are the live controllers whose kept tank
+     * (N13-3) has the tile in its border; a valve is in the border of a tank only within
+     * {@link TankStructure#REACH} of its controller. Both sides: clients read the synced kept tanks
+     * and recognition, so placement checks that need the tank's fluid (N17-1) agree with the server.
      *
-     * <p>First come, first served (N13-3): the valve belongs to the controller that recognized it
-     * first ({@code owner}, set by {@link TankControllerObjectEntity}), as long as that controller
-     * keeps a tank with the valve in its border; while that tank is inactive its storage takes and
-     * gives nothing. Another tank completed around the valve later never gets it, and is no tank while
-     * the valve is in its border (N15-3).
+     * <p>TODO(design): a tank whose controller is not loaded (dormant, N21-2, N22-7) is not in the
+     * registry, so it is not seen here: its valve in a wall shared with a loaded recognized tank is
+     * no plain wall and works for that tank. Read as the dormant tank not being recognized now.
      */
-    public static TankStorage findValveTank(Level level, int tileX, int tileY, GridPos owner) {
-        TankControllerObjectEntity controller = findValveController(level, tileX, tileY, owner);
-        return controller == null ? null : controller.getStorage();
-    }
-
-    /**
-     * The controller of the tank the valve at ({@code tileX}, {@code tileY}) belongs to, or
-     * {@code null} (N13-3). Both sides: clients read the synced owner and kept tanks, so placement
-     * checks that need the tank's fluid (N17-1) agree with the server.
-     */
-    public static TankControllerObjectEntity findValveController(Level level, int tileX, int tileY, GridPos owner) {
-        if (owner == null) {
-            return null;
+    public static TankValveRole<TankControllerObjectEntity> valveRole(Level level, int tileX, int tileY) {
+        LevelControllers controllers = of(level);
+        List<TankControllerObjectEntity> candidates = Collections.emptyList();
+        if (controllers != null) {
+            int reach = TankStructure.REACH;
+            candidates = new ArrayList<>();
+            for (TankControllerObjectEntity controller : controllers.near(tileX - reach, tileY - reach,
+                    tileX + reach, tileY + reach)) {
+                if (isGone(controller)) {
+                    remove(controller);
+                } else {
+                    candidates.add(controller);
+                }
+            }
         }
-        TankControllerObjectEntity controller = controllerAt(level, owner);
-        return controller != null && TankStructure.ownsValve(controller.getKeptTank(), tileX, tileY) ? controller : null;
+        return TankValveRole.of(tileX, tileY, candidates, TankControllerObjectEntity::getKeptTank,
+                TankControllerObjectEntity::isRecognized);
     }
 
     /**
-     * A controller stopped keeping {@code tank} (it took another tank, or it is gone): the valves
-     * and the controller cells of that tank may now belong to other tanks, so every controller close
-     * enough to have such a cell in its border searches its tank again on its next tick (N13-3).
-     * Server only.
+     * A controller stopped keeping {@code tank} (it took another tank, or it is gone): the controller
+     * cells of that tank may now belong to other tanks, so every controller close enough to have such
+     * a cell in its border searches its tank again on its next tick (N13-3). Server only.
      */
     static void onTankReleased(Level level, TankBounds tank) {
         if (level == null || !level.isServer() || tank == null) {

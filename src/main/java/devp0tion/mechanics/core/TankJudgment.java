@@ -8,7 +8,7 @@ import java.util.Set;
 
 /**
  * How a tank controller judges the tank it keeps (N20-7 tank part, N20-8, N21-3, N22-7, N23-4,
- * N26-3, N29-1, N29-2, N29-5, N29-8, N29-10).
+ * N26-3, N29-1, N29-2, N29-5).
  *
  * <p>The judgment is anchored at the controller: the tank it keeps (its range, N13-3), whether that
  * tank is active and its capacity ({@link TankStorage}), and the tank's lowest tier (N29-1). The
@@ -31,18 +31,10 @@ import java.util.Set;
  *     all loaded is recognized right away; a rectangle touching cells that are not loaded is not,
  *     until they load ({@link TankStructure#findLoadedTank}, N29-2, replacing the wait for the whole
  *     search area).</li>
- *     <li>Two tanks at once (N29-8): when one change makes the tanks of two controllers valid at the
- *     same time and they share a valve that belongs to no tank yet (on their shared wall), neither is
- *     recognized, whichever controller judges first, until a player changes something within reach
- *     of either tank, so the tank still valid then is recognized. That reading is decided as
- *     implemented (N29-10): a contested controller judges again after a change within its own reach
- *     ({@link TankStructure#REACH}, 6 tiles) and also within twice the reach (REACH x 2, 12 tiles),
- *     where the other tank's cells are ({@code TankRegistry.onTileChanged}), so breaking the
- *     competing controller recognizes the other tank right away. A valve that already belongs to a
- *     tank keeps N13-3 and N15-3. A rectangle touching cells that are not loaded is no competitor (it
- *     cannot be judged valid). Note: a competing controller that is not loaded (dormant) is not seen,
- *     so the loaded one recognizes its tank and takes the valve; the other finds the valve taken
- *     when it loads (N15-3).</li>
+ *     <li>Valves in shared walls (N33-1): a valve in the border of another tank changes nothing in
+ *     the judgment, so two tanks sharing a wall with a valve are both recognized, also when one
+ *     change makes both valid at once (N29-8 and N29-10 replaced). The valve counts as a plain wall
+ *     for both ({@link TankValveRole}).</li>
  *     <li>Natural growth (N23-4, N26-3, N29-5): while the tank is active, natural growth on its
  *     loaded interior cells ({@link TankCell#isNaturalGrowth}: every object of the game's grass kind,
  *     placed by a player or not) is broken when the tank is judged, without drops, instead of making
@@ -93,12 +85,7 @@ public final class TankJudgment {
          * The search area is not all loaded, and a rectangle with all its cells loaded is the tank
          * (N29-2).
          */
-        FOUND_LOADED,
-        /**
-         * The tank would be valid, but a valve of it that belongs to no tank is in the valid tank of
-         * another controller too (N29-8): no tank, nothing waits.
-         */
-        CONTESTED
+        FOUND_LOADED
     }
 
     /** The outcome of one judgment. */
@@ -125,7 +112,7 @@ public final class TankJudgment {
          */
         public boolean appliesJudgment() {
             return kind == Kind.SEARCHED || kind == Kind.KEPT_VALID || kind == Kind.KEPT_INVALID
-                    || kind == Kind.FOUND_LOADED || kind == Kind.CONTESTED;
+                    || kind == Kind.FOUND_LOADED;
         }
 
         /** The valid tank of the new judgment, or {@code null}. */
@@ -194,7 +181,7 @@ public final class TankJudgment {
                 // Another rectangle: the cells as they are (the break covers the kept tank only).
                 tank = TankStructure.findTank(controllerX, controllerY, lookup).getTank();
             }
-            return result(Kind.SEARCHED, tank, true, growth, broken);
+            return new Result(Kind.SEARCHED, tank, true, growth);
         }
         if (kept != null && mode != Mode.SEARCH) {
             if (mode == Mode.LOAD && !TankStructure.isLoaded(kept, lookup)) {
@@ -203,13 +190,13 @@ public final class TankJudgment {
             }
             TankValidation keptTank = TankStructure.validateLoaded(kept, broken, controller, judgedTier);
             if (keptTank.isValid()) {
-                return result(Kind.KEPT_VALID, keptTank, true, growth, broken);
+                return new Result(Kind.KEPT_VALID, keptTank, true, growth);
             }
         }
         // N29-2: no kept tank, or it is not valid: a rectangle with all its cells loaded is recognized now.
         TankSearchResult loaded = TankStructure.findLoadedTank(controllerX, controllerY, lookup);
         if (loaded.getTank() != null) {
-            return result(Kind.FOUND_LOADED, loaded.getTank(), true, growth, lookup);
+            return new Result(Kind.FOUND_LOADED, loaded.getTank(), true, growth);
         }
         boolean settled = loaded.getStatus() == TankSearchResult.Status.CONTROLLER_IN_SHARED_WALL
                 || !loaded.hasUnloadedCandidates();
@@ -218,35 +205,6 @@ public final class TankJudgment {
             return new Result(Kind.KEPT_INVALID, null, settled, growth);
         }
         return new Result(Kind.WAITING, null, settled, Collections.<GridPos>emptyList());
-    }
-
-    /** A judgment with a valid tank, unless another controller's tank contests one of its valves (N29-8). */
-    private static Result result(Kind kind, TankValidation tank, boolean settled, List<GridPos> growth,
-                                 TankCellLookup lookup) {
-        if (tank != null && isContested(tank, lookup)) {
-            return new Result(Kind.CONTESTED, null, true, growth);
-        }
-        return new Result(kind, tank, settled, growth);
-    }
-
-    /**
-     * N29-8: whether a valve of {@code tank} that belongs to no tank yet is also in the border of the
-     * valid tank of another controller ({@link TankStructure#findTanksWithBorderCell}). The same for
-     * both controllers, so neither tank is recognized whichever judges first.
-     */
-    static boolean isContested(TankValidation tank, TankCellLookup lookup) {
-        for (GridPos valve : tank.getValves()) {
-            if (TankStructure.effectiveValveOwner(valve.x, valve.y, lookup.getCell(valve.x, valve.y), lookup) != null) {
-                // Already a tank's: N13-3, N15-3.
-                continue;
-            }
-            for (TankValidation other : TankStructure.findTanksWithBorderCell(valve.x, valve.y, lookup)) {
-                if (!other.getController().equals(tank.getController())) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     /** The loaded interior cells of {@code bounds} holding natural growth, in reading order. */

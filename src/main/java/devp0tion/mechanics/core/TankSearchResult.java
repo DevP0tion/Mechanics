@@ -28,9 +28,8 @@ public final class TankSearchResult {
          * ({@link TankStructure#canPlaceController}). A controller that already keeps a valid tank
          * never ends up here: it keeps its tank (N13-3). One change (a wall, valve, glass block or
          * floor tile) can still complete two tanks around a controller that keeps no valid tank, so
-         * neither came first: no tank is recognized for it. When one change completes two tanks of
-         * two controllers around a valve that belongs to no tank yet, neither is recognized either
-         * ({@code TankJudgment}, N29-8).
+         * neither came first: no tank is recognized for it. Two tanks of two controllers sharing a
+         * wall with a valve are both recognized (N33-1, N29-8 replaced).
          */
         CONTROLLER_IN_SHARED_WALL
     }

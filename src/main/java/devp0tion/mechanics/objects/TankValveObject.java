@@ -1,8 +1,6 @@
 package devp0tion.mechanics.objects;
 
 import devp0tion.mechanics.core.MineralTier;
-import devp0tion.mechanics.core.TankStructure;
-import devp0tion.mechanics.tank.LevelTankCellLookup;
 import devp0tion.mechanics.tank.TankInteriorPlacement;
 import devp0tion.mechanics.tank.TankValveObjectEntity;
 import necesse.engine.localization.Localization;
@@ -29,17 +27,15 @@ import java.awt.Color;
  *     <li>Has the tier of the mineral wall it was crafted from (N13-5 ②): one item for every tier
  *     ({@link TankValveObjectItem}), the tier kept when placed (in the object entity) and when picked
  *     up again ({@link #getLootTable}), shown in the item tooltip.</li>
- *     <li>Belongs to the tank that recognized it first (N13-3); a tank completed later around it is
- *     no tank (N15-3).</li>
- *     <li>Placement is rejected where the valve would be part of two tanks at once, i.e. in a wall
- *     shared by two tanks (N11-1), and inside a recognized tank (N16-2); the item description says
- *     so, and the wire rule (N11-3, N11-6).</li>
+ *     <li>Works for the one recognized tank with it in its border; in a wall shared by two recognized
+ *     tanks it is a plain wall for both, and both tanks are recognized (N33-1,
+ *     {@link TankValveObjectEntity#isPlainWall}). So it may be placed in a shared wall (N11-1
+ *     dropped).</li>
+ *     <li>Placement is rejected inside a recognized tank (N16-2); the item description says so, and
+ *     the wire rule (N11-3, N11-6).</li>
  * </ul>
  */
 public class TankValveObject extends TankBorderBlockObject {
-
-    /** canPlace error when the valve would sit in a wall shared by two tanks (N11-1). */
-    public static final String SHARED_WALL_ERROR = "tanksharedwall";
 
     public TankValveObject(String textureName) {
         // Minimap color: the base shade of the texture palette (art choice, not a design value).
@@ -50,25 +46,6 @@ public class TankValveObject extends TankBorderBlockObject {
     @Override
     public Item generateNewObjectItem() {
         return new TankValveObjectItem(this);
-    }
-
-    @Override
-    public String canPlace(Level level, int layerID, int x, int y, int rotation, boolean byPlayer, boolean ignoreOtherLayers) {
-        String error = super.canPlace(level, layerID, x, y, rotation, byPlayer, ignoreOtherLayers);
-        if (error != null) {
-            return error;
-        }
-        if (!TankStructure.canPlaceValve(x, y, new LevelTankCellLookup(level))) {
-            return SHARED_WALL_ERROR;
-        }
-        return null;
-    }
-
-    @Override
-    public boolean canReplace(Level level, int layerID, int tileX, int tileY, int rotation) {
-        // Replacing a wall with a valve that would then be rejected would only destroy the wall.
-        return TankStructure.canPlaceValve(tileX, tileY, new LevelTankCellLookup(level))
-                && super.canReplace(level, layerID, tileX, tileY, rotation);
     }
 
     @Override
@@ -106,8 +83,8 @@ public class TankValveObject extends TankBorderBlockObject {
             tooltips.add(new LocalMessage("itemtooltip", "tankvalvetier", "wall",
                     MineralWallObject.displayNameOf(tier)).translate(), 400);
         }
-        // Placement rejection rules and the wire rule (N11-6): not in a wall shared by two tanks
-        // (N11-1); off while receiving a wire signal (N11-3); not inside a recognized tank (N16-2).
+        // Placement rejection rules and the wire rule (N11-6): off while receiving a wire signal
+        // (N11-3); not inside a recognized tank (N16-2).
         tooltips.add(Localization.translate("itemtooltip", "tankvalvetip"), 400);
         tooltips.add(TankInteriorPlacement.rejectedTooltip(), 400);
         return tooltips;

@@ -11,7 +11,7 @@ import java.util.Map;
  * 0-9, a   mineral wall of MineralTier ordinal 0-9, a = 10 (0 = COPPER ... 8 = ANCIENTFOSSIL,
  *          9 = NIGHTSTEEL, a = SPIDERITE)
  * C        controller keeping no tank
- * V        copper valve belonging to no tank
+ * V        copper valve
  * G / g    glass (g: on the tank floor tile)
  * . / ,    empty (,: tank floor tile)
  * ~        empty on a liquid floor tile
@@ -20,7 +20,7 @@ import java.util.Map;
  * n        the lookup returns null
  * </pre>
  * Tiles outside the rows are empty with a normal floor. {@link #set} overrides single tiles (valve
- * tiers, ownership, kept tanks).
+ * tiers, kept tanks).
  */
 final class Grid implements TankCellLookup {
 

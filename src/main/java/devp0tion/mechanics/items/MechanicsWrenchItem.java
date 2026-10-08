@@ -12,6 +12,7 @@ import devp0tion.mechanics.objects.UndergroundPipeObject;
 import devp0tion.mechanics.pipe.PipeSystem;
 import devp0tion.mechanics.pipe.PlacementCorrection;
 import devp0tion.mechanics.pipe.UndergroundPipeLayer;
+import devp0tion.mechanics.tank.TankValveObjectEntity;
 import devp0tion.mechanics.wrench.WrenchMode;
 import devp0tion.mechanics.wrench.WrenchRefusal;
 import devp0tion.mechanics.wrench.WrenchTargets;
@@ -169,7 +170,14 @@ public class MechanicsWrenchItem extends PlaceableItem implements ItemInteractAc
 
     // ------------------------------------------------------------------ right click: links
 
-    /** The linkable part on the base layer at a tile: a basic pipe, pump or valve, or {@code null}. */
+    /**
+     * The linkable part on the base layer at a tile: a basic pipe, pump or valve, or {@code null}.
+     * A valve that is a plain wall (N33-1, {@link TankValveObjectEntity#isPlainWall}, synced to
+     * clients) is none, like a wall: no tooltip there (N30-7) and the click acts on the underground
+     * pipe of the tile, if any; toward it a part's own flag flips only ({@link PipeGrid#toggleSide}).
+     * TODO(design): what the wrench shows and does on a valve in a shared wall is not decided
+     * (N33-1); read as a plain wall, so no refusal reason either.
+     */
     private static PipeGrid.Part basePartAt(Level level, int tileX, int tileY) {
         GameObject base = level.getObject(tileX, tileY);
         if (base instanceof BasicPipeObject) {
@@ -179,7 +187,8 @@ public class MechanicsWrenchItem extends PlaceableItem implements ItemInteractAc
             return PipeGrid.Part.PUMP;
         }
         if (base instanceof TankValveObject) {
-            return PipeGrid.Part.VALVE;
+            TankValveObjectEntity valve = level.entityManager.getObjectEntity(tileX, tileY, TankValveObjectEntity.class);
+            return valve != null && valve.isPlainWall() ? null : PipeGrid.Part.VALVE;
         }
         return null;
     }

@@ -22,9 +22,9 @@ anypipe=아무 파이프
 mechanicswrench=공학 렌치
 
 [itemtooltip]
-// Placement rejection rules (N8-1, N11-1, N16-2) and the valve's wire rule (N11-3), in the item descriptions (N11-6)
+// Placement rejection rules (N8-1, N16-2) and the valve's wire rule (N11-3), in the item descriptions (N11-6)
 tankcontrollertip=두 탱크가 공유하는 벽에는 설치할 수 없습니다.
-tankvalvetip=두 탱크가 공유하는 벽에는 설치할 수 없습니다. 와이어 신호를 받으면 작동을 멈춥니다.
+tankvalvetip=와이어 신호를 받으면 작동을 멈춥니다.
 tankinteriortip=인식된 탱크의 내부에는 설치할 수 없습니다.
 glassblocktip=인식된 탱크의 내부에는 유리 블럭만 설치할 수 있습니다.
 // Pump placement rejection (N17-1) and wire rule (N11-3), in the item descriptions (N11-6)

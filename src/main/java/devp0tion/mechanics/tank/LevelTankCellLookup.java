@@ -1,8 +1,6 @@
 package devp0tion.mechanics.tank;
 
 import devp0tion.mechanics.core.CellKind;
-import devp0tion.mechanics.core.GridPos;
-import devp0tion.mechanics.core.MineralTier;
 import devp0tion.mechanics.core.TankBounds;
 import devp0tion.mechanics.core.TankCell;
 import devp0tion.mechanics.core.TankCellLookup;
@@ -28,8 +26,8 @@ import necesse.level.maps.Level;
  *     <li>The kind comes from the base object layer (layer 0, where walls and blocks go, D1): no
  *     object is {@link CellKind#EMPTY}; mineral wall, tank controller, tank valve, glass block are
  *     their kinds; anything else is {@link CellKind#OTHER}.</li>
- *     <li>Mineral walls carry their tier; valves their tier and the controller they belong to
- *     ({@link TankValveObjectEntity}, N13-3, N13-5); controllers the tank they keep
+ *     <li>Mineral walls and valves carry their tier ({@link TankValveObjectEntity}, N13-5); a valve
+ *     belongs to no tank here (N33-1); controllers carry the tank they keep
  *     ({@link TankControllerObjectEntity}, N13-3).</li>
  *     <li>For the interior checks (N15-4): whether any other object layer holds something (wall and
  *     table decorations, carpets, every other registered layer) except the underground pipe layer
@@ -101,7 +99,7 @@ public final class LevelTankCellLookup implements TankCellLookup, TankFloorRecor
         return tile != null && tile.spreadToDirtChance() > 0;
     }
 
-    /** The cell of the base layer object on a tile, with its tier and ownership. */
+    /** The cell of the base layer object on a tile, with its tier and the tank a controller keeps. */
     private static TankCell cellAt(Level level, int tileX, int tileY) {
         GameObject object = level.getObject(ObjectLayerRegistry.BASE_LAYER, tileX, tileY);
         if (object instanceof TankControllerObject) {
@@ -112,9 +110,7 @@ public final class LevelTankCellLookup implements TankCellLookup, TankFloorRecor
         }
         if (object instanceof TankValveObject) {
             TankValveObjectEntity valve = level.entityManager.getObjectEntity(tileX, tileY, TankValveObjectEntity.class);
-            MineralTier tier = valve == null ? TankValveObjectItem.DEFAULT_TIER : valve.getTier();
-            GridPos owner = valve == null ? null : valve.getOwner();
-            return TankCell.valve(tier, owner);
+            return TankCell.valve(valve == null ? TankValveObjectItem.DEFAULT_TIER : valve.getTier());
         }
         return cellOf(object);
     }

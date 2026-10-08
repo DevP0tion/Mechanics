@@ -2,7 +2,6 @@ package devp0tion.mechanics.pipe;
 
 import devp0tion.mechanics.objects.PumpObject;
 import devp0tion.mechanics.objects.TankControllerObject;
-import devp0tion.mechanics.objects.TankValveObject;
 import devp0tion.mechanics.tank.TankInteriorPlacement;
 import necesse.engine.network.gameNetworkData.GNDItemMap;
 import necesse.engine.network.packet.PacketChangeObjects;
@@ -39,7 +38,6 @@ public final class PlacementCorrection {
     private static final Set<String> OWN_ERRORS = new HashSet<>(Arrays.asList(
             TankInteriorPlacement.ERROR,
             TankControllerObject.SHARED_WALL_ERROR,
-            TankValveObject.SHARED_WALL_ERROR,
             PumpObject.MIXED_SOURCES_ERROR));
 
     private PlacementCorrection() {

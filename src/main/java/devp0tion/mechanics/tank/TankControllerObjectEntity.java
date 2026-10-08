@@ -34,8 +34,10 @@ import java.util.Objects;
  *     floor tile within reach changed ({@link TankRegistry#onTileChanged}, 5-1).</li>
  *     <li>First come, first served (N13-3): it keeps the tank it recognized ({@link #getKeptTank()})
  *     while that rectangle is valid, even when a later change also puts it in another tank's border,
- *     and it remembers that tank while it is invalid. The valves of its tank become its own
- *     ({@link TankValveObjectEntity#getOwner()}). The kept tank is saved and synced to clients.</li>
+ *     and it remembers that tank while it is invalid. The kept tank is saved and synced to clients,
+ *     with whether it is recognized ({@link #isRecognized}): a valve in its border works for it, or
+ *     is a plain wall when another recognized tank shares that wall (N33-1,
+ *     {@link TankRegistry#valveRole}).</li>
  *     <li>Its judgment is saved: the kept tank (the range), whether it is active, its capacity and
  *     its lowest tier (N20-7, N22-7, N29-1). A controller loaded while part of its tank is not loaded
  *     keeps the saved judgment, so an active tank works from the moment the controller loads; a
@@ -91,8 +93,6 @@ public class TankControllerObjectEntity extends ObjectEntity {
     private MineralTier judgedTier;
     /** The interior floors of the active tank, recorded when it was recognized (N29-9); saved. */
     private TankFloorRecord floorRecord;
-    /** The last judgment found its tank contested by another controller's (N29-8, {@link #isContested}). */
-    private boolean contested;
     /** The region is unloading: nothing about the tank changes for the others (N21-2). */
     private boolean unloading;
     private int ticksSinceViewSync = AMOUNT_SYNC_TICKS;
@@ -136,8 +136,7 @@ public class TankControllerObjectEntity extends ObjectEntity {
         storage.release();
         if (!unloading) {
             // Its tank's cells may now belong to other tanks. An unloading controller changes no
-            // cell: the controllers nearby judge again only when a loaded cell changes (N20-7), and
-            // its valves still count as its own while it is not loaded (TankStructure.effectiveValveOwner).
+            // cell: the controllers nearby judge again only when a loaded cell changes (N20-7).
             TankRegistry.onTankReleased(getLevel(), kept);
         }
     }
@@ -174,15 +173,6 @@ public class TankControllerObjectEntity extends ObjectEntity {
         updateView();
     }
 
-    /**
-     * Whether the last judgment left the controller without a tank because another controller's
-     * tank contests a valve (N29-8): it judges again after a change within reach of that tank too
-     * ({@link TankRegistry#onTileChanged}).
-     */
-    boolean isContested() {
-        return contested;
-    }
-
     /** Judges the tank ({@link TankJudgment}) and applies the result. */
     private void judge(TankJudgment.Mode mode) {
         Level level = getLevel();
@@ -197,7 +187,6 @@ public class TankControllerObjectEntity extends ObjectEntity {
         }
         structureChanged = false;
         justLoaded = false;
-        contested = result.getKind() == TankJudgment.Kind.CONTESTED;
         searchWaiting = !result.isSettled();
         if (searchWaiting) {
             searchSignature = TankStructure.loadedSignature(tileX, tileY, lookup);
@@ -209,7 +198,6 @@ public class TankControllerObjectEntity extends ObjectEntity {
             if (tank != null) {
                 judgedTier = tank.getLowestTier();
                 setKeptTank(tank.getBounds());
-                claimValves(tank);
             }
             // No tank: the kept tank is still remembered (N13-3) and the storage is inactive (5-9).
         }
@@ -235,18 +223,6 @@ public class TankControllerObjectEntity extends ObjectEntity {
             kept = bounds;
             TankRegistry.onTankReleased(getLevel(), old);
             markDirty();
-        }
-    }
-
-    /** The valves of the recognized tank become this controller's (N13-3); loaded valves only. */
-    private void claimValves(TankValidation tank) {
-        GridPos self = new GridPos(tileX, tileY);
-        for (GridPos position : tank.getValves()) {
-            TankValveObjectEntity valve = getLevel().entityManager.getObjectEntity(position.x, position.y,
-                    TankValveObjectEntity.class);
-            if (valve != null) {
-                valve.setOwner(self);
-            }
         }
     }
 
@@ -447,6 +423,15 @@ public class TankControllerObjectEntity extends ObjectEntity {
     /** Whether a tank is recognized around the controller. */
     public boolean isActive() {
         return viewActive;
+    }
+
+    /**
+     * Whether its kept tank ({@link #getKeptTank}) is recognized now: its judgment is active. On the
+     * server the live state, on clients the synced view. Two recognized tanks sharing a wall make a
+     * valve there a plain wall (N33-1, {@link TankRegistry#valveRole}).
+     */
+    public boolean isRecognized() {
+        return isServer() ? storage.isActive() : viewActive;
     }
 
     /** The recognized tank (border included), or {@code null} while no tank is recognized. */

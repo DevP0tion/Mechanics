@@ -1,11 +1,10 @@
 package devp0tion.mechanics.tank;
 
-import devp0tion.mechanics.core.GridPos;
 import devp0tion.mechanics.core.LinkFlags;
 import devp0tion.mechanics.core.MineralTier;
 import devp0tion.mechanics.core.PipeGrid;
-import devp0tion.mechanics.core.TankStructure;
 import devp0tion.mechanics.core.TankValve;
+import devp0tion.mechanics.core.TankValveRole;
 import devp0tion.mechanics.objects.TankValveObjectItem;
 import devp0tion.mechanics.pipe.PipeSystem;
 import necesse.engine.network.PacketReader;
@@ -30,10 +29,16 @@ import java.util.Objects;
  *     <li>Its tier: the mineral wall it was crafted from (N13-5 ②), from the item it was placed
  *     with ({@link TankValveObjectItem#onPlaceObject}). Saved, synced to clients and dropped with the
  *     item again. An item without tier data counts as copper (N19-7 (a)).</li>
- *     <li>Its owner: the controller of the tank that recognized it first (N13-3), set by that
- *     controller ({@link TankControllerObjectEntity}). It belongs to that tank while the controller
- *     keeps a tank with the valve in its border ({@link TankStructure#effectiveValveOwner}); another
- *     tank completed around it later does not take it (N15-3). Saved and synced to clients.</li>
+ *     <li>Its tank (N33-1, {@link TankRegistry#valveRole}): the one recognized tank with the valve in
+ *     its border. In a wall shared by two recognized tanks it is a plain wall for both
+ *     ({@link #isPlainWall}): neither a destination nor a source, and the pipes linked to it, the
+ *     underground pipe on its tile and the pumps next to it exchange no fluid through it
+ *     ({@link PipeGrid#setValvePlainWall}). It follows the judgments: a valve that tank A used
+ *     becomes a plain wall once a tank B next to A is recognized, and works again once the sharing
+ *     ends. Looked up every tick, not saved (old saves' owner is ignored); the plain wall state is
+ *     synced to clients, which draw and collide with it as a wall.
+ *     TODO(design): what the valve's own hover or tooltip shows for a plain wall is not decided; it
+ *     shows nothing about it (the valve has no hover tooltip).</li>
  *     <li>In the level's pipe grid (server): a new valve's link toward a pump already next to it
  *     starts cut (N13-3, N16-3); its link flags (sides and the underground pipe on its tile) are
  *     saved and synced to clients, which draw cut faces (N16-4). Its tank is looked up every tick
@@ -53,7 +58,8 @@ public class TankValveObjectEntity extends ObjectEntity {
 
     private final TankValve valve = new TankValve();
     private MineralTier tier = TankValveObjectItem.DEFAULT_TIER;
-    private GridPos owner;
+    /** In a wall shared by two recognized tanks (N33-1): synced to clients, not saved. */
+    private boolean plainWall;
     private boolean loadedFromSave;
     private boolean deferred;
     private boolean registered;
@@ -64,7 +70,8 @@ public class TankValveObjectEntity extends ObjectEntity {
 
     public TankValveObjectEntity(Level level, int tileX, int tileY) {
         super(level, TYPE, tileX, tileY);
-        // Saved: the tier, the owner and the link flags. The on/off state comes from the wires.
+        // Saved: the tier and the link flags. The on/off state comes from the wires, the tank and the
+        // plain wall state from the tanks around it (N33-1).
     }
 
     @Override
@@ -162,8 +169,25 @@ public class TankValveObjectEntity extends ObjectEntity {
         valve.applyWireSignal(getLevel().wireManager.isWireActiveAny(tileX, tileY));
     }
 
+    /**
+     * Looks the valve's tank up (N33-1): the storage of the tank it works for, and whether it is a
+     * plain wall now. A change of the plain wall state is a structure change in the grid (the links
+     * through the valve appear or disappear); a valve not in the grid yet just takes the state.
+     */
     private void refreshTank() {
-        valve.setTank(TankRegistry.findValveTank(getLevel(), tileX, tileY, owner));
+        TankValveRole<TankControllerObjectEntity> role = TankRegistry.valveRole(getLevel(), tileX, tileY);
+        TankControllerObjectEntity controller = role.getTank();
+        valve.setTank(controller == null ? null : controller.getStorage());
+        PipeSystem system = registered ? PipeSystem.getIfExists(getLevel()) : null;
+        if (system != null && system.getGrid().getValve(tileX, tileY) == valve) {
+            system.getGrid().setValvePlainWall(tileX, tileY, role.isPlainWall());
+        } else {
+            valve.setPlainWall(role.isPlainWall());
+        }
+        if (plainWall != role.isPlainWall()) {
+            plainWall = role.isPlainWall();
+            markDirty();
+        }
     }
 
     /** Whether the valve is on (no wire signal, N11-3). */
@@ -184,20 +208,15 @@ public class TankValveObjectEntity extends ObjectEntity {
         }
     }
 
-    /** The controller the valve remembers belonging to (N13-3), or {@code null}. */
-    public GridPos getOwner() {
-        return owner;
+    /**
+     * Whether the valve is in a wall shared by two recognized tanks: a plain wall for both (N33-1).
+     * Both sides: clients get it synced.
+     */
+    public boolean isPlainWall() {
+        return plainWall;
     }
 
-    /** Called by the controller that recognizes the valve's tank (N13-3). */
-    void setOwner(GridPos owner) {
-        if (!Objects.equals(owner, this.owner)) {
-            this.owner = owner;
-            markDirty();
-        }
-    }
-
-    /** The core valve, linked to the tank it belongs to now. Server only (clients hold no fluid). */
+    /** The core valve, linked to the tank it works for now (N33-1). Server only (clients hold no fluid). */
     public TankValve getValve() {
         updateWireSignal();
         refreshTank();
@@ -221,10 +240,6 @@ public class TankValveObjectEntity extends ObjectEntity {
     public void addSaveData(SaveData save) {
         super.addSaveData(save);
         save.addEnum("tier", tier);
-        if (owner != null) {
-            save.addInt("ownerX", owner.x);
-            save.addInt("ownerY", owner.y);
-        }
         save.addInt("links", registered ? valve.getLinks() : links);
     }
 
@@ -233,8 +248,7 @@ public class TankValveObjectEntity extends ObjectEntity {
         super.applyLoadData(save);
         loadedFromSave = true;
         tier = save.getEnum(MineralTier.class, "tier", TankValveObjectItem.DEFAULT_TIER, false);
-        owner = save.hasLoadDataByName("ownerX") && save.hasLoadDataByName("ownerY")
-                ? new GridPos(save.getInt("ownerX", 0, false), save.getInt("ownerY", 0, false)) : null;
+        // An owner saved before N33-1 (ownerX, ownerY) is ignored: the tank is looked up every tick.
         // Valves saved before round 4b have no flags: everything open.
         links = LinkFlags.sanitize(save.getInt("links", LinkFlags.ALL_OPEN, false));
     }
@@ -243,11 +257,7 @@ public class TankValveObjectEntity extends ObjectEntity {
     public void setupContentPacket(PacketWriter writer) {
         super.setupContentPacket(writer);
         writer.putNextByteUnsigned(tier.ordinal());
-        writer.putNextBoolean(owner != null);
-        if (owner != null) {
-            writer.putNextInt(owner.x);
-            writer.putNextInt(owner.y);
-        }
+        writer.putNextBoolean(plainWall);
         writer.putNextByteUnsigned(registered ? valve.getLinks() : links);
     }
 
@@ -256,7 +266,7 @@ public class TankValveObjectEntity extends ObjectEntity {
         super.applyContentPacket(reader);
         int tierIndex = reader.getNextByteUnsigned();
         tier = tierIndex < MineralTier.values().length ? MineralTier.values()[tierIndex] : TankValveObjectItem.DEFAULT_TIER;
-        owner = reader.getNextBoolean() ? new GridPos(reader.getNextInt(), reader.getNextInt()) : null;
+        plainWall = reader.getNextBoolean();
         links = LinkFlags.sanitize(reader.getNextByteUnsigned());
     }
 

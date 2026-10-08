@@ -28,11 +28,6 @@ public final class TankValidation {
         /** The border has more than one controller of its own (4-3). */
         MULTIPLE_CONTROLLERS,
         /**
-         * A border valve belongs to another tank: valves are not shared, so this rectangle is no tank
-         * and the other tank keeps the valve (N13-3, N15-3).
-         */
-        FOREIGN_VALVE,
-        /**
          * An interior cell holds something other than glass or nothing, on the base layer or on any
          * other object layer except the underground pipe layer (5-5, 5-11, N15-4).
          */
@@ -132,8 +127,9 @@ public final class TankValidation {
     }
 
     /**
-     * The tiles of the tank's valves (all border valves: a valid tank has no valve of another tank,
-     * N15-3), in reading order. Empty if invalid. The tank's controller takes them as its own (N13-3).
+     * The tiles of the tank's valves (all border valves), in reading order. Empty if invalid. A valve
+     * in a wall shared with another recognized tank counts as a plain wall for both, though it is
+     * listed here and its tier counts (N33-1, {@link TankValveRole}).
      */
     public List<GridPos> getValves() {
         return valves;
