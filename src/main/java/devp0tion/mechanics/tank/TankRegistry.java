@@ -146,9 +146,9 @@ public final class TankRegistry {
      * {@link TankStructure#REACH} of its controller. Both sides: clients read the synced kept tanks
      * and recognition, so placement checks that need the tank's fluid (N17-1) agree with the server.
      *
-     * <p>TODO(design): a tank whose controller is not loaded (dormant, N21-2, N22-7) is not in the
-     * registry, so it is not seen here: its valve in a wall shared with a loaded recognized tank is
-     * no plain wall and works for that tank. Read as the dormant tank not being recognized now.
+     * <p>N33-13: a tank whose controller is not loaded (dormant, N21-2, N22-7) is not in the
+     * registry, so it is not seen here: it does not make the wall shared, and the valve in a wall it
+     * shares with a loaded recognized tank is no plain wall and works for that tank.
      */
     public static TankValveRole<TankControllerObjectEntity> valveRole(Level level, int tileX, int tileY) {
         LevelControllers controllers = of(level);

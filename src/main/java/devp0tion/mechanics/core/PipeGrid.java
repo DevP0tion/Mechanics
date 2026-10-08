@@ -48,7 +48,8 @@ import java.util.Set;
  *     <li>A valve in a wall shared by two recognized tanks counts as a plain wall (N33-1,
  *     {@link #setValvePlainWall}): no link to it counts, from pipes, the underground pipe on its tile
  *     or pumps, so it is neither a destination nor a source; its flags stay for when it is a valve
- *     again.</li>
+ *     again. The pumps next to it drop it from their sources, and take it back as their last source
+ *     when it is a valve again and both flags toward each other are open (N33-16).</li>
  * </ul>
  * Pipes may always be placed and linked: where two fluids meet, the face is simply not used, a
  * dead end (N13-2; {@link #getFluidBlockedSides}, so the game can draw it).
@@ -690,7 +691,9 @@ public final class PipeGrid implements PumpHost {
 
     /**
      * The valves a pump pulls through: linked to its sides (11-1 ②, N16-3), in pull order, not
-     * switched off by a wire signal (N27-4) and not a plain wall (N33-1).
+     * switched off by a wire signal (N27-4) and not a plain wall (N33-1). A plain wall is not in the
+     * pump's sources at all: the pump drops it, and takes it back as its last source when it is a
+     * valve again (N33-16, {@link #setValvePlainWall}).
      */
     public List<TankValve> getSourceValves(Pump pump) {
         List<TankValve> result = new ArrayList<>();
@@ -706,11 +709,10 @@ public final class PipeGrid implements PumpHost {
     }
 
     /**
-     * Whether a pump and the valve on its side {@code direction} are linked (N16-3). Not while the
-     * valve is a plain wall (N33-1): the pump keeps its source slot, skipped until the valve is a
-     * valve again, as for a valve switched off by a wire signal (N27-4); the slot follows only the
-     * flags (a cut drops it, {@link #toggleSide}). TODO(confirm): that reading of "pumps attached to
-     * it directly" (the slot stays, in its place in the pull order, N19-1).
+     * Whether a pump and the valve on its side {@code direction} are linked (N16-3): both flags
+     * toward each other open, and the valve no plain wall (N33-1). A valve that becomes a plain wall
+     * leaves the pump's sources; when it is a valve again it comes back as the last source (N19-1)
+     * if both flags are open then (N33-16, {@link #setValvePlainWall}).
      */
     @Override
     public boolean isPumpValveLinked(Pump pump, Direction direction) {
@@ -940,7 +942,8 @@ public final class PipeGrid implements PumpHost {
 
     /**
      * Places a new valve, a new destination. Its links start open, except toward pumps already next
-     * to it: those start cut, so the pumps keep their sources (N13-3, N16-3).
+     * to it: those start cut, so the pumps keep their sources (N13-3, N16-3). A valve placed as a
+     * plain wall (N33-1) is followed by those pumps as one ({@link #followPlainWall}).
      */
     public void placeValve(int x, int y, TankValve valve) {
         addValve(x, y, valve);
@@ -952,6 +955,7 @@ public final class PipeGrid implements PumpHost {
                 changed = true;
             }
         }
+        followPlainWallAround(x, y, valve);
         // A new destination; a valve is never passed through, so no other destination changes.
         staleDestinations.add(key(x, y));
         if (changed) {
@@ -961,11 +965,14 @@ public final class PipeGrid implements PumpHost {
 
     /**
      * Adds a valve with its saved link flags (its region was loaded). Its saved hints are in its
-     * pipes; it is searched only when none of its linked pipes holds a hint for it (N25-1).
+     * pipes; it is searched only when none of its linked pipes holds a hint for it (N25-1). The pumps
+     * next to it follow its plain wall state (N33-16, {@link #followPlainWall}): it may have become a
+     * plain wall, or a valve again, while it was not loaded.
      */
     public void loadValve(int x, int y, TankValve valve) {
         addValve(x, y, valve);
         checkDestinations.add(key(x, y));
+        followPlainWallAround(x, y, valve);
     }
 
     private void addValve(int x, int y, TankValve valve) {
@@ -991,6 +998,7 @@ public final class PipeGrid implements PumpHost {
                 Pump pump = pumps.get(key(x + d.dx, y + d.dy));
                 if (pump != null) {
                     pump.removeSourceSlot(Pump.SourceSlot.valve(d.opposite()));
+                    pump.setSawPlainWall(d.opposite(), false);
                 }
             }
             long dest = key(x, y);
@@ -1021,8 +1029,12 @@ public final class PipeGrid implements PumpHost {
      * links them: a structure change of the valve's region and of each linked part's (N28-1, so the
      * summaries passing them are invalid, N28-2), the networks there rebuilt, and the valve's
      * destination and the destinations of the linked pipes' networks searched again when used
-     * (N25-4, N28-12). The pumps next to it keep its source slot (see {@link #isPumpValveLinked}). The
-     * tank's fluid is untouched. Nothing happens when the state does not change or no valve is there.
+     * (N25-4, N28-12). The tank's fluid is untouched. Nothing happens when the state does not change
+     * or no valve is there.
+     * <p>N33-16: the pumps next to it drop it from their sources when it becomes a plain wall, and
+     * take it back as their last source (N19-1) when it is a valve again, each pump whose flag and the
+     * valve's flag toward each other are both open then ({@link #followPlainWall}). A pump that is not
+     * loaded follows when it loads ({@link #loadPump}).
      */
     public void setValvePlainWall(int x, int y, boolean plainWall) {
         TankValve valve = valves.get(key(x, y));
@@ -1048,6 +1060,7 @@ public final class PipeGrid implements PumpHost {
             pipes.add(under);
         }
         valve.setPlainWall(plainWall);
+        followPlainWallAround(x, y, valve);
         changed();
         structureChanged(x, y);
         // No longer a destination, or a destination again (as a new valve).
@@ -1066,13 +1079,66 @@ public final class PipeGrid implements PumpHost {
         }
     }
 
+    /** {@link #followPlainWall} for each loaded pump next to the valve at the tile (N33-16). */
+    private void followPlainWallAround(int x, int y, TankValve valve) {
+        for (Direction d : DIRS) {
+            Pump pump = pumps.get(key(x + d.dx, y + d.dy));
+            if (pump != null) {
+                followPlainWall(pump, d.opposite(), valve);
+            }
+        }
+    }
+
+    /**
+     * N33-16: a pump's source toward the valve on its side {@code d} follows the valve's plain wall
+     * state (N33-1). The pump remembers the sides whose valve it last saw as a plain wall
+     * ({@link Pump#getPlainWallSides}, saved), so this runs when the state changes
+     * ({@link #setValvePlainWall}) and when the pump or the valve enters the grid: a change while one
+     * of them was not loaded is followed too.
+     * <ul>
+     *     <li>A plain wall leaves the pump's sources.</li>
+     *     <li>A valve the pump last saw as a plain wall comes back as its last source (N19-1) when the
+     *     pump's flag and the valve's flag toward each other are both open. A flag cut while it was a
+     *     plain wall brings nothing back; the wrench links it later as usual. Flipping the pump's flag
+     *     while it is a plain wall adds no source ({@link #toggleSide}).</li>
+     *     <li>The source fluid rule refuses it back as it refuses the wrench's link (N16-3): when its
+     *     tank holds another fluid than the pump's other sources, it does not come back.
+     *     TODO(confirm): no rule covers this automatic return with another fluid; refused as the
+     *     wrench's link is, changing nothing else, so the flags stay open (drawn linked) while the
+     *     valve is no source of the pump, until the wrench cuts and links it again. Not decided
+     *     whether it should cut the pump's side instead (as a pump registering after its placement
+     *     check does) or come back anyway as a dormant source (N17-3). A valve entering the grid
+     *     before the game knows its tank (its controller not loaded yet) is checked as empty.</li>
+     * </ul>
+     */
+    private void followPlainWall(Pump pump, Direction d, TankValve valve) {
+        Pump.SourceSlot slot = Pump.SourceSlot.valve(d);
+        if (valve.isPlainWall()) {
+            pump.removeSourceSlot(slot);
+            pump.setSawPlainWall(d, true);
+            return;
+        }
+        if (!pump.sawPlainWall(d)) {
+            return;
+        }
+        pump.setSawPlainWall(d, false);
+        if (!pump.isSideOpen(d) || !valve.isSideOpen(d.opposite())) {
+            return;
+        }
+        List<FluidType> fluids = pump.getSourceFluids(slot);
+        fluids.add(valve.getStoredFluid());
+        if (Pump.canConnectSources(fluids)) {
+            pump.addSourceSlot(slot);
+        }
+    }
+
     // ---------------------------------------------------------------- pumps
 
     /**
      * Placement check of a pump (N17-1): the base layer must be free, and the sources it would
      * connect (the liquid tile under it and the valves next to it whose side toward it is not cut)
-     * must hold one fluid or be empty. A valve that is a plain wall (N33-1) has no tank, so it holds
-     * nothing here.
+     * must hold one fluid or be empty. A valve that is a plain wall (N33-1) would not connect
+     * (N33-16, {@link #placePump}), so it holds nothing here.
      *
      * @param tileFluid the fluid of the liquid tile under it ({@link FluidType#fromPumpedTile}), or
      *                  {@code null} on land
@@ -1085,7 +1151,7 @@ public final class PipeGrid implements PumpHost {
         fluids.add(tileFluid);
         for (Direction d : DIRS) {
             TankValve valve = valves.get(key(x + d.dx, y + d.dy));
-            if (valve != null && valve.isSideOpen(d.opposite())) {
+            if (valve != null && !valve.isPlainWall() && valve.isSideOpen(d.opposite())) {
                 fluids.add(valve.getStoredFluid());
             }
         }
@@ -1096,8 +1162,8 @@ public final class PipeGrid implements PumpHost {
      * Places a new pump. It connects its sources in this order: the liquid tile under it (when the
      * game set a {@link Pump#setTileSource tile source}), then the valves next to it whose links are
      * open, north, east, south, west (a technical order for sources connected at the same moment).
-     * A valve that is a plain wall (N33-1) gets its slot too, skipped while it is one
-     * ({@link #isPumpValveLinked}). It starts a network of its own (N18-2).
+     * A valve that is a plain wall (N33-1) is no source: it comes back as the last source when it is
+     * a valve again (N33-16, {@link #followPlainWall}). It starts a network of its own (N18-2).
      *
      * @throws IllegalStateException if {@link #checkPumpPlacement} is not {@link Check#OK}
      */
@@ -1111,13 +1177,17 @@ public final class PipeGrid implements PumpHost {
         if (pump.getTileSource() != null) {
             slots.add(Pump.SourceSlot.TILE);
         }
+        int plainWalls = 0;
         for (Direction d : DIRS) {
             TankValve valve = valves.get(key(x + d.dx, y + d.dy));
-            if (valve != null && pump.isSideOpen(d) && valve.isSideOpen(d.opposite())) {
+            if (valve != null && valve.isPlainWall()) {
+                plainWalls = LinkFlags.withSide(plainWalls, d, true);
+            } else if (valve != null && pump.isSideOpen(d) && valve.isSideOpen(d.opposite())) {
                 slots.add(Pump.SourceSlot.valve(d));
             }
         }
         pump.setSourceSlots(slots);
+        pump.setPlainWallSides(plainWalls);
         // A new pump: an old summary at its tile belonged to another pump.
         dropSummariesOf(key(x, y));
         // N28-17: the placement order, kept for good (wrench, merges, saves).
@@ -1129,7 +1199,9 @@ public final class PipeGrid implements PumpHost {
     /**
      * Adds a pump with its saved state (its region was loaded). Saved valve sources behind its own
      * cut sides are dropped; a slot whose valve cut the link is skipped while it is cut
-     * ({@link Pump#getSources}), and linking it again makes it the last source (N19-1).
+     * ({@link Pump#getSources}), and linking it again makes it the last source (N19-1). It follows
+     * the plain wall state of the loaded valves next to it (N33-16, {@link #followPlainWall}): one may
+     * have become a plain wall, or a valve again, while the pump was not loaded.
      */
     public void loadPump(int x, int y, Pump pump) {
         Objects.requireNonNull(pump, "pump");
@@ -1140,6 +1212,12 @@ public final class PipeGrid implements PumpHost {
         } else {
             // Saved without one (older formats are not read, N28-19): numbered as if placed now.
             pump.setInstallNumber(nextInstall++);
+        }
+        for (Direction d : DIRS) {
+            TankValve valve = valves.get(key(x + d.dx, y + d.dy));
+            if (valve != null) {
+                followPlainWall(pump, d, valve);
+            }
         }
     }
 
@@ -1222,10 +1300,11 @@ public final class PipeGrid implements PumpHost {
      * other sources (N16-3); a linked valve becomes the pump's last source (N19-1).
      * When the tile or the neighbour's tile is not loaded, nothing changes ({@link Check#NOT_LOADED}):
      * the game loads the neighbour's region before it uses the wrench toward it.
-     * A valve that is a plain wall (N33-1) is no part here, like a wall: toward it only the part's
-     * own flag flips, and on it the click finds nothing ({@link Check#NOTHING_THERE}).
-     * TODO(design): what the wrench does with a valve in a shared wall is not decided (N33-1); read
-     * as a plain wall, so its flags stay as they were for when it is a valve again.
+     * N33-15: a valve that is a plain wall (N33-1) is no part here, like a wall: toward it only the
+     * part's own flag flips, and on it the click finds nothing ({@link Check#NOTHING_THERE}); its
+     * flags stay as they were for when it is a valve again. A pump's flag flipped toward it adds or
+     * drops no source: the valve is none while it is a plain wall, and comes back from the flags as
+     * they are when it is a valve again (N33-16, {@link #followPlainWall}).
      */
     public Check toggleSide(int x, int y, Part part, Direction direction) {
         int nx = x + direction.dx;
@@ -1245,9 +1324,6 @@ public final class PipeGrid implements PumpHost {
         Direction pumpSide = part == Part.PUMP ? direction : direction.opposite();
         if (other == null) {
             own.set(!own.isOpen());
-            if (part == Part.PUMP) {
-                plainWallSourceSlot(pump, direction);
-            }
         } else if (own.isOpen() && other.isOpen()) {
             own.set(false);
             other.set(false);
@@ -1285,28 +1361,10 @@ public final class PipeGrid implements PumpHost {
     }
 
     /**
-     * N33-1: a pump's own flag toward a valve that is a plain wall flipped. Its source slot follows
-     * the flags as when the pump is placed ({@link #placePump}): dropped with the cut, appended last
-     * (N19-1) when both flags are open, so the valve is its source again once it is a valve again
-     * (see {@link #isPumpValveLinked}).
-     */
-    private void plainWallSourceSlot(Pump pump, Direction direction) {
-        TankValve valve = valves.get(key(pump.getTileX() + direction.dx, pump.getTileY() + direction.dy));
-        if (valve == null || !valve.isPlainWall()) {
-            return;
-        }
-        if (pump.isSideOpen(direction) && valve.isSideOpen(direction.opposite())) {
-            pump.addSourceSlot(Pump.SourceSlot.valve(direction));
-        } else {
-            pump.removeSourceSlot(Pump.SourceSlot.valve(direction));
-        }
-    }
-
-    /**
      * Wrench right-click on the middle of a tile (12-8, 13-5, N16-4): toggles the vertical link
      * between the basic pipe or valve there and the underground pipe there. With only one of them,
      * only its own flag flips. Nothing changes on a tile that is not loaded ({@link Check#NOT_LOADED}).
-     * A valve that is a plain wall (N33-1) counts as no valve here, as in {@link #toggleSide}.
+     * A valve that is a plain wall (N33-1) counts as no valve here, as in {@link #toggleSide} (N33-15).
      */
     public Check toggleVertical(int x, int y) {
         if (!isTileLoaded(x, y)) {

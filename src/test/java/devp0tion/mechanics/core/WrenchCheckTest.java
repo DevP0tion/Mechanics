@@ -81,7 +81,7 @@ public final class WrenchCheckTest {
     }
 
     public static void testAPlainWallValveIsNoPartForTheWrench() {
-        // N33-1, TODO(design) reading: a valve in a shared wall is a plain wall for the wrench too.
+        // N33-1, N33-15: a valve in a shared wall is a plain wall for the wrench too.
         PipeGrid grid = grid();
         TankValve valve = Fluids.valve(100);
         grid.placeValve(1, 0, valve);
@@ -101,7 +101,7 @@ public final class WrenchCheckTest {
         Check.isTrue(valve.isVerticalOpen(), "the valve's stays");
     }
 
-    public static void testAPumpCuttingItsSideTowardAPlainWallValveDropsTheSource() {
+    public static void testAPumpsFlagTowardAPlainWallValveAddsNoSource() {
         PipeGrid grid = grid();
         TankValve valve = Fluids.valve(100);
         grid.placeValve(1, 0, valve);
@@ -109,15 +109,17 @@ public final class WrenchCheckTest {
         grid.placePump(0, 0, pump);
         Check.equal(1, pump.getSourceSlots().size(), "linked at placement");
         grid.setValvePlainWall(1, 0, true);
+        Check.equal(0, pump.getSourceSlots().size(), "a plain wall leaves the sources (N33-16)");
+        Check.equal(PipeGrid.Check.OK, grid.checkToggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST), "previewed");
         Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST), "own flag");
         Check.isFalse(pump.isSideOpen(Direction.EAST), "cut");
         Check.isTrue(valve.isSideOpen(Direction.WEST), "the valve's flag stays");
-        Check.equal(0, pump.getSourceSlots().size(), "no source behind its cut side");
         Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST), "open again");
-        Check.equal(1, pump.getSourceSlots().size(), "a source slot again, for when it is a valve again");
+        Check.equal(0, pump.getSourceSlots().size(), "no source while it is a plain wall (N33-16)");
         Check.isFalse(grid.isPumpValveLinked(pump, Direction.EAST), "not linked while it is a plain wall");
         grid.setValvePlainWall(1, 0, false);
         Check.isTrue(grid.isPumpValveLinked(pump, Direction.EAST), "linked once it is a valve again");
+        Check.equal(1, pump.getSourceSlots().size(), "a source again: both flags are open");
     }
 
 }

@@ -21,9 +21,9 @@ import java.util.function.Predicate;
  *     next to A is recognized, and works as a valve again from the judgment that ends the sharing (B
  *     breaks, etc.).</li>
  *     <li>No recognized tank: the valve belongs to the one tank kept with it in its border, inactive
- *     (that tank keeps its fluid and takes and gives nothing, 5-9). TODO(design): two or more tanks
- *     kept with it, none recognized (both walls broken, for example), is not decided; read as no
- *     tank, as when there is none.</li>
+ *     (that tank keeps its fluid and takes and gives nothing, 5-9). Two or more tanks kept with it,
+ *     none recognized (both walls broken, for example): it belongs to no tank, as when there is none
+ *     (N33-14).</li>
  * </ul>
  * The candidates are the controllers the game knows: their kept tanks (N13-3) and whether each is
  * recognized now (its judgment is active). Game independent, so it is tested by the plain test runner.

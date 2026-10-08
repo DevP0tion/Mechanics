@@ -116,9 +116,10 @@ public class PumpObject extends GameObject {
     /**
      * The fluids of the sources a pump placed at the tile would connect: the liquid tile under it
      * and the tanks of the valves next to it whose side toward it is not cut. A valve that is a plain
-     * wall (N33-1) works for no tank: it holds nothing here. Both sides read the same synced state
-     * (valve flags, the controllers' kept tanks, recognition and fluid view); the server's answer is
-     * final and a rejected client prediction is corrected ({@code PlacementCorrection}).
+     * wall (N33-1) works for no tank and would not connect (N33-16): it holds nothing here. Both
+     * sides read the same synced state (valve flags, the controllers' kept tanks, recognition and
+     * fluid view); the server's answer is final and a rejected client prediction is corrected
+     * ({@code PlacementCorrection}).
      */
     public static List<FluidType> sourceFluidsIfPlaced(Level level, int x, int y) {
         List<FluidType> fluids = new ArrayList<>();

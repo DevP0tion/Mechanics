@@ -12,7 +12,8 @@ import java.util.List;
  * N29-8, N29-10 and the valve part of N13-3; N11-1 dropped): both tanks are recognized, its tier
  * counts for both (N13-5), it is neither a destination nor a source while the wall is shared
  * ({@link TankValveRole}, {@link PipeGrid#setValvePlainWall}), and it works again once the sharing
- * ends. See {@link Grid} for the map legend.
+ * ends. The pumps next to it drop it from their sources and take it back as their last source
+ * (N33-16). See {@link Grid} for the map legend.
  */
 final class TankSharedWallTest {
 
@@ -166,7 +167,7 @@ final class TankSharedWallTest {
         Check.isFalse(roleAt(4, 1, a).isPlainWall(), "no plain wall");
         Controller b = new Controller("B", RIGHT, false);
         TankValveRole<Controller> none = roleAt(4, 1, a, b);
-        Check.isNull(none.getTank(), "TODO(design) reading: two kept tanks, none recognized, is no tank");
+        Check.isNull(none.getTank(), "two kept tanks, none recognized, is no tank (N33-14)");
         Check.isFalse(none.isPlainWall(), "not a shared wall of recognized tanks");
     }
 
@@ -292,8 +293,7 @@ final class TankSharedWallTest {
         grid.setValvePlainWall(-1, 0, true);
         Check.isFalse(grid.isPumpValveLinked(pump, Direction.WEST), "not linked to a plain wall");
         Check.isTrue(grid.getSourceValves(pump).isEmpty(), "no source valve");
-        Check.equal(Collections.singletonList(Pump.SourceSlot.valve(Direction.WEST)), pump.getSourceSlots(),
-                "TODO(confirm) reading: the slot stays, skipped");
+        Check.equal(Collections.<Pump.SourceSlot>emptyList(), pump.getSourceSlots(), "out of the sources (N33-16)");
         List<Integer> amounts = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
             Fluids.cycle(pump);
@@ -303,8 +303,204 @@ final class TankSharedWallTest {
 
         grid.setValvePlainWall(-1, 0, false);
         Check.isTrue(grid.isPumpValveLinked(pump, Direction.WEST), "linked again");
+        Check.equal(Collections.singletonList(WEST), pump.getSourceSlots(), "a source again");
         Fluids.cycle(pump);
         Check.isTrue(source.getTank().getAmount() < left, "pulls again");
+    }
+
+    // ---------- The pumps next to it: out of the sources, back last (N33-16) ----------
+
+    private static final Pump.SourceSlot NORTH = Pump.SourceSlot.valve(Direction.NORTH);
+    private static final Pump.SourceSlot EAST = Pump.SourceSlot.valve(Direction.EAST);
+    private static final Pump.SourceSlot WEST = Pump.SourceSlot.valve(Direction.WEST);
+
+    /** A valve of a 1000 tank holding {@code amount} of freshwater. */
+    private static TankValve water(int amount) {
+        TankValve valve = Fluids.valve(1000);
+        valve.getTank().insert(FluidType.FRESHWATER, amount);
+        return valve;
+    }
+
+    /**
+     * A fire pump at (0, 0) between the valves {@code north} (0, -1) and {@code west} (-1, 0), placed
+     * after them (sources north, then west), pushing east through a full pipe (1, 0) into a tank (2, 0).
+     */
+    private static PipeGrid twoSources(TankValve north, TankValve west, Pump pump) {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
+        grid.placeValve(0, -1, north);
+        grid.placeValve(-1, 0, west);
+        pump.setFuelSupply(new Fluids.Logs(100));
+        grid.placePump(0, 0, pump);
+        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
+        Fluids.fill(grid, 1, 1, 0, PipeLayer.BASE, FluidType.FRESHWATER);
+        grid.placeValve(2, 0, Fluids.valve(1000));
+        return grid;
+    }
+
+    public static void testAPlainWallLeavesThePullOrderAndComesBackLast() {
+        TankValve north = water(30);
+        TankValve west = water(100);
+        Pump pump = new Pump(PumpTier.FIRE);
+        PipeGrid grid = twoSources(north, west, pump);
+        Check.equal(Arrays.asList(NORTH, WEST), pump.getSourceSlots(), "north first");
+        grid.setValvePlainWall(0, -1, true);
+        Check.equal(Collections.singletonList(WEST), pump.getSourceSlots(), "the plain wall leaves the sources");
+        Check.equal(LinkFlags.bit(Direction.NORTH), pump.getPlainWallSides(), "the pump remembers it");
+        Fluids.cycle(pump);
+        Check.equal(30, north.getTank().getAmount(), "nothing through the plain wall");
+        Check.equal(80, west.getTank().getAmount(), "the west valve gives");
+
+        grid.setValvePlainWall(0, -1, false);
+        Check.equal(Arrays.asList(WEST, NORTH), pump.getSourceSlots(), "a valve again: the last source (N19-1)");
+        Check.equal(0, pump.getPlainWallSides());
+        Fluids.cycle(pump);
+        Check.equal(30, north.getTank().getAmount(), "after the west valve now");
+        Check.equal(60, west.getTank().getAmount(), "the west valve gives first");
+        grid.setValvePlainWall(0, -1, false);
+        Check.equal(Arrays.asList(WEST, NORTH), pump.getSourceSlots(), "no change: nothing happens");
+    }
+
+    public static void testAPumpsFlagFlippedWhileItIsAPlainWallAddsNoSource() {
+        TankValve north = water(30);
+        Pump pump = new Pump(PumpTier.FIRE);
+        PipeGrid grid = twoSources(north, water(100), pump);
+        grid.setValvePlainWall(0, -1, true);
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH), "cut");
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH), "open again");
+        Check.isTrue(pump.isSideOpen(Direction.NORTH) && north.isSideOpen(Direction.SOUTH), "both flags open");
+        Check.equal(Collections.singletonList(WEST), pump.getSourceSlots(), "no source while it is a plain wall");
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.NORTH), "not linked");
+        grid.setValvePlainWall(0, -1, false);
+        Check.equal(Arrays.asList(WEST, NORTH), pump.getSourceSlots(), "back last once it is a valve again");
+    }
+
+    public static void testACutFlagBringsNothingBack() {
+        TankValve north = water(30);
+        Pump pump = new Pump(PumpTier.FIRE);
+        PipeGrid grid = twoSources(north, water(100), pump);
+        grid.setValvePlainWall(0, -1, true);
+        grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH);
+        Check.isFalse(pump.isSideOpen(Direction.NORTH), "the pump's flag cut while it is a plain wall");
+        grid.setValvePlainWall(0, -1, false);
+        Check.equal(Collections.singletonList(WEST), pump.getSourceSlots(), "not back");
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.NORTH), "cut");
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH), "the wrench links it");
+        Check.equal(Arrays.asList(WEST, NORTH), pump.getSourceSlots(), "as usual: the last source");
+
+        // The valve's flag cut (with the wrench, before), the pump's opened while it is a plain wall.
+        grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH);
+        Check.isFalse(north.isSideOpen(Direction.SOUTH), "both cut");
+        grid.setValvePlainWall(0, -1, true);
+        grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH);
+        Check.isTrue(pump.isSideOpen(Direction.NORTH), "the pump's own flag only");
+        grid.setValvePlainWall(0, -1, false);
+        Check.equal(Collections.singletonList(WEST), pump.getSourceSlots(), "the valve's cut flag: not back");
+    }
+
+    public static void testAPumpPlacedNextToAPlainWallTakesItOnceItIsAValve() {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
+        TankValve valve = water(100);
+        valve.setPlainWall(true);
+        grid.placeValve(1, 0, valve);
+        Pump pump = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
+        Check.equal(Collections.singletonList(Pump.SourceSlot.TILE), pump.getSourceSlots(), "no source while it is a plain wall");
+        Check.equal(LinkFlags.bit(Direction.EAST), pump.getPlainWallSides());
+        grid.setValvePlainWall(1, 0, false);
+        Check.equal(Arrays.asList(Pump.SourceSlot.TILE, EAST), pump.getSourceSlots(), "after the tile");
+        grid.setValvePlainWall(1, 0, true);
+        grid.removeValve(1, 0);
+        Check.equal(Collections.singletonList(Pump.SourceSlot.TILE), pump.getSourceSlots());
+        Check.equal(0, pump.getPlainWallSides(), "a removed valve is forgotten");
+    }
+
+    public static void testAnotherFluidKeepsItOut() {
+        TankValve north = water(30);
+        Pump pump = new Pump(PumpTier.FIRE);
+        PipeGrid grid = twoSources(north, water(100), pump);
+        grid.setValvePlainWall(0, -1, true);
+        // Its tank holds lava now (filled through another valve while the wall was shared).
+        north.getTank().extract(FluidType.FRESHWATER, 30);
+        north.getTank().insert(FluidType.LAVA, 30);
+        grid.setValvePlainWall(0, -1, false);
+        Check.equal(Collections.singletonList(WEST), pump.getSourceSlots(),
+                "TODO(confirm) reading: refused as the wrench's link is (N16-3)");
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.NORTH), "the flags stay open");
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH), "the wrench cuts it");
+        Check.equal(PipeGrid.Check.DIFFERENT_SOURCE_FLUID, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH),
+                "and refuses to link it");
+    }
+
+    // ---------- Saved and loaded (the plain wall state is not saved) ----------
+
+    public static void testAPumpSavedWhileItsValveWasAPlainWallTakesItBackLast() {
+        TankValve north = water(30);
+        TankValve west = water(100);
+        Pump pump = new Pump(PumpTier.FIRE);
+        PipeGrid grid = twoSources(north, west, pump);
+        grid.setValvePlainWall(0, -1, true);
+        // What the game saves: the pump's flags, sources and plain wall sides, the valves' flags.
+        int pumpLinks = pump.getLinks();
+        List<Pump.SourceSlot> slots = new ArrayList<>(pump.getSourceSlots());
+        int plainWallSides = pump.getPlainWallSides();
+        Check.equal(Collections.singletonList(WEST), slots, "saved without the plain wall");
+
+        for (int order = 0; order < 3; order++) {
+            PipeGrid loaded = new PipeGrid(Fluids.uniform(40));
+            TankValve n = water(30);
+            n.setLinks(north.getLinks());
+            // order 2: still a plain wall when it loads (the game looks it up as the valve registers).
+            n.setPlainWall(order == 2);
+            TankValve w = water(100);
+            w.setLinks(west.getLinks());
+            Pump p = new Pump(PumpTier.FIRE);
+            p.setLinks(pumpLinks);
+            p.setSourceSlots(slots);
+            p.setPlainWallSides(plainWallSides);
+            if (order == 1) {
+                loaded.loadPump(0, 0, p);
+                loaded.loadValve(-1, 0, w);
+                loaded.loadValve(0, -1, n);
+            } else {
+                loaded.loadValve(0, -1, n);
+                loaded.loadValve(-1, 0, w);
+                loaded.loadPump(0, 0, p);
+            }
+            if (order == 2) {
+                Check.equal(Collections.singletonList(WEST), p.getSourceSlots(), "still a plain wall: still out");
+                loaded.setValvePlainWall(0, -1, false);
+            }
+            Check.equal(Arrays.asList(WEST, NORTH), p.getSourceSlots(), "a valve after loading: back last, order " + order);
+            Check.equal(0, p.getPlainWallSides());
+        }
+    }
+
+    public static void testAPumpNotLoadedFollowsWhenItLoads() {
+        Pump pump = new Pump(PumpTier.FIRE);
+        PipeGrid grid = twoSources(water(30), water(100), pump);
+        grid.unloadPump(0, 0);
+        grid.setValvePlainWall(0, -1, true);
+        Check.equal(Arrays.asList(NORTH, WEST), pump.getSourceSlots(), "a pump that is not loaded is not touched");
+        grid.loadPump(0, 0, pump);
+        Check.equal(Collections.singletonList(WEST), pump.getSourceSlots(), "it drops the plain wall when it loads");
+        grid.unloadPump(0, 0);
+        grid.setValvePlainWall(0, -1, false);
+        grid.loadPump(0, 0, pump);
+        Check.equal(Arrays.asList(WEST, NORTH), pump.getSourceSlots(), "and takes it back last when it loads");
+    }
+
+    public static void testAValveNotLoadedIsFollowedWhenItLoads() {
+        TankValve north = water(30);
+        Pump pump = new Pump(PumpTier.FIRE);
+        PipeGrid grid = twoSources(north, water(100), pump);
+        grid.unloadValve(0, -1);
+        Check.equal(Arrays.asList(NORTH, WEST), pump.getSourceSlots(), "kept while it is not loaded");
+        north.setPlainWall(true);
+        grid.loadValve(0, -1, north);
+        Check.equal(Collections.singletonList(WEST), pump.getSourceSlots(), "loaded as a plain wall: out");
+        grid.unloadValve(0, -1);
+        north.setPlainWall(false);
+        grid.loadValve(0, -1, north);
+        Check.equal(Arrays.asList(WEST, NORTH), pump.getSourceSlots(), "loaded as a valve again: back last");
     }
 
 }

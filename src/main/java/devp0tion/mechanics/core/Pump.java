@@ -32,6 +32,8 @@ import java.util.Set;
  * A valve placed next to a pump later starts with its link cut, so the pump keeps its sources
  * (N13-3, N16-3); the wrench links and cuts valves ({@link PipeGrid#toggleSide}). A valve switched
  * off by a wire signal is no source while it is off: nothing is pulled through it (N27-4).
+ * A valve that becomes a plain wall (N33-1) leaves the sources, and comes back as the last one when
+ * it is a valve again (N33-16, {@link PipeGrid#setValvePlainWall}, {@link #getPlainWallSides}).
  *
  * <h2>One cycle</h2>
  * <ol>
@@ -111,6 +113,8 @@ public class Pump extends LiquidStorage {
     private int burnTicksLeft;
     private int ticksSinceCycle;
     private int links = LinkFlags.ALL_OPEN;
+    /** The sides whose valve the pump last saw as a plain wall (N33-16, {@link #getPlainWallSides}). */
+    private int plainWallSides;
     private FluidType lastPushedFluid;
     /** The level-wide install number (N28-17): the placement order; -1 until the engine gives one. */
     private long installNumber = -1;
@@ -198,6 +202,29 @@ public class Pump extends LiquidStorage {
 
     void removeSourceSlot(SourceSlot slot) {
         sourceSlots.remove(slot);
+    }
+
+    /**
+     * The sides whose valve the pump last saw as a plain wall (N33-1, N33-16), as {@link LinkFlags}
+     * side bits. That valve left its sources; once the pump sees it as a valve again it comes back
+     * as the last one ({@link PipeGrid#setValvePlainWall}). Saved, so a valve that stopped or started
+     * being a plain wall while the pump was not loaded is followed when the pump loads again.
+     */
+    public int getPlainWallSides() {
+        return plainWallSides;
+    }
+
+    /** Restores the saved plain wall sides (before the pump is added to a grid). */
+    public void setPlainWallSides(int sides) {
+        plainWallSides = sides & LinkFlags.SIDES;
+    }
+
+    boolean sawPlainWall(Direction direction) {
+        return LinkFlags.isSideOpen(plainWallSides, direction);
+    }
+
+    void setSawPlainWall(Direction direction, boolean plainWall) {
+        plainWallSides = LinkFlags.withSide(plainWallSides, direction, plainWall);
     }
 
     /**

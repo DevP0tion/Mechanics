@@ -172,11 +172,10 @@ public class MechanicsWrenchItem extends PlaceableItem implements ItemInteractAc
 
     /**
      * The linkable part on the base layer at a tile: a basic pipe, pump or valve, or {@code null}.
-     * A valve that is a plain wall (N33-1, {@link TankValveObjectEntity#isPlainWall}, synced to
-     * clients) is none, like a wall: no tooltip there (N30-7) and the click acts on the underground
-     * pipe of the tile, if any; toward it a part's own flag flips only ({@link PipeGrid#toggleSide}).
-     * TODO(design): what the wrench shows and does on a valve in a shared wall is not decided
-     * (N33-1); read as a plain wall, so no refusal reason either.
+     * N33-15: a valve that is a plain wall (N33-1, {@link TankValveObjectEntity#isPlainWall}, synced
+     * to clients) is none, like a wall: no tooltip there (N30-7), so no refusal reason either, and the
+     * click acts on the underground pipe of the tile, if any; toward it a part's own flag flips only
+     * ({@link PipeGrid#toggleSide}).
      */
     private static PipeGrid.Part basePartAt(Level level, int tileX, int tileY) {
         GameObject base = level.getObject(tileX, tileY);
