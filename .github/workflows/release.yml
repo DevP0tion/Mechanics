@@ -17,6 +17,16 @@
 # The build compiles against the official Necesse dedicated server package for the game version
 # in build.gradle (gameVersion). The jar's mod.info version must equal the tag without its
 # leading "v", or the run fails before anything is published.
+#
+# Steam Workshop: a run started by hand with "steam_publish" ticked also uploads the release's
+# jar to the Steam Workshop item, in the job "workshop" after the release job, through the
+# reusable workflow workshop-upload.yml (its header lists what an upload changes and the
+# one-time setup; step-by-step guide in Korean: docs/steam-workshop.md). Runs started by a pushed
+# tag never upload. Before building, such a run checks that it is on the default branch, that the
+# repository variable WORKSHOP_ITEM_ID is set, and that the Workshop title, description and the
+# English change note exist and fit Steam's limits, so a run that cannot upload fails before the
+# release is published. To upload an existing release again, run Workshop re-upload
+# (workshop-reupload.yml).
 
 name: Release
 
@@ -30,6 +40,11 @@ on:
         description: "Tag to create for the release, for example v0.1.0"
         required: true
         type: string
+      steam_publish:
+        description: "Also upload to the Steam Workshop (default branch only)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -71,6 +86,28 @@ jobs:
             exit 1
           fi
           echo "NOTES_FILE=$notes" >> "$GITHUB_ENV"
+
+      # Only with steam_publish (empty, so false, on tag pushes). The same checks as the upload.
+      - name: Check the Steam Workshop upload settings
+        if: inputs.steam_publish
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ITEM_ID: ${{ vars.WORKSHOP_ITEM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEFAULT_BRANCH" ] || [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::steam_publish needs a run on the default branch ($DEFAULT_BRANCH), not on $GITHUB_REF"
+            exit 1
+          fi
+          if [[ ! "$ITEM_ID" =~ ^[1-9][0-9]{0,19}$ ]]; then
+            echo "::error::Set the repository variable WORKSHOP_ITEM_ID to the numeric Workshop item ID (now '$ITEM_ID')"
+            exit 1
+          fi
+          python3 -I tools/workshop/md_to_bbcode.py "$NOTES_FILE" -o "$RUNNER_TEMP/changenote.bbcode"
+          python3 -I tools/workshop/write_vdf.py --check-only \
+            --title-file .github/workshop/title.txt \
+            --description-file .github/workshop/description.bbcode \
+            --changenote-file "$RUNNER_TEMP/changenote.bbcode"
 
       - uses: actions/setup-java@v4
         with:
@@ -138,3 +175,19 @@ jobs:
             --title "Mechanics $VERSION" \
             --notes-file "$NOTES_FILE" \
             ${prerelease[@]+"${prerelease[@]}"}
+
+  # Steam Workshop upload of this release: only for a run started by hand with steam_publish
+  # ticked, and only after the release job succeeded. The Steam secrets are environment secrets of
+  # "steam-workshop"; GitHub requires the caller to pass them by name to the reusable workflow.
+  workshop:
+    needs: release
+    if: inputs.steam_publish
+    permissions:
+      contents: read
+    uses: ./.github/workflows/workshop-upload.yml
+    with:
+      tag: ${{ inputs.tag }}
+    secrets:
+      STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+      STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+      STEAM_SHARED_SECRET: ${{ secrets.STEAM_SHARED_SECRET }}

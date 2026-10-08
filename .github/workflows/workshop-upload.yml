@@ -1,0 +1,215 @@
+# Uploads the jar attached to an existing GitHub release to this mod's Steam Workshop item.
+# Reusable workflow: Release (release.yml) calls it after the release job when a run started by
+# hand has "steam_publish" ticked, and Workshop re-upload (workshop-reupload.yml) calls it for an
+# existing release. It never runs on its own, and runs started by a pushed tag never upload.
+#
+# Each upload (steamcmd +workshop_build_item, app 1169040) sets on the existing Workshop item:
+#   - content: the release's jar plus preview.png, the folder layout the in-game uploader makes;
+#     preview image: the same preview.png, taken from the jar's resources/preview.png (under 1 MB);
+#   - title and description: .github/workshop/title.txt and .github/workshop/description.bbcode
+#     (BBCode) from the latest commit of the default branch, also when uploading an old release;
+#   - change note: the "## English" section of the GitHub release's notes, converted from
+#     Markdown to Steam BBCode by tools/workshop/md_to_bbcode.py.
+# Visibility and tags are not touched. Steam stores the title, description and change note as
+# English (steamcmd has no language key); a Korean change note is added by hand on the Workshop
+# page. The run fails if the release has no English section, if a text file is missing or empty,
+# or if a text is longer than Steam allows (title 128 bytes, description and change note 7,999).
+#
+# One-time setup (step-by-step guide in Korean: docs/steam-workshop.md):
+#   - The first upload is done by hand with the in-game uploader; it creates the item and its tags.
+#   - Repository variable WORKSHOP_ITEM_ID (Settings > Secrets and variables > Actions >
+#     Variables): the item ID from the Workshop URL (...filedetails/?id=<ID>).
+#   - Environment "steam-workshop" (Settings > Environments): deployment branches limited to the
+#     default branch, no required reviewers, and the environment secrets STEAM_USERNAME,
+#     STEAM_PASSWORD and STEAM_SHARED_SECRET (the base64 shared_secret of the account's Steam
+#     Guard mobile authenticator). The account must own the item. Password and shared_secret
+#     together give full access to the Steam account.
+#
+# Security: no third-party actions, actions/checkout pinned to a commit, read-only token. Only the
+# upload step receives the Steam secrets; it generates the Steam Guard code in the job and masks
+# it. The VDF holds no credentials. The job also refuses to run outside the default branch.
+#
+# Judging the upload: steamcmd's exit status and output only (tools/workshop/check_steamcmd_log.py);
+# no Steam web API check follows. The exact success and error strings are assumptions
+# (to confirm on the first upload).
+
+name: Workshop upload
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag whose attached jar is uploaded, for example v0.1.0"
+        required: true
+        type: string
+    secrets:
+      STEAM_USERNAME:
+        required: true
+      STEAM_PASSWORD:
+        required: true
+      STEAM_SHARED_SECRET:
+        required: true
+
+jobs:
+  upload:
+    name: Upload to the Steam Workshop
+    runs-on: ubuntu-24.04
+    environment: steam-workshop
+    permissions:
+      contents: read
+    concurrency:
+      group: steam-workshop
+      cancel-in-progress: false
+    timeout-minutes: 30
+    env:
+      APP_ID: "1169040"
+      MOD_ID: devp0tion.mechanics
+      TAG: ${{ inputs.tag }}
+      ITEM_ID: ${{ vars.WORKSHOP_ITEM_ID }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      # Valve's SteamCMD bootstrapper for Linux. Valve's wiki listed this URL until mid-2026 and now
+      # lists https://client-update.steamstatic.com/installer/steamcmd_linux.tar.gz, which serves
+      # the same file (checked 2026-10-08; unchanged since 2018). The bootstrapper then updates
+      # itself from Valve. A changed checksum fails the run: check the new file, then update it.
+      STEAMCMD_URL: https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
+      STEAMCMD_SHA256: cebf0046bfd08cf45da6bc094ae47aa39ebf4155e5ede41373b579b8f1071e7c
+    steps:
+      - name: Check the run
+        run: |
+          set -euo pipefail
+          if [ -z "$DEFAULT_BRANCH" ] || [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::Workshop uploads run only on the default branch ($DEFAULT_BRANCH), not on $GITHUB_REF"
+            exit 1
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "::error::Tag '$TAG' is not of the form v<version>, for example v0.1.0"
+            exit 1
+          fi
+          if [[ ! "$ITEM_ID" =~ ^[1-9][0-9]{0,19}$ ]]; then
+            echo "::error::Set the repository variable WORKSHOP_ITEM_ID to the numeric Workshop item ID (now '$ITEM_ID')"
+            exit 1
+          fi
+
+      # The latest commit of the default branch: the Workshop title, description and scripts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+          persist-credentials: false
+
+      - name: Test the Workshop scripts
+        run: python3 -I tools/workshop/test_workshop_tools.py
+
+      - name: Get the release jar and notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/workshop"
+          mkdir -p "$work/release" "$work/content"
+          gh release download "$TAG" --pattern '*.jar' --dir "$work/release"
+          gh release view "$TAG" --json body --jq .body > "$work/notes.md"
+          jars=("$work"/release/*.jar)
+          if [ "${#jars[@]}" -ne 1 ] || [ ! -f "${jars[0]}" ]; then
+            echo "::error::Expected exactly one jar attached to release $TAG, found: ${jars[*]##*/}"
+            exit 1
+          fi
+          jar="${jars[0]}"
+          info="$(unzip -p "$jar" mod.info | tr -d '\r')"
+          field() { printf '%s\n' "$info" | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([^,]*\),\{0,1\}[[:space:]]*\$/\1/p"; }
+          if [ "$(field id)" != "$MOD_ID" ] || [ "$(field version)" != "${TAG#v}" ]; then
+            echo "::error::mod.info in ${jar##*/} has id '$(field id)' and version '$(field version)'; expected $MOD_ID and ${TAG#v}"
+            exit 1
+          fi
+          if ! unzip -Z1 "$jar" | grep -Fx 'resources/preview.png' > /dev/null; then
+            echo "::error::${jar##*/} has no resources/preview.png"
+            exit 1
+          fi
+          # Content folder: the jar and preview.png, as the in-game uploader leaves them. Necesse
+          # loads the first top-level jar of a Workshop item; the folder may hold nothing else.
+          cp "$jar" "$work/content/"
+          unzip -p "$jar" resources/preview.png > "$work/content/preview.png"
+          size="$(stat -c %s "$work/content/preview.png")"
+          # Steam: "The preview image is too large, it must be less than 1 Megabyte". 1 MB is taken
+          # as 1,000,000 bytes, the stricter reading (to confirm).
+          if [ "$size" -eq 0 ] || [ "$size" -ge 1000000 ]; then
+            echo "::error::resources/preview.png is $size bytes; Steam needs a preview image under 1 MB"
+            exit 1
+          fi
+          if [ "$(head -c 8 "$work/content/preview.png" | od -An -tx1 | tr -d ' \n')" != "89504e470d0a1a0a" ]; then
+            echo "::error::resources/preview.png in ${jar##*/} is not a PNG image"
+            exit 1
+          fi
+          ls -l "$work/content"
+          echo "WORK=$work" >> "$GITHUB_ENV"
+
+      - name: Write the item VDF
+        run: |
+          set -euo pipefail
+          echo "Title and description from $DEFAULT_BRANCH at $(git rev-parse HEAD)"
+          echo "Change note from the English section of the $TAG release notes (GitHub release body)"
+          python3 -I tools/workshop/md_to_bbcode.py "$WORK/notes.md" -o "$WORK/changenote.bbcode"
+          python3 -I tools/workshop/write_vdf.py \
+            --title-file .github/workshop/title.txt \
+            --description-file .github/workshop/description.bbcode \
+            --changenote-file "$WORK/changenote.bbcode" \
+            --app-id "$APP_ID" --item-id "$ITEM_ID" \
+            --content-folder "$WORK/content" --preview-file "$WORK/content/preview.png" \
+            --output "$WORK/item.vdf"
+          # The VDF holds only the item fields and local paths, no credentials. Workflow commands
+          # are switched off while it is printed, so its text cannot act as one.
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          echo "::group::Item VDF"
+          echo "::stop-commands::$token"
+          cat "$WORK/item.vdf"
+          echo "::$token::"
+          echo "::endgroup::"
+
+      - name: Install SteamCMD
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q lib32gcc-s1
+          dir="$RUNNER_TEMP/steamcmd"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/steamcmd_linux.tar.gz" "$STEAMCMD_URL"
+          echo "$STEAMCMD_SHA256  $dir/steamcmd_linux.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/steamcmd_linux.tar.gz" -C "$dir"
+          # The first run, without a login, updates SteamCMD itself.
+          "$dir/steamcmd.sh" +quit < /dev/null
+          echo "STEAMCMD=$dir/steamcmd.sh" >> "$GITHUB_ENV"
+
+      - name: Upload to the Steam Workshop
+        timeout-minutes: 20
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+          STEAM_SHARED_SECRET: ${{ secrets.STEAM_SHARED_SECRET }}
+        run: |
+          set -euo pipefail
+          for name in STEAM_USERNAME STEAM_PASSWORD STEAM_SHARED_SECRET; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::The secret $name is empty; add it to the steam-workshop environment"
+              exit 1
+            fi
+          done
+          # Steam Guard code from the shared_secret (read from the environment, never printed),
+          # with the clock aligned to Steam's and at least 10 s left in its 30 s period.
+          code="$(python3 -I tools/workshop/steam_totp.py --steam-time --min-remaining 10)"
+          echo "::add-mask::$code"
+          # Valve's documented form: +login <user> <password> <Steam Guard code>. No retry: repeated
+          # failed logins can hit Steam's rate limit.
+          log="$WORK/steamcmd.log"
+          set +e
+          "$STEAMCMD" +@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 \
+            +login "$STEAM_USERNAME" "$STEAM_PASSWORD" "$code" \
+            +workshop_build_item "$WORK/item.vdf" +quit < /dev/null 2>&1 | tee "$log"
+          status="${PIPESTATUS[0]}"
+          set -e
+          python3 -I tools/workshop/check_steamcmd_log.py --exit-status "$status" "$log"
+          echo "::notice::Uploaded $TAG to https://steamcommunity.com/sharedfiles/filedetails/?id=$ITEM_ID"
+
+      # GitHub-hosted runners are discarded after the job; this only matters on a reused runner.
+      - name: Remove the SteamCMD login data
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/steamcmd" "$HOME/Steam" "$HOME/.steam"

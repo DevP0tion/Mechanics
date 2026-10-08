@@ -1,0 +1,35 @@
+# Uploads an existing release to the Steam Workshop again, started by hand (Actions tab >
+# Workshop re-upload > Run workflow) on the default branch with the release tag, for example
+# v0.1.0. Use it when the Workshop upload of a Release run failed, or to upload an older release.
+#
+# It runs the same reusable workflow as Release (workshop-upload.yml): the jar attached to that
+# GitHub release, the English section of that release's notes as the change note, and the title
+# and description from the latest commit of the default branch. The steam-workshop environment
+# allows only the default branch, so runs on other branches are refused. Setup: the header of
+# workshop-upload.yml; step-by-step guide in Korean: docs/steam-workshop.md.
+
+name: Workshop re-upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to upload, for example v0.1.0"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  # The Steam secrets are environment secrets of "steam-workshop"; GitHub requires the caller to
+  # pass them by name to the reusable workflow.
+  workshop:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/workshop-upload.yml
+    with:
+      tag: ${{ inputs.tag }}
+    secrets:
+      STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+      STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+      STEAM_SHARED_SECRET: ${{ secrets.STEAM_SHARED_SECRET }}
