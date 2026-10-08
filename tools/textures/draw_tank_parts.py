@@ -36,7 +36,9 @@ selection for the previews). The item icon stays one framed pane.
     row 7      cols 0-1: roof inner corners (top-left / top-right)
   Cells (2..3, 5..7) are only for a different wall type beside a vanilla wall and stay empty.
   Inside columns 1 and 2 meet each other in both orders, so their features stay inside the cell.
-  Opaque: the vanilla wall's quarters overdraw each other in places.
+  See-through like the ceiling (N34-7): the same pane colours and opaque edges. The game draws
+  every screen quarter of a glass wall once, where the vanilla wall draws some twice: the quarter
+  row between two glass walls on top of each other is the lower one's (wall_pieces below).
 
 Usage:
   python3 -I draw_tank_parts.py <resources_dir> <out_preview_png>
@@ -46,8 +48,9 @@ Usage:
       glass walls) to <out_preview_png>
   python3 -I draw_tank_parts.py --glass-preview <out_dir> <resources_dir>
       renders the glass review set to <out_dir>: tanks 3x2 and 5x5 at 0 % (empty), 50 % and 100 %,
-      glass walls beside a mineral wall, a rock-like block and furniture, and the two sheets
-      enlarged. Uses objects/copperwall.png from <resources_dir> for the mineral walls.
+      see-through glass walls beside a mineral wall, a rock-like block and furniture (with objects
+      and a sand path behind them), and the two sheets enlarged. Uses objects/copperwall.png from
+      <resources_dir> for the mineral walls. Checks that no glass wall quarter is drawn twice.
   Previews draw in the game's order (tile stage, then sorted objects by row * 32 + sort offset)
   with flat colours standing in for the liquid shader, no light and no wall outline overlay.
 """
@@ -435,29 +438,22 @@ def glass_ceiling_sheet():
 
 # ---------- glass block: wall sheet (outside a recognized tank) ----------
 
-# Opaque: the vanilla wall's quarters overdraw each other in places (a 2x2 block draws the same
-# roof quarter twice), which partly transparent pixels would show.
-WALL_ROOF = (176, 218, 234, 255)
-WALL_FACE_HI = (150, 198, 220, 255)
-WALL_FACE = (122, 172, 200, 255)
-WALL_FACE_SH = (98, 144, 174, 255)
-WALL_GLINT = (236, 250, 254, 255)
-WALL_GLINT_SOFT = (204, 234, 246, 255)
-
+# See-through like the ceiling pane (N34-7): the same pane colours and opaque edges. The game draws
+# every screen quarter of a glass wall once (GlassBlockSprites.wallPieces), so nothing stacks.
 
 def wall_roof(phase):
     """Roof inside; phase 0 is drawn above a tile row, phase 1 on the tile's upper half. Features
     stay inside the cell: inside columns 1 and 2 meet each other in both orders."""
     c = Canvas(16, 16)
-    c.rect(0, 0, 15, 15, WALL_ROOF)
+    c.rect(0, 0, 15, 15, GLASS_PANE)
     if phase == 0:
         for i in range(5):
-            c.px(5 + i, 11 - i, WALL_GLINT_SOFT)
-            c.px(6 + i, 11 - i, WALL_GLINT_SOFT)
-        c.px(6, 10, WALL_GLINT)
+            c.px(5 + i, 11 - i, GLASS_SHINE_SOFT)
+            c.px(6 + i, 11 - i, GLASS_SHINE_SOFT)
+        c.px(6, 10, GLASS_SHINE)
     else:
         for x, y in ((9, 7), (10, 6), (8, 8)):
-            c.px(x, y, WALL_GLINT_SOFT)
+            c.px(x, y, GLASS_SHINE_SOFT)
     return c
 
 
@@ -497,22 +493,22 @@ def wall_roof_inner_corner(cell, side):
 
 
 def wall_face(left=False, right=False):
-    """The 32 px front face of one 16 px column (rows 3 and 4 of the sheet are its halves)."""
+    """The 32 px front face of one 16 px column (rows 3 and 4 of the sheet are its halves): the
+    pane's shade, lit at the top, a little denser than the roof so it reads as a vertical face."""
     c = Canvas(16, 32)
-    c.rect(0, 0, 15, 31, WALL_FACE)
-    c.rect(0, 2, 15, 6, WALL_FACE_HI)
-    c.rect(0, 25, 15, 29, WALL_FACE_SH)
+    c.rect(0, 0, 15, 31, GLASS_PANE_SH)
+    c.rect(0, 2, 15, 6, GLASS_PANE)
     c.hline(0, 15, 0, OUTLINE)
     c.hline(0, 15, 1, GLASS_EDGE_HI)
     c.hline(0, 15, 30, GLASS_EDGE_SH)
     c.hline(0, 15, 31, OUTLINE)
     for i in range(5):  # a glint streak, inside the column
-        c.px(4 + i, 21 - 2 * i, WALL_GLINT_SOFT)
-        c.px(4 + i, 20 - 2 * i, WALL_GLINT_SOFT)
-    c.px(8, 12, WALL_GLINT)
+        c.px(4 + i, 21 - 2 * i, GLASS_SHINE_SOFT)
+        c.px(4 + i, 20 - 2 * i, GLASS_SHINE_SOFT)
+    c.px(8, 12, GLASS_SHINE)
     for i in range(3):
-        c.px(10 + i, 24 - 2 * i, WALL_FACE_HI)
-        c.px(10 + i, 23 - 2 * i, WALL_FACE_HI)
+        c.px(10 + i, 24 - 2 * i, GLASS_PANE)
+        c.px(10 + i, 23 - 2 * i, GLASS_PANE)
     if left:
         c.vline(0, 0, 31, OUTLINE)
         c.vline(1, 2, 29, GLASS_EDGE)
@@ -580,8 +576,9 @@ def ceiling_pieces(n):
     return pieces
 
 
-def wall_pieces(j, force_top=False, force_remove_bot=False):
-    """[(sheet x, sheet y, offset x, offset y)]: WallObject's quarters for one wall type."""
+def vanilla_wall_pieces(j, force_top=False, force_remove_bot=False):
+    """[(sheet x, sheet y, offset x, offset y)]: WallObject's quarters for one wall type, as vanilla
+    draws them (some twice). Also how the previews draw the mineral walls."""
     if all(j):
         return [(1, 1, 0, -16), (2, 1, 16, -16), (1, 2, 0, 0), (2, 2, 16, 0)]
     top, left, right, bot_left, bot, bot_right = j[T], j[L], j[R], j[BL], j[B], j[BR]
@@ -643,6 +640,32 @@ def wall_pieces(j, force_top=False, force_remove_bot=False):
     return p
 
 
+def wall_pieces(j, force_top=False, force_remove_bot=False, glass_above=False, glass_below=False):
+    """The glass wall's quarters (N34-7): vanilla's, each screen quarter drawn once. A quarter
+    vanilla adds twice within the tile is drawn once; the quarter row between two glass walls on
+    top of each other is the lower one's (glass_above: drawn here at -16 with the sprites the upper
+    tile's bottom branch picks; glass_below: left out here)."""
+    vanilla = vanilla_wall_pieces(j, force_top, force_remove_bot)
+    shared_above = glass_above and j[T] and not all(j)
+    shared_below = glass_below and j[B]
+    pieces = []
+    if shared_above:
+        for upper, lower, right in ((j[TL], j[L], False), (j[TR], j[R], True)):
+            if upper:
+                col, row = (1, 1) if lower else (0, 6)
+                col += 1 if right else 0
+            else:
+                col, row = ((1 if right else 0), 7) if lower else ((3 if right else 0), 1)
+            pieces.append((col, row, 16 if right else 0, -16))
+    for piece in vanilla:
+        if shared_above and piece[3] < 0 or shared_below and piece[3] > 0:
+            continue
+        if any(other[2:] == piece[2:] for other in pieces):
+            continue
+        pieces.append(piece)
+    return pieces
+
+
 # ---------- previews (the game's drawing order, flat colours for the shader) ----------
 
 GROUND_A = (60, 120, 70, 255)
@@ -691,10 +714,15 @@ class Scene:
         return self.img.resize((self.img.width * scale, self.img.height * scale), Image.NEAREST)
 
 
-def draw_wall_like(scene, sheet, tx, ty, joined):
+def draw_pieces(scene, sheet, tx, ty, pieces):
     x, y = scene.at(tx, ty)
-    for sx, sy, ox, oy in wall_pieces(joined):
+    for sx, sy, ox, oy in pieces:
         scene.paste(quarter(sheet, sx, sy), x + ox, y + oy)
+
+
+def draw_wall_like(scene, sheet, tx, ty, joined):
+    """A vanilla wall (the mineral walls of the previews)."""
+    draw_pieces(scene, sheet, tx, ty, vanilla_wall_pieces(joined))
 
 
 def draw_rock(scene, tx, ty):
@@ -713,6 +741,15 @@ def draw_table(scene, tx, ty):
     scene.rect(x + 4, y + 16, x + 28, y + 20, TABLE_SH)
     scene.rect(x + 5, y + 20, x + 8, y + 28, TABLE_SH)
     scene.rect(x + 24, y + 20, x + 27, y + 28, TABLE_SH)
+
+
+def draw_lamp(scene, tx, ty):
+    """A stand-in for a tall object with a small collision (a lamp post), to see behind the glass."""
+    x, y = scene.at(tx, ty)
+    scene.rect(x + 10, y - 40, x + 22, y - 28, (250, 206, 92, 255))
+    scene.rect(x + 12, y - 38, x + 20, y - 30, (255, 240, 170, 255))
+    scene.rect(x + 14, y - 28, x + 18, y + 24, (62, 60, 72, 255))
+    scene.rect(x + 9, y + 22, x + 23, y + 30, (46, 44, 54, 255))
 
 
 def tank_scene(ceiling, mineral_wall, controller_img, valve_img, iw, ih, fill):
@@ -762,25 +799,43 @@ def tank_scene(ceiling, mineral_wall, controller_img, valve_img, iw, ih, fill):
 
 GLASS_WALL_LAYOUT = [
     "...........",
+    "...T.L..L..",
     ".CCGGGR.GT.",
     "...G.G.....",
     "...GTG..G..",
     "...GGG..G..",
     "...........",
 ]
+# Floor tiles drawn as a sand path, so the see-through faces show what is under them.
+GLASS_WALL_PATH = {(x, 3) for x in range(11)} | {(8, y) for y in range(3, 7)}
+SAND = (196, 176, 120, 255)
+SAND_DK = (172, 150, 98, 255)
 
 
-def glass_wall_scene(wall_sheet, mineral_wall, layout=GLASS_WALL_LAYOUT):
-    """Glass walls outside a tank: G glass, C a mineral wall, R a rock-like solid block, T furniture.
-    The glass joins toward C, R and G (they block the whole tile), not toward T; the mineral wall
-    is vanilla and does not join toward the glass."""
+def glass_wall_scene(wall_sheet, mineral_wall, layout=GLASS_WALL_LAYOUT, path=GLASS_WALL_PATH):
+    """Glass walls outside a tank: G glass, C a mineral wall, R a rock-like solid block, T furniture,
+    L a tall lamp post (small collision) behind a glass wall. The glass joins toward C, R and G (they
+    block the whole tile), not toward T; the mineral wall is vanilla and does not join toward the
+    glass. The glass is see-through (N34-7); every screen quarter of it is drawn once (checked)."""
     cells = {(x, y): ch for y, row in enumerate(layout) for x, ch in enumerate(row) if ch != "."}
     scene = Scene(len(layout[0]), len(layout))
+    for (x, y) in path:
+        px, py = scene.at(x, y)
+        scene.rect(px, py, px + 32, py + 32, SAND)
+        scene.rect(px + 6, py + 9, px + 9, py + 11, SAND_DK)
+        scene.rect(px + 20, py + 22, px + 23, py + 24, SAND_DK)
     full = {p for p, ch in cells.items() if ch in "GCR"}
+    quarters = set()
     for (x, y), ch in cells.items():
         if ch == "G":
             joined = [(x + dx, y + dy) in full for dx, dy in ADJ]
-            scene.add_sorted(y * 32 + 20, lambda x=x, y=y, j=joined: draw_wall_like(scene, wall_sheet, x, y, j))
+            pieces = wall_pieces(joined, glass_above=cells.get((x, y - 1)) == "G",
+                                 glass_below=cells.get((x, y + 1)) == "G")
+            for _, _, ox, oy in pieces:
+                q = (x * 2 + ox // 16, y * 2 + oy // 16)
+                assert q not in quarters, "glass quarter drawn twice: %s" % (q,)
+                quarters.add(q)
+            scene.add_sorted(y * 32 + 20, lambda x=x, y=y, p=pieces: draw_pieces(scene, wall_sheet, x, y, p))
         elif ch == "C":
             joined = [cells.get((x + dx, y + dy)) == "C" for dx, dy in ADJ]
             scene.add_sorted(y * 32 + 20, lambda x=x, y=y, j=joined: draw_wall_like(scene, mineral_wall, x, y, j))
@@ -788,6 +843,8 @@ def glass_wall_scene(wall_sheet, mineral_wall, layout=GLASS_WALL_LAYOUT):
             scene.add_sorted(y * 32 + 16, lambda x=x, y=y: draw_rock(scene, x, y))
         elif ch == "T":
             scene.add_sorted(y * 32 + 16, lambda x=x, y=y: draw_table(scene, x, y))
+        elif ch == "L":
+            scene.add_sorted(y * 32 + 16, lambda x=x, y=y: draw_lamp(scene, x, y))
     return scene.finish()
 
 
@@ -841,7 +898,8 @@ def glass_previews(out_dir, resources):
     for iw, ih in ((3, 2), (5, 5)):
         panels = [tank_scene(ceiling, mineral, ctrl, vlv, iw, ih, f) for f in fills]
         labelled(panels, labels).save(os.path.join(out_dir, "tank_%dx%d.png" % (iw, ih)))
-    labelled([glass_wall_scene(wall, mineral)], ["glass walls: C copper wall, R rock stand-in, T furniture stand-in"]) \
+    labelled([glass_wall_scene(wall, mineral)],
+             ["see-through glass walls: copper wall, rock and furniture stand-ins, objects and a sand path behind"]) \
         .save(os.path.join(out_dir, "glass_walls.png"))
     enlarged_sheet(ceiling).save(os.path.join(out_dir, "sheet_glassblock_ceiling.png"))
     enlarged_sheet(wall).save(os.path.join(out_dir, "sheet_glassblock_wall.png"))

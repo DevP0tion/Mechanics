@@ -44,7 +44,9 @@ import java.util.List;
  *
  * <h2>Wall (outside a recognized tank)</h2>
  * Drawn like a vanilla wall: a port of {@code WallObject.addWallDrawOptions} for one wall type
- * ({@code isWall == sameWall == adj}), with its all-joined fast path. Sheet
+ * ({@code isWall == sameWall == adj}), with its all-joined fast path ({@link #vanillaWallPieces}).
+ * The glass wall is see-through (N34-7), so {@link #wallPieces} draws every screen quarter once,
+ * where vanilla draws some twice; the result on screen is vanilla's. Sheet
  * {@code objects/glassblock_wall.png}, 64x128, the vanilla wall sheet layout (4x8 cells of 16 px):
  * row 0 roof top edge (col 0 corner TL, cols 1-2 edge, col 3 corner TR); rows 1 and 2 roof (col 0
  * left edge, cols 1-2 inside, col 3 right edge; row 1 is the phase drawn above the tile, row 2 the
@@ -205,14 +207,89 @@ public final class GlassBlockSprites {
     // ------------------------------------------------------------------ wall
 
     /**
-     * The wall pieces of a glass block outside a recognized tank: {@code WallObject}'s quarter
-     * selection with {@code adj}, {@code sameWall} and {@code isWall} all {@code joined}.
+     * The wall pieces of a glass block outside a recognized tank (N34-5, N34-7): the vanilla wall's
+     * quarters ({@link #vanillaWallPieces}), with every screen quarter drawn by exactly one tile,
+     * because the glass wall is see-through and a quarter drawn twice would show darker.
+     * <ul>
+     *     <li>Within a tile, a quarter vanilla adds twice (the roof above the tile, when both sides
+     *     are joined) is drawn once.</li>
+     *     <li>Between two glass walls on top of each other, the quarter row between them (the upper
+     *     tile's {@code +16}, the lower tile's {@code -16}) belongs to the lower tile: vanilla's
+     *     upper tile draws it always and its lower tile again where its sides are joined. The upper
+     *     tile leaves it out ({@code glassBelow}); the lower tile draws it with the sprites the upper
+     *     tile would have used, which only depend on tiles both see ({@code glassAbove}).</li>
+     * </ul>
+     * The result on screen is vanilla's: the same sprite on every quarter vanilla covers. Toward a
+     * joined block that is not glass (a wall, a rock), nothing changes: that block draws itself.
+     *
+     * @param joined         per neighbour (adjacent order): the glass joins toward it
+     * @param forceDrawTop   the top neighbour is joined and a wall drawing its top (a window)
+     * @param forceRemoveBot the bottom neighbour is joined and a wall drawing its top (a window)
+     * @param glassAbove     the top neighbour is a glass block also drawn as a wall
+     * @param glassBelow     the bottom neighbour is a glass block also drawn as a wall
+     */
+    public static List<Piece> wallPieces(boolean[] joined, boolean forceDrawTop, boolean forceRemoveBot,
+                                         boolean glassAbove, boolean glassBelow) {
+        List<Piece> vanilla = vanillaWallPieces(joined, forceDrawTop, forceRemoveBot);
+        boolean all = vanilla.get(0).fastPath;
+        boolean sharedAbove = glassAbove && joined[TOP] && !all;
+        boolean sharedBelow = glassBelow && joined[BOTTOM];
+        List<Piece> pieces = new ArrayList<>(8);
+        if (sharedAbove) {
+            // The upper glass wall's lower quarter row, as its bottom branch picks it: its left /
+            // right and bottom-left / bottom-right are this tile's top-left / top-right and left / right.
+            pieces.add(sharedRowQuarter(joined[TOP_LEFT], joined[LEFT], false));
+            pieces.add(sharedRowQuarter(joined[TOP_RIGHT], joined[RIGHT], true));
+        }
+        for (Piece piece : vanilla) {
+            if (sharedAbove && piece.offsetY < 0 || sharedBelow && piece.offsetY > 0) {
+                continue;
+            }
+            boolean taken = false;
+            for (Piece other : pieces) {
+                taken |= other.offsetX == piece.offsetX && other.offsetY == piece.offsetY;
+            }
+            if (!taken) {
+                pieces.add(piece);
+            }
+        }
+        return Collections.unmodifiableList(pieces);
+    }
+
+    /**
+     * One half of the quarter row between two glass walls on top of each other, drawn by the lower
+     * one at {@code -16}: vanilla's bottom-branch {@code +16} piece of the upper one.
+     *
+     * @param upperSide the upper tile's left (right) neighbour is joined
+     * @param lowerSide the lower tile's left (right) neighbour is joined
+     */
+    private static Piece sharedRowQuarter(boolean upperSide, boolean lowerSide, boolean rightSide) {
+        int col;
+        int row;
+        if (upperSide) {
+            col = lowerSide ? 1 : 0;  // roof inside, or the roof beside a joined front face
+            row = lowerSide ? 1 : 6;
+        } else {
+            col = 0;                  // roof inner corner, or the roof's side edge
+            row = lowerSide ? 7 : 1;
+        }
+        if (rightSide) {
+            // (1, 1) -> (2, 1); (0, 6) -> (1, 6); (0, 7) -> (1, 7); (0, 1) -> (3, 1)
+            col = upperSide ? col + 1 : (lowerSide ? 1 : 3);
+        }
+        return wall(col, row, rightSide ? 16 : 0, -16, rightSide ? 1 : 0, -1);
+    }
+
+    /**
+     * {@code WallObject}'s quarter selection as vanilla draws it, with {@code adj}, {@code sameWall}
+     * and {@code isWall} all {@code joined}, including its duplicates. The base of
+     * {@link #wallPieces}.
      *
      * @param joined         per neighbour (adjacent order): the glass joins toward it
      * @param forceDrawTop   the top neighbour is joined and a wall drawing its top (a window)
      * @param forceRemoveBot the bottom neighbour is joined and a wall drawing its top (a window)
      */
-    public static List<Piece> wallPieces(boolean[] joined, boolean forceDrawTop, boolean forceRemoveBot) {
+    public static List<Piece> vanillaWallPieces(boolean[] joined, boolean forceDrawTop, boolean forceRemoveBot) {
         check(joined);
         List<Piece> pieces = new ArrayList<>(8);
         boolean all = true;

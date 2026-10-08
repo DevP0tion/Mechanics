@@ -30,11 +30,9 @@ import net.bytebuddy.asm.Advice;
  * <p>The glass ceiling (N34-1, N34-6) is drawn 16 px above its tiles and its hover hitbox follows
  * the drawing, so over the north wall's front face the hit object is now the first interior row's
  * glass instead of the wall (or a valve or controller there, whose front face is only hit above
- * the glass). The tooltip still goes by the cursor's own tile, so it shows over the interior tiles
- * as before: not over the north wall's face, where the raised pane and its rim are drawn, and still
+ * the glass). The tooltip goes by the cursor's own tile, as decided (N34-8): it shows over the
+ * interior tiles, not over the north wall's face where the raised pane and its rim are drawn, and
  * over the interior's last 16 px, which the south wall's roof covers.
- * TODO(design): whether the tooltip should follow the drawn pane (the tank looked up from the hit
- * glass) instead of the tiles; unchanged for now.
  */
 public final class TankHoverTooltip {
 

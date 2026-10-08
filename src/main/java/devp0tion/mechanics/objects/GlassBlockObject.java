@@ -41,19 +41,18 @@ import java.util.List;
  *     fill level band on the north wall ({@code TankFluidRendering}, N34-4), show through the partly
  *     transparent pane. Sheet {@code objects/<stringID>_ceiling.png}.</li>
  *     <li><b>Wall</b>, anywhere else, also in a tank under construction or a broken one (N34-5):
- *     drawn like a vanilla wall, a roof and a front face from quarter sprites by adjacency (a port
- *     of {@code WallObject}'s selection, {@link GlassBlockSprites#wallPieces}), lit and faded
+ *     drawn like a vanilla wall, a roof and a front face from quarter sprites by adjacency
+ *     ({@code WallObject}'s selection, {@link GlassBlockSprites#wallPieces}), lit and faded
  *     behind the player like a vanilla wall. It joins toward every neighbour that blocks the whole
  *     tile ({@link #blocksWholeTile}: walls, rocks, other glass, tank parts; not furniture with a
  *     smaller collision). Only the glass draws the join: vanilla walls are not changed and draw
- *     their own edge toward the glass. Sheet {@code objects/<stringID>_wall.png}.</li>
+ *     their own edge toward the glass. See-through like the ceiling (N34-7): the sheet is partly
+ *     transparent, so every screen quarter is drawn by exactly one glass tile (vanilla draws some
+ *     roof quarters twice; the quarter row between two glass walls on top of each other is drawn
+ *     by the lower one). Sheet {@code objects/<stringID>_wall.png}.</li>
  * </ul>
  * Both sheets and their layouts: {@link GlassBlockSprites}; drawn by
  * {@code tools/textures/draw_tank_parts.py}. The item icon ({@code items/<stringID>.png}) stays.
- * The wall sheet is opaque, unlike the ceiling: the vanilla wall's quarters overdraw each other in
- * places (a 2x2 block draws the same roof quarter twice), which partly transparent pixels would
- * show as darker patches. TODO(design): whether the glass wall should be see-through (it would
- * need a selection without overdraw).
  *
  * <p>Both styles are sorted drawables with the vanilla wall's sort offset {@link #SORT_Y} (20) in
  * their tile row. For the ceiling that keeps it after the tank's north border and the fill band
@@ -77,7 +76,9 @@ import java.util.List;
  * <p>TODO(game): not verified visually: the raised pane and the rim against the north wall's top
  * edge, the seams of the joined pane, the pane over the shader fluid and the band, the ceiling's
  * light (the light of its own tile, while the pane is drawn up to 32 px above it), the glass wall
- * next to vanilla walls, rocks and furniture, its lighting and fade, and the hover areas.
+ * next to vanilla walls, rocks and furniture, its transparency, lighting and fade (the row
+ * between two glass walls on top of each other is lit and sorted as the lower one's), and the
+ * hover areas.
  */
 public class GlassBlockObject extends GameObject {
 
@@ -133,7 +134,7 @@ public class GlassBlockObject extends GameObject {
             for (GlassBlockSprites.Piece piece : wallPieces(level, tileX, tileY)) {
                 SharedTextureDrawOptions.Wrapper wrapper = add(options, piece, drawX, drawY);
                 float alpha = piece.fades ? fade : 1f;
-                // As WallObject.applyLights, and its all-joined fast path (always smooth, opaque).
+                // As WallObject.applyLights, and its all-joined fast path (always smooth, alpha 1).
                 if (piece.fastPath) {
                     wrapper.advColor(WallObject.getAdvancedLight(lights, 1f, piece.lightX, piece.lightY));
                 } else if (Settings.smoothLighting) {
@@ -198,7 +199,10 @@ public class GlassBlockObject extends GameObject {
         return tank.isInterior(tileX, tileY) && level.getObject(tileX, tileY) instanceof GlassBlockObject;
     }
 
-    /** The wall style's pieces: joined toward neighbours that block the whole tile (N34-5). */
+    /**
+     * The wall style's pieces: joined toward neighbours that block the whole tile (N34-5), each
+     * screen quarter drawn once (N34-7).
+     */
     private static List<GlassBlockSprites.Piece> wallPieces(Level level, int tileX, int tileY) {
         GameObject[] adjacent = level.getAdjacentObjects(tileX, tileY);
         boolean[] joined = new boolean[adjacent.length];
@@ -209,7 +213,15 @@ public class GlassBlockObject extends GameObject {
         // As WallObject: a joined wall above or below that draws its own top (a window).
         boolean forceDrawTop = joined[GlassBlockSprites.TOP] && drawsWallTop(adjacent[GlassBlockSprites.TOP]);
         boolean forceRemoveBot = joined[GlassBlockSprites.BOTTOM] && drawsWallTop(adjacent[GlassBlockSprites.BOTTOM]);
-        return GlassBlockSprites.wallPieces(joined, forceDrawTop, forceRemoveBot);
+        // The quarter row between this and a glass wall above / below is drawn by the lower one.
+        boolean glassAbove = isWallGlass(level, adjacent[GlassBlockSprites.TOP], tileX, tileY - 1);
+        boolean glassBelow = isWallGlass(level, adjacent[GlassBlockSprites.BOTTOM], tileX, tileY + 1);
+        return GlassBlockSprites.wallPieces(joined, forceDrawTop, forceRemoveBot, glassAbove, glassBelow);
+    }
+
+    /** A glass block drawn in the wall style: not in the interior of a recognized tank. */
+    private static boolean isWallGlass(Level level, GameObject object, int tileX, int tileY) {
+        return object instanceof GlassBlockObject && TankRegistry.findInteriorBounds(level, tileX, tileY) == null;
     }
 
     private static boolean drawsWallTop(GameObject object) {
