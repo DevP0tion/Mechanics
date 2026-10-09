@@ -211,3 +211,8 @@ CI는 영어 변경 노트만 올립니다. steamcmd에는 언어 키가 없어�
 - **계정**
   - GitHub 러너 위치에서 로그인했다는 Steam 알림이 올 수 있습니다. 예상된 것입니다.
   - 로그인이 실패해도 재시도하지 않습니다. 실패가 반복되면 Steam의 로그인 횟수 제한에 걸릴 수 있습니다.
+- **Release job의 action 버전** (v0.1.1 뒤에 바꿈, 다음 Release 실행에서 확인)
+  - Node 20 지원 종료와 setup-java v4 지원 종료 경고 때문에 바꿨습니다: `actions/checkout`은 Workshop upload job과 같은 SHA 고정(v7.0.1), `actions/setup-java@v5`, `gradle/actions/setup-gradle@v5`, 러너 `ubuntu-24.04`.
+    - setup-gradle v5의 존재와 Node 24 사용은 저장소 밖에서 확인하지 못했습니다. (확인 안 됨)
+  - Set up job에서 세 action을 받아 오는지, 빌드까지 통과하는지, 실행 요약에 Node 20·setup-java v4 경고가 없는지 봅니다.
+  - 실패하면 릴리스를 만들기 전 단계에서 멈춥니다. 고친 뒤 다시 실행합니다.
