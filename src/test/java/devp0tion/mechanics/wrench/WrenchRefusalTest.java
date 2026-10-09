@@ -18,7 +18,11 @@ final class WrenchRefusalTest {
     }
 
     public static void testEngineResults() {
-        Check.equal(WrenchRefusal.DIFFERENT_SOURCE_FLUID, WrenchRefusal.of(PipeGrid.Check.DIFFERENT_SOURCE_FLUID, false), "N16-3");
+        Check.equal(WrenchRefusal.PUMP_SIDE, WrenchRefusal.of(PipeGrid.Check.PUMP_SIDE_CLOSED_NEIGHBOUR, false),
+                "toward a pump's side that cannot be linked, from the part next to it (N36-55, N36-61)");
+        Check.equal(null, WrenchRefusal.of(PipeGrid.Check.PUMP_SIDE_CLOSED, false),
+                "on the pump's own tile: no reason, like a wall (N36-45)");
+        Check.equal(null, WrenchRefusal.of(PipeGrid.Check.OK, false), "the click goes through");
         Check.equal(WrenchRefusal.NOT_LOADED, WrenchRefusal.of(PipeGrid.Check.NOT_LOADED, false));
         Check.equal(WrenchRefusal.NOT_LOADED, WrenchRefusal.of(PipeGrid.Check.NOT_LOADED, true));
         Check.equal(WrenchRefusal.NOTHING_TO_LINK, WrenchRefusal.of(PipeGrid.Check.NOTHING_THERE, false));

@@ -22,8 +22,14 @@ final class NewEngineTest {
         return new PipeGrid(rules);
     }
 
+    /** A ground pump facing east (its output, N36-1). */
     private static Pump pump(PipeGrid grid, int x, int y, PumpTier tier) {
+        return pump(grid, x, y, tier, Direction.EAST);
+    }
+
+    private static Pump pump(PipeGrid grid, int x, int y, PumpTier tier, Direction facing) {
         Pump pump = new Pump(tier);
+        pump.setDirection(facing);
         pump.setTileSource(LiquidTileSource.infinite(FluidType.FRESHWATER));
         pump.setFuelSupply(new Fluids.Logs(1000));
         grid.placePump(x, y, pump);
@@ -104,26 +110,6 @@ final class NewEngineTest {
         Check.equal(7, result.getDelivered(v[2]), "C: east face of J2, before south");
     }
 
-    public static void testPumpFacesTakeTheRemainderNorthEastSouthWest() {
-        // Output pipes north, east and west of the pump, each to its own valve at distance 1.
-        PipeGrid grid = grid(Fluids.uniform(1000));
-        grid.placePipe(0, -1, PipeLayer.BASE, MineralTier.IRON);
-        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.IRON);
-        grid.placePipe(-1, 0, PipeLayer.BASE, MineralTier.IRON);
-        TankValve north = Fluids.valve(1000);
-        TankValve east = Fluids.valve(1000);
-        TankValve west = Fluids.valve(1000);
-        grid.placeValve(0, -2, north);
-        grid.placeValve(2, 0, east);
-        grid.placeValve(-2, 0, west);
-        fillAll(grid);
-        Pump pump = pump(grid, 0, 0, PumpTier.FIRE);
-        PumpResult result = cycle(grid, pump);
-        Check.equal(7, result.getDelivered(north), "north first (N25-5, N27-1)");
-        Check.equal(7, result.getDelivered(east), "then east");
-        Check.equal(6, result.getDelivered(west), "west last");
-    }
-
     public static void testFullTanksDoNotCountAtJunctions() {
         // N24-3 counts the destinations that can take something: a full tank behind the north face
         // leaves the whole amount to the east face.
@@ -189,7 +175,7 @@ final class NewEngineTest {
         TankValve valve = Fluids.valve(100000);
         grid.placeValve(3, 0, valve);
         pump(grid, 0, 0, PumpTier.ADVANCED_FIRE);
-        pump(grid, 1, -1, PumpTier.ADVANCED_FIRE);
+        pump(grid, 1, -1, PumpTier.ADVANCED_FIRE, Direction.SOUTH);
         pushTick(grid);
         Check.equal(40, grid.getPipe(1, 0, PipeLayer.BASE).getAmount(), "copper full: its whole cap");
         Check.isFalse(grid.getPipe(2, 0, PipeLayer.BASE).isReached(), "the cap lets in one empty pipe per cycle");
@@ -239,7 +225,7 @@ final class NewEngineTest {
         grid.placeValve(10, 0, valveOut[0]);
         fillAll(grid);
         Pump a = pump(grid, 0, 0, PumpTier.FIRE);
-        Pump b = pump(grid, 3, -branchLength - 1, PumpTier.FIRE);
+        Pump b = pump(grid, 3, -branchLength - 1, PumpTier.FIRE, Direction.SOUTH);
         return new Pump[]{a, b};
     }
 
@@ -281,7 +267,7 @@ final class NewEngineTest {
         for (int i = 0; i < 7; i++) {
             grid.runTick();
         }
-        pump(grid, 3, -2, PumpTier.FIRE);
+        pump(grid, 3, -2, PumpTier.FIRE, Direction.SOUTH);
         java.util.List<Long> ticksA = new java.util.ArrayList<>();
         java.util.List<Long> ticksB = new java.util.ArrayList<>();
         for (int i = 0; i < 60; i++) {
@@ -809,7 +795,7 @@ final class NewEngineTest {
         Pump again = new Pump(PumpTier.FIRE);
         again.setTileSource(LiquidTileSource.infinite(FluidType.FRESHWATER));
         again.setFuelSupply(new Fluids.Logs(10));
-        again.setSourceSlots(pump.getSourceSlots());
+        again.setDirection(pump.getDirection());
         again.setLastPushedFluid(pump.getLastPushedFluid());
         loaded.loadPump(0, 0, again);
         PumpResult result = cycle(loaded, again);
@@ -909,7 +895,7 @@ final class NewEngineTest {
         line(grid, 1, 0, 3, 0);
         line(grid, 1, 2, 10, 2);
         grid.placeValve(0, 0, Fluids.valve(100000));
-        Pump pump = pump(grid, 1, -1, PumpTier.FIRE);
+        Pump pump = pump(grid, 1, -1, PumpTier.FIRE, Direction.SOUTH);
         cycle(grid, pump);
         long dest = PipeGrid.key(0, 0);
         PipeNode held = grid.unloadPipe(3, 0, PipeLayer.BASE);
@@ -945,6 +931,7 @@ final class NewEngineTest {
         // N22-5: the manual pump's click is queued and runs in the systems' tick.
         PipeGrid grid = grid(Fluids.uniform(20));
         Pump pump = new Pump(PumpTier.MANUAL);
+        pump.setDirection(Direction.EAST);
         pump.setTileSource(LiquidTileSource.infinite(FluidType.FRESHWATER));
         grid.placePump(0, 0, pump);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.IRON);

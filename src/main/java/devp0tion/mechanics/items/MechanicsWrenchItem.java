@@ -47,8 +47,9 @@ import java.awt.geom.Line2D;
  *     fluid is lost (N12-1).</li>
  *     <li>Right click toward a side of a tile: toggles that side's link of the basic pipe, pump or
  *     valve there (else of the underground pipe; in underground mode the underground pipe first):
- *     cut when linked, linked otherwise (12-8, 13-4, N16-3, N16-4, N30-5). Linking a valve to a
- *     pump is refused when its tank holds another fluid than the pump's other sources (N16-3). The
+ *     cut when linked, linked otherwise (12-8, 13-4, N16-3, N16-4, N30-5). A side of a pump that
+ *     cannot be linked changes nothing, from the pump or from the part next to it (N36-9, N36-25,
+ *     N36-55); a valve of another fluid is linked to a pump like any other (N36-26, N36-27). The
  *     neighbour's region is loaded first, so the change also reaches a part in a region that was
  *     not loaded and lasts ({@link PipeSystem#toggleSide}).</li>
  *     <li>Right click on the middle of a tile, its centre 16x16 pixels (N30-4): toggles the vertical
@@ -260,7 +261,8 @@ public class MechanicsWrenchItem extends PlaceableItem implements ItemInteractAc
                     : system.toggleSide(tileX, tileY, part, side);
         }
         if (result != PipeGrid.Check.OK) {
-            // Refused (N16-3) or nothing there: no message (N30-1, the tooltip previews the reason);
+            // Refused (a pump's side that cannot be linked, N36-9, N36-55) or nothing there: no message
+            // (N30-1, the tooltip previews the reason);
             // the client gets the cell's real state.
             PlacementCorrection.correct(level, (PlayerMob) attackerMob, tileX, tileY);
         }
