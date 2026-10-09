@@ -4,6 +4,7 @@ import devp0tion.mechanics.client.PipeRendering;
 import devp0tion.mechanics.core.Direction;
 import devp0tion.mechanics.core.LinkFlags;
 import devp0tion.mechanics.core.MineralTier;
+import devp0tion.mechanics.core.PipeGrid;
 import devp0tion.mechanics.core.PipeShape;
 import devp0tion.mechanics.pipe.BasicPipeObjectEntity;
 import devp0tion.mechanics.registry.MechanicsIngredients;
@@ -101,9 +102,10 @@ public class BasicPipeObject extends GameObject {
      * The center square plus a connection part toward each side that is linked and not blocked by
      * another fluid (N31-10, N31-13, {@link PipeShape}), as the pipe is drawn: from the link flags on
      * both sides and the pipe's blocked faces, all kept in the object entities and synced to clients,
-     * so the server and the clients compute the same shape. Nothing caches it: the game asks on every
-     * collision check. A pipe not placed yet (the placement check) counts every own flag as open, as
-     * it links on placement (9-4), and has no blocked face.
+     * so the server and the clients compute the same shape; a pump's side other than its front is no
+     * link, like a wall (N36-2, N36-37), read from the pump's rotation, which both sides have. Nothing
+     * caches it: the game asks on every collision check. A pipe not placed yet (the placement check)
+     * counts every own flag as open, as it links on placement (9-4), and has no blocked face.
      */
     @Override
     public List<Rectangle> getCollisions(Level level, int x, int y, int rotation) {
@@ -112,7 +114,9 @@ public class BasicPipeObject extends GameObject {
             int own = PipeRendering.baseLinks(level, x, y);
             int[] neighbours = new int[Direction.values().length];
             for (Direction d : Direction.values()) {
-                neighbours[d.ordinal()] = PipeRendering.baseLinks(level, x + d.dx, y + d.dy);
+                // A pump's side that cannot link to a basic pipe is no part, like a wall (N36-37).
+                neighbours[d.ordinal()] = PipeRendering.baseLinksFacing(level, x + d.dx, y + d.dy, d.opposite(),
+                        PipeGrid.Part.BASIC_PIPE);
             }
             int linked = PipeShape.linkedSides(own < 0 ? LinkFlags.ALL_OPEN : own, neighbours);
             open = PipeShape.openSides(linked, PipeRendering.baseBlockedSides(level, x, y));

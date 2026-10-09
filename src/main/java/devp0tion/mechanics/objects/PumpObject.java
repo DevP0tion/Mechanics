@@ -1,9 +1,11 @@
 package devp0tion.mechanics.objects;
 
 import devp0tion.mechanics.client.PipeRendering;
+import devp0tion.mechanics.core.Direction;
 import devp0tion.mechanics.core.LinkFlags;
 import devp0tion.mechanics.core.Pump;
 import devp0tion.mechanics.core.PumpForm;
+import devp0tion.mechanics.core.PumpSprites;
 import devp0tion.mechanics.core.PumpTier;
 import devp0tion.mechanics.pipe.PumpObjectEntity;
 import devp0tion.mechanics.registry.MechanicsContainers;
@@ -59,9 +61,13 @@ import java.util.List;
  *     the held logs can go in, else the vanilla "Open" (N31-12). They are switched off by a wire
  *     signal (11-3, N11-3, in the item description).</li>
  *     <li>Pushes only into the basic pipe in front of it, or into the tank of the valve in front of it
- *     (9-3, 9-9, N36-1, N36-4). Cut links to valves are drawn on the pump (N16-4).</li>
+ *     (9-3, 9-9, N36-1, N36-4). Cut links to valves are drawn on the pump (N16-4), only on the sides
+ *     that link to a valve; its other sides are a wall for the parts beside them: no pipe arm,
+ *     collision part or cut mark for the pump's flag there (N36-37, {@link PipeRendering#baseLinksFacing}).</li>
  * </ul>
- * Texture {@code objects/<stringID>.png}: one 32x64 sprite like the tank parts; item icons per form
+ * Texture {@code objects/<stringID>.png}: a 128x128 sheet with a 32x64 cell (like the tank parts) per
+ * rotation and form, the body drawn turned toward each output side ({@link PumpSprites}, N36-38,
+ * N36-39, N36-41), also as the placement preview (N36-40); item icons per form
  * {@code items/<stringID>.png} (valve) and {@code items/<stringID>ground.png} (ground, N36-39).
  * A full-tile block like the tank parts: it blocks movement (N31-1) and is mined with any pickaxe,
  * tier 0, the engine default (N31-2).
@@ -204,19 +210,41 @@ public class PumpObject extends GameObject {
 
     // ------------------------------------------------------------------ drawing
 
+    /** The output side of the pump at a tile: the object's rotation (N36-10), which the engine syncs to clients. */
+    public static Direction frontAt(Level level, int tileX, int tileY) {
+        return Direction.values()[level.getObjectRotation(tileX, tileY) & 3];
+    }
+
+    /**
+     * The form of the pump at a tile (N36-6): its object entity's, ground without one (N36-32). Clients
+     * read the form their entity was sent ({@link PumpObjectEntity#getForm}).
+     */
+    public static PumpForm formAt(Level level, int tileX, int tileY) {
+        ObjectEntity entity = level.entityManager.getObjectEntity(tileX, tileY);
+        return entity instanceof PumpObjectEntity ? ((PumpObjectEntity) entity).getForm() : PumpForm.GROUND;
+    }
+
+    /**
+     * The cell of its rotation and form (N36-38, N36-39, N36-41; {@link PumpSprites}), 32 px above the
+     * tile, and the cut marks toward valves on the sides that link to one (N16-4, N36-37).
+     */
     @Override
     public void addDrawables(List<LevelSortedDrawable> list, OrderableDrawables tileList, Level level, int tileX, int tileY,
                              TickManager tickManager, GameCamera camera, PlayerMob perspective) {
         int drawX = camera.getTileDrawX(tileX);
         int drawY = camera.getTileDrawY(tileY);
         GameLight light = level.getLightLevel(tileX, tileY);
+        PumpObjectEntity pump = getCurrentObjectEntity(level, tileX, tileY, PumpObjectEntity.class);
+        Direction front = frontAt(level, tileX, tileY);
+        PumpForm form = pump == null ? PumpForm.GROUND : pump.getForm();
+        int[] cell = PumpSprites.section(front.ordinal(), form);
         final TextureDrawOptions options = texture.initDraw()
+                .section(cell[0], cell[1], cell[2], cell[3])
                 .addObjectDamageOverlay(this, level, tileX, tileY)
                 .light(light)
                 .pos(drawX, drawY - 32);
-        PumpObjectEntity pump = getCurrentObjectEntity(level, tileX, tileY, PumpObjectEntity.class);
         final DrawOptionsList cuts = PipeRendering.pumpCutOptions(level, tileX, tileY, drawX, drawY,
-                pump == null ? LinkFlags.ALL_OPEN : pump.getLinks());
+                pump == null ? LinkFlags.ALL_OPEN : pump.getLinks(), front, form);
         list.add(new LevelSortedDrawable(this, tileX, tileY) {
             @Override
             public int getSortY() {
@@ -231,9 +259,19 @@ public class PumpObject extends GameObject {
         });
     }
 
+    /**
+     * The placement preview looks as the pump will once placed (N36-40): the cell of the placement
+     * rotation and of the form of the held pump item, the one being placed ({@link PumpObjectItem#getForm};
+     * ground when no pump item is held, e.g. a preset's preview, N36-32, N36-35).
+     */
     @Override
     public void drawPreview(Level level, int tileX, int tileY, int rotation, float alpha, PlayerMob player, GameCamera camera) {
-        texture.initDraw().alpha(alpha).draw(camera.getTileDrawX(tileX), camera.getTileDrawY(tileY) - 32);
+        InventoryItem held = player == null ? null : player.getSelectedItem();
+        PumpForm form = held != null && held.item instanceof PumpObjectItem
+                ? PumpObjectItem.getForm(held) : PumpForm.GROUND;
+        int[] cell = PumpSprites.section(rotation, form);
+        texture.initDraw().section(cell[0], cell[1], cell[2], cell[3]).alpha(alpha)
+                .draw(camera.getTileDrawX(tileX), camera.getTileDrawY(tileY) - 32);
     }
 
     @Override

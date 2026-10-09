@@ -2,6 +2,9 @@ package devp0tion.mechanics.client;
 
 import devp0tion.mechanics.core.Direction;
 import devp0tion.mechanics.core.LinkFlags;
+import devp0tion.mechanics.core.PipeGrid;
+import devp0tion.mechanics.core.Pump;
+import devp0tion.mechanics.core.PumpForm;
 import devp0tion.mechanics.items.MechanicsWrenchItem;
 import devp0tion.mechanics.objects.BasicPipeObject;
 import devp0tion.mechanics.objects.PumpObject;
@@ -30,7 +33,11 @@ import necesse.level.maps.light.GameLight;
  * marks north, east, south, west, then the vertical link marker linked and cut.
  *
  * <p>Cut faces are drawn (N16-4): a pipe marks every side whose own flag is cut and every side
- * facing a part whose flag toward it is cut; a pump marks its cut links to valves. A face between
+ * facing a part whose flag toward it is cut; a pump marks its cut links to valves. A pump's side
+ * that cannot link to the part beside it (by its rotation and form, N36-2, N36-5, N36-20) is no part
+ * there, like a wall: no arm, no collision part, not linked in the wrench's tooltip, no cut mark for
+ * the pump's flag or a valve's flag there; a pipe's own cut flag there is still marked, as beside a
+ * wall (N36-37, N36-55, {@link #baseLinksFacing}, {@link #pumpCutOptions}). A face between
  * two pipes holding different fluids is a dead end (N13-2) and is drawn the same way, from the
  * blocked faces the server syncs ({@link BasicPipeObjectEntity#getBlockedSides},
  * {@link ClientUndergroundPipes#getBlockedSides}): between two pipes of one layer, and the vertical
@@ -97,6 +104,28 @@ public final class PipeRendering {
     }
 
     /**
+     * {@link #baseLinks}, as seen by the part of kind {@code neighbourKind} beside the tile's side
+     * {@code side}: a pump's side that does not link to that kind is no part, like a wall (N36-37):
+     * its sides follow its rotation and form ({@link PumpObject#frontAt}, {@link PumpObject#formAt},
+     * {@link Pump#accepts(Direction, PumpForm, Direction, PipeGrid.Part)}). So a basic pipe beside a
+     * pump has no arm, no collision part and no link toward any side but the pump's front (N36-2), and
+     * draws no mark for the pump's flag there; its own flag cut there is still its own cut mark, as
+     * beside a wall (N36-55, N16-4). For basic pipes only the rotation counts, never the form, so the
+     * server and the clients compute the same collision. Also read on the server (collision, N31-10).
+     *
+     * @param side the side of the part at the tile that faces the asking neighbour
+     */
+    public static int baseLinksFacing(Level level, int tileX, int tileY, Direction side, PipeGrid.Part neighbourKind) {
+        int links = baseLinks(level, tileX, tileY);
+        if (links >= 0 && level.getObject(tileX, tileY) instanceof PumpObject
+                && !Pump.accepts(PumpObject.frontAt(level, tileX, tileY), PumpObject.formAt(level, tileX, tileY), side,
+                neighbourKind)) {
+            return -1;
+        }
+        return links;
+    }
+
+    /**
      * The faces of the basic pipe at a tile blocked by another fluid (N13-2; sides and vertical), or 0.
      * Also read on the server, for the basic pipe's collision (N31-13): its object entity keeps the
      * faces on both sides (synced to clients).
@@ -138,7 +167,8 @@ public final class PipeRendering {
         for (Direction d : Direction.values()) {
             int nx = tileX + d.dx;
             int ny = tileY + d.dy;
-            int neighbour = underground ? undergroundLinks(level, nx, ny) : baseLinks(level, nx, ny);
+            int neighbour = underground ? undergroundLinks(level, nx, ny)
+                    : baseLinksFacing(level, nx, ny, d.opposite(), PipeGrid.Part.BASIC_PIPE);
             boolean own = LinkFlags.isSideOpen(ownLinks, d);
             boolean other = neighbour >= 0 && LinkFlags.isSideOpen(neighbour, d.opposite());
             boolean blocked = LinkFlags.isSideOpen(blockedSides, d);
@@ -169,11 +199,22 @@ public final class PipeRendering {
         return baseLinks(level, tileX, tileY);
     }
 
-    /** Cut marks of a pump's links to the valves next to it (N16-3, N16-4); none toward a plain wall (N33-1). */
-    public static DrawOptionsList pumpCutOptions(Level level, int tileX, int tileY, int drawX, int drawY, int pumpLinks) {
+    /**
+     * Cut marks of a pump's links to the valves next to it (N16-4), only on the sides that link to a
+     * valve: its front, and a valve pump's back (N36-3, N36-4, N36-17, N36-18). None on the other sides,
+     * like a wall (N36-37; N36-5, N36-20), and none toward a plain wall (N33-1).
+     *
+     * @param front the pump's output side (its rotation, {@link PumpObject#frontAt})
+     * @param form  the pump's form ({@link PumpObject#formAt})
+     */
+    public static DrawOptionsList pumpCutOptions(Level level, int tileX, int tileY, int drawX, int drawY, int pumpLinks,
+                                                 Direction front, PumpForm form) {
         GameLight light = level.getLightLevel(tileX, tileY);
         DrawOptionsList options = new DrawOptionsList();
         for (Direction d : Direction.values()) {
+            if (!Pump.accepts(front, form, d, PipeGrid.Part.VALVE)) {
+                continue;
+            }
             int nx = tileX + d.dx;
             int ny = tileY + d.dy;
             if (!(level.getObject(nx, ny) instanceof TankValveObject)) {

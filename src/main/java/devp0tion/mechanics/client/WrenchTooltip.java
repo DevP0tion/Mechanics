@@ -194,7 +194,11 @@ public final class WrenchTooltip {
         for (Direction d : Direction.values()) {
             int nx = tileX + d.dx;
             int ny = tileY + d.dy;
-            neighbours[d.ordinal()] = base ? PipeRendering.baseLinks(level, nx, ny) : PipeRendering.undergroundLinks(level, nx, ny);
+            // The base section is a basic pipe's (WrenchTargets.pipeOrder): a pump's side that cannot
+            // link to it is no neighbour, like a wall (N36-37).
+            neighbours[d.ordinal()] = base
+                    ? PipeRendering.baseLinksFacing(level, nx, ny, d.opposite(), PipeGrid.Part.BASIC_PIPE)
+                    : PipeRendering.undergroundLinks(level, nx, ny);
         }
         int partner;
         if (base) {
