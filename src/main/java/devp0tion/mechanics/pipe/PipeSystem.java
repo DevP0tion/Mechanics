@@ -58,7 +58,8 @@ import java.util.Map;
  *     <li>Clients get the underground pipes' link flags and the faces blocked by another fluid
  *     ({@link PipeGrid#getFluidBlockedSides}, N13-2) per region when the region is sent to them
  *     ({@link PipeSyncPatches}) and per tile when either changes ({@link PacketUndergroundPipes},
- *     N26-2); basic pipes, pumps and valves sync through their object entities.</li>
+ *     N26-2); basic pipes, pumps and valves sync through their object entities, pumps also the
+ *     state of each cycle that ran (N36-44, {@link PumpObjectEntity}).</li>
  * </ul>
  */
 public class PipeSystem extends LevelData implements RegionLevelDataComponent, RegionLoadedListenerEntityComponent {
@@ -91,6 +92,7 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
             @Override
             public void onPumpCycle(int tileX, int tileY, PumpResult result) {
                 applyResult(result);
+                showState(tileX, tileY, result);
             }
         });
     }
@@ -601,6 +603,20 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
         for (PipeNode node : result.getBroken()) {
             int layerID = node.getLayer() == PipeLayer.BASE ? 0 : UndergroundPipeLayer.ID;
             removeObjectWithoutDrop(level, layerID, node.getTileX(), node.getTileY());
+        }
+    }
+
+    /**
+     * The pump's window and tooltip show what its cycle did (N36-44, N36-57); the entity syncs the
+     * state to clients when it changed.
+     */
+    private void showState(int tileX, int tileY, PumpResult result) {
+        if (level == null) {
+            return;
+        }
+        PumpObjectEntity pump = level.entityManager.getObjectEntity(tileX, tileY, PumpObjectEntity.class);
+        if (pump != null) {
+            pump.setState(result.getStatus(), result.getDetail(), result.getFluid());
         }
     }
 

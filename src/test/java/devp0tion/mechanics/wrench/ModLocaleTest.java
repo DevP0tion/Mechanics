@@ -1,9 +1,12 @@
 package devp0tion.mechanics.wrench;
 
+import devp0tion.mechanics.core.PumpStatusText;
+
 /**
  * Other texts of the locale files read by the game-independent tests: the log-fuelled pumps' hint
  * (N31-12), the Korean name of ooze (N32-6), the wrench's reason toward a pump's side that cannot be
- * linked (N36-61), the pump texts N36-8 removed and the pump item's form texts (N36-42, N36-54).
+ * linked (N36-61), the pump texts N36-8 removed, the pump item's form texts (N36-42, N36-54) and the
+ * pump's state texts (N36-44, N36-57).
  */
 final class ModLocaleTest {
 
@@ -42,6 +45,22 @@ final class ModLocaleTest {
             // Kept beside the form line (N36-54).
             Check.isTrue(file.get("itemtooltip", "pumpwiretip") != null, lang + " pumpwiretip");
             Check.isTrue(file.get("itemtooltip", "tankinteriortip") != null, lang + " tankinteriortip");
+        }
+    }
+
+    public static void testPumpStatusTexts() {
+        // N36-44, N36-56, N36-57, N36-67: every line of the pump window and tooltip; drafts (N36-48),
+        // so their presence and their placeholders only.
+        for (String lang : new String[]{"kr", "en"}) {
+            LangFile file = LangFile.load(lang);
+            for (String key : PumpStatusText.keys()) {
+                String text = file.ui(key);
+                Check.isFalse(text.isEmpty(), lang + " [ui] " + key);
+                Check.isFalse(text.contains("\u2014"), lang + " [ui] " + key + ": no em dash");
+            }
+            String output = file.ui(PumpStatusText.OUTPUT);
+            Check.isTrue(output.contains("<direction>") && output.contains("<form>"), lang + " output line: " + output);
+            Check.isTrue(file.ui(PumpStatusText.PUMPING).contains("<fluid>"), lang + " pumping line");
         }
     }
 

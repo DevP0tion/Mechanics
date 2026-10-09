@@ -96,3 +96,29 @@ mechanicswrenchnotloaded=Cannot change: that tile is not loaded or is outside th
 mechanicswrenchnothingtolink=Nothing here to link.
 mechanicswrenchnovertical=Nothing here to link above and below.
 mechanicswrenchpumpside=Cannot change: that side of the pump cannot be connected.
+// The pump's state (N36-44): in the window of the log-fuelled pumps and the tooltip over every pump, the same words
+// (N36-57, N36-60; PumpStatusText). Line 1: <direction> is the output direction's name, <form> the form's name.
+// Line 2: what the last cycle did, "Nowhere to push (reason)" when there is nowhere to push (N36-56), "Waiting"
+// until the first cycle (N36-67); <fluid> is the fluid's name.
+// TODO(confirm): draft wording (N36-48); plain translations of the Korean drafts.
+mechanicspumpoutput=Output direction: <direction>, form: <form>
+mechanicspumpdirnorth=North
+mechanicspumpdireast=East
+mechanicspumpdirsouth=South
+mechanicspumpdirwest=West
+mechanicspumpformvalve=valve
+mechanicspumpformground=ground
+mechanicspumpwaiting=Waiting
+mechanicspumppumping=Pumping (<fluid>)
+mechanicspumpwireoff=Switched off by wire
+mechanicspumpnosourceground=No source (no liquid under it)
+mechanicspumpnosourcevalve=No source (no linked tank valve behind it)
+mechanicspumpsourceoff=The tank valve behind it is switched off by wire
+mechanicspumpsourceempty=The source is empty
+mechanicspumpsourceotherfluid=Source inactive: it holds another fluid
+mechanicspumpfluidnotallowed=This pump cannot move the fluid
+mechanicspumpnodestination=Nowhere to push (no tank linked in front)
+mechanicspumpdestinationfull=Nowhere to push (full)
+mechanicspumpdestinationotherfluid=Nowhere to push (another fluid in front)
+mechanicspumpdestinationoff=Nowhere to push (the tank valve in front is switched off by wire)
+mechanicspumpnofuel=No fuel

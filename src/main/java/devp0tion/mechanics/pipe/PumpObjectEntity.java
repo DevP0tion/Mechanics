@@ -7,13 +7,21 @@ import devp0tion.mechanics.core.LiquidTileSource;
 import devp0tion.mechanics.core.PipeGrid;
 import devp0tion.mechanics.core.Pump;
 import devp0tion.mechanics.core.PumpForm;
+import devp0tion.mechanics.core.PumpResult;
+import devp0tion.mechanics.core.PumpStatusText;
 import devp0tion.mechanics.core.PumpTier;
+import devp0tion.mechanics.tank.FluidNames;
+import necesse.engine.localization.Localization;
 import necesse.engine.network.PacketReader;
 import necesse.engine.network.PacketWriter;
 import necesse.engine.registries.GlobalIngredientRegistry;
 import necesse.engine.save.LoadData;
 import necesse.engine.save.SaveData;
+import necesse.entity.mobs.PlayerMob;
 import necesse.entity.objectEntity.InventoryObjectEntity;
+import necesse.gfx.gameTooltips.GameTooltipManager;
+import necesse.gfx.gameTooltips.StringTooltips;
+import necesse.gfx.gameTooltips.TooltipLocation;
 import necesse.inventory.InventoryItem;
 import necesse.inventory.InventoryRange;
 import necesse.level.maps.Level;
@@ -52,11 +60,17 @@ import java.util.Objects;
  *     systems (N22-5), at most every 20 ticks per pump however many players click (N3-2, N3-3,
  *     N31-3).</li>
  *     <li>Fuel (11-7, 11-8): the log-fueled pumps burn any log from one slot. Logs get in both ways
- *     (N31-4): the vanilla object inventory window with the one fuel slot, and a right click on
+ *     (N31-4): the pump window ({@link PumpContainer}) with the one fuel slot, and a right click on
  *     the pump while holding logs that can go in; otherwise the right click opens the window
  *     ({@code PumpObject.interact}, N31-11).</li>
- *     <li>Clients get the link flags (drawn as cut faces, N16-4) and the slot (vanilla inventory
- *     sync); the fluid stays on the server.</li>
+ *     <li>State (N36-44): what the last cycle did, and why it stopped for want of a source or a
+ *     destination (N36-56), shown with the output direction and the form in the pump window and in
+ *     the tooltip over any pump ({@link #onMouseHover}, N36-57, N36-60; words:
+ *     {@link PumpStatusText}). The engine reports every cycle that ran ({@link PipeSystem}); a cycle
+ *     not due yet keeps the last state, and a wire signal sets "switched off" at once, no cycle running
+ *     then. Not saved: "대기 중" until the first cycle (N36-67).</li>
+ *     <li>Clients get the link flags (drawn as cut faces, N16-4), the form, the state (only when
+ *     it changed) and the slot (vanilla inventory sync); the fluid stays on the server.</li>
  * </ul>
  */
 public class PumpObjectEntity extends InventoryObjectEntity {
@@ -74,6 +88,13 @@ public class PumpObjectEntity extends InventoryObjectEntity {
     /** The object this entity was created for ({@link PipeSystem#isReplacedEntity}). */
     private int objectID = -1;
     private int links = LinkFlags.ALL_OPEN;
+
+    // The state (N36-44): set on the server from the cycles, synced to clients; not saved, so a new or
+    // loaded pump reads "대기 중" until its first cycle (N36-67).
+    private PumpResult.Status status = PumpResult.Status.WAITING;
+    private PumpResult.Detail detail = PumpResult.Detail.NONE;
+    /** The fluid the last cycle moved ({@link PumpResult.Status#PUMPED}), else {@code null}. */
+    private FluidType stateFluid;
 
     // Saved state waiting for init.
     private FluidType savedBufferFluid;
@@ -199,6 +220,8 @@ public class PumpObjectEntity extends InventoryObjectEntity {
             return;
         }
         this.form = form;
+        // Clients draw the form and show it in the window and the tooltip (N36-39, N36-44).
+        markDirty();
         if (registered) {
             if (form == PumpForm.GROUND && tileSource == null) {
                 tileSource = newTileSource(false);
@@ -268,10 +291,58 @@ public class PumpObjectEntity extends InventoryObjectEntity {
         }
     }
 
-    /** Reads the wire signal on the pump's tile: a signal switches tier 2 and up off (11-3, N11-3). */
+    /**
+     * Reads the wire signal on the pump's tile: a signal switches tier 2 and up off (11-3, N11-3). No
+     * cycle runs while it is off, so the state says so here (N36-44); the first cycle after the signal
+     * ends replaces it.
+     */
     public void updateWire() {
         if (pump.getTier().isWireControllable()) {
-            pump.setEnabled(!getLevel().wireManager.isWireActiveAny(tileX, tileY));
+            boolean off = getLevel().wireManager.isWireActiveAny(tileX, tileY);
+            pump.setEnabled(!off);
+            if (off) {
+                setState(PumpResult.Status.DISABLED, PumpResult.Detail.NONE, null);
+            }
+        }
+    }
+
+    /**
+     * The state of a cycle that ran (server; from {@link PipeSystem}, and "switched off" from
+     * {@link #updateWire}): synced to clients only when it changed. A cycle that was not due yet
+     * ({@link PumpResult.Status#WAITING}: the click cooldown) keeps the last state.
+     */
+    void setState(PumpResult.Status status, PumpResult.Detail detail, FluidType fluid) {
+        if (!isServer() || status == PumpResult.Status.WAITING) {
+            return;
+        }
+        if (status != this.status || detail != this.detail || fluid != stateFluid) {
+            this.status = status;
+            this.detail = detail;
+            this.stateFluid = fluid;
+            markDirty();
+        }
+    }
+
+    /** The output line: the output direction and the form (N36-44), in the game's language; both sides. */
+    public String getOutputText() {
+        return PumpStatusText.outputLine(facing(), form, key -> Localization.translate("ui", key));
+    }
+
+    /** The state line (N36-44, N36-56, N36-67), in the game's language; both sides. */
+    public String getStateText() {
+        return PumpStatusText.stateLine(status, detail, form, FluidNames.displayName(stateFluid),
+                key -> Localization.translate("ui", key));
+    }
+
+    /**
+     * N36-57: the cursor over the pump shows the window's lines, whatever the player holds, on every
+     * pump (the manual pump has no window). The wrench's own tooltip stacks with it (N36-60).
+     */
+    @Override
+    public void onMouseHover(PlayerMob perspective, boolean debug) {
+        super.onMouseHover(perspective, debug);
+        if (isClient()) {
+            GameTooltipManager.addTooltip(new StringTooltips(getOutputText(), getStateText()), TooltipLocation.INTERACT_FOCUS);
         }
     }
 
@@ -395,12 +466,27 @@ public class PumpObjectEntity extends InventoryObjectEntity {
     public void setupContentPacket(PacketWriter writer) {
         super.setupContentPacket(writer);
         writer.putNextByteUnsigned(registered ? pump.getLinks() : links);
+        // The form (drawing, N36-39) and the state (N36-44, N36-57).
+        writer.putNextByteUnsigned(form.ordinal());
+        writer.putNextByteUnsigned(status.ordinal());
+        writer.putNextByteUnsigned(detail.ordinal());
+        writer.putNextByte((byte) (stateFluid == null ? -1 : stateFluid.ordinal()));
     }
 
     @Override
     public void applyContentPacket(PacketReader reader) {
         super.applyContentPacket(reader);
         links = LinkFlags.sanitize(reader.getNextByteUnsigned());
+        // Clients only: the server's form is in the grid (setForm).
+        form = valueAt(PumpForm.values(), reader.getNextByteUnsigned(), PumpForm.GROUND);
+        status = valueAt(PumpResult.Status.values(), reader.getNextByteUnsigned(), PumpResult.Status.WAITING);
+        detail = valueAt(PumpResult.Detail.values(), reader.getNextByteUnsigned(), PumpResult.Detail.NONE);
+        stateFluid = valueAt(FluidType.values(), reader.getNextByte(), null);
+    }
+
+    /** The value at a synced ordinal, or {@code fallback} for one out of range. */
+    private static <T> T valueAt(T[] values, int ordinal, T fallback) {
+        return ordinal >= 0 && ordinal < values.length ? values[ordinal] : fallback;
     }
 
 }

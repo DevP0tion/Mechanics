@@ -91,3 +91,29 @@ mechanicswrenchnotloaded=불러오지 않았거나 월드 밖인 칸이라 바�
 mechanicswrenchnothingtolink=이 칸에는 연결할 것이 없습니다.
 mechanicswrenchnovertical=이 칸에는 기본·지하로 연결할 것이 없습니다.
 mechanicswrenchpumpside=펌프의 연결될 수 없는 쪽이라 바꿀 수 없습니다.
+// The pump's state (N36-44): in the window of the log-fuelled pumps and the tooltip over every pump, the same words
+// (N36-57, N36-60; PumpStatusText). Line 1: <direction> is the output direction's name, <form> the form's name.
+// Line 2: what the last cycle did, "넣을 곳 없음(이유)" when there is nowhere to push (N36-56), "대기 중" until the
+// first cycle (N36-67); <fluid> is the fluid's name.
+// TODO(confirm): draft wording (N36-48).
+mechanicspumpoutput=출력 방향: <direction> · 형태: <form>
+mechanicspumpdirnorth=북
+mechanicspumpdireast=동
+mechanicspumpdirsouth=남
+mechanicspumpdirwest=서
+mechanicspumpformvalve=밸브형
+mechanicspumpformground=땅형
+mechanicspumpwaiting=대기 중
+mechanicspumppumping=작동 중(<fluid>)
+mechanicspumpwireoff=와이어로 꺼짐
+mechanicspumpnosourceground=공급원 없음(아래에 액체 없음)
+mechanicspumpnosourcevalve=공급원 없음(뒤에 연결된 탱크 밸브 없음)
+mechanicspumpsourceoff=뒤 탱크 밸브가 와이어로 꺼짐
+mechanicspumpsourceempty=공급원 비어 있음
+mechanicspumpsourceotherfluid=공급원이 다른 유체라 비활성
+mechanicspumpfluidnotallowed=이 펌프로는 옮길 수 없는 유체
+mechanicspumpnodestination=넣을 곳 없음(앞으로 이어진 탱크 없음)
+mechanicspumpdestinationfull=넣을 곳 없음(가득 참)
+mechanicspumpdestinationotherfluid=넣을 곳 없음(앞의 유체가 다름)
+mechanicspumpdestinationoff=넣을 곳 없음(앞 탱크 밸브가 와이어로 꺼짐)
+mechanicspumpnofuel=연료 없음

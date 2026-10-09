@@ -6,10 +6,10 @@ import devp0tion.mechanics.core.Pump;
 import devp0tion.mechanics.core.PumpForm;
 import devp0tion.mechanics.core.PumpTier;
 import devp0tion.mechanics.pipe.PumpObjectEntity;
+import devp0tion.mechanics.registry.MechanicsContainers;
 import devp0tion.mechanics.tank.TankInteriorPlacement;
 import necesse.engine.gameLoop.tickManager.TickManager;
 import necesse.engine.localization.Localization;
-import necesse.engine.registries.ContainerRegistry;
 import necesse.entity.mobs.PlayerMob;
 import necesse.entity.objectEntity.ObjectEntity;
 import necesse.gfx.camera.GameCamera;
@@ -53,7 +53,9 @@ import java.util.List;
  *     both ways (N31-4): right clicked while the player holds logs that can go into their fuel
  *     slot, they take as many of them as fit from the held stack; otherwise, also while holding
  *     logs that cannot go in (the slot is full or holds another kind of log), the right click opens
- *     their fuel slot window (N31-11). The interaction hint reads "연료 넣기" / "Add fuel" while
+ *     their window (N31-11): the fuel slot, the output direction and form, and the state (N36-44).
+ *     Every pump shows the same lines in a tooltip while the cursor is over it (N36-57); the manual
+ *     pump has no window. The interaction hint reads "연료 넣기" / "Add fuel" while
  *     the held logs can go in, else the vanilla "Open" (N31-12). They are switched off by a wire
  *     signal (11-3, N11-3, in the item description).</li>
  *     <li>Pushes only into the basic pipe in front of it, or into the tank of the valve in front of it
@@ -151,8 +153,9 @@ public class PumpObject extends GameObject {
                 insertHeldLogs(level, player, pump);
                 return;
             }
-            // Nothing held that can go in (no logs, the slot full, another kind of log): the window (N31-11).
-            OEInventoryContainer.openAndSendContainer(ContainerRegistry.OE_INVENTORY_CONTAINER, player.getServerClient(), level, x, y);
+            // Nothing held that can go in (no logs, the slot full, another kind of log): the window (N31-11)
+            // with the fuel slot and the pump's state (N36-44).
+            OEInventoryContainer.openAndSendContainer(MechanicsContainers.PUMP, player.getServerClient(), level, x, y);
         } else {
             PumpObjectEntity pump = getCurrentObjectEntity(level, x, y, PumpObjectEntity.class);
             if (pump != null) {
