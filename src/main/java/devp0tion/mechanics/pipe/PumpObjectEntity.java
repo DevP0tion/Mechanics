@@ -486,7 +486,9 @@ public class PumpObjectEntity extends InventoryObjectEntity {
         if (isServer()) {
             // An admin's content packet (PacketObjectEntity.processServer): the grid owns the flags and
             // the form (setForm; a placed pump's form changes only when it is placed again, N36-7,
-            // N36-12) and the cycles own the state, so the server keeps its own.
+            // N36-12) and the cycles own the state, so the server keeps its own. The engine then relays
+            // the admin's packet to the other clients, so mark dirty to resend the server's own content.
+            markDirty();
             return;
         }
         links = packetLinks;
