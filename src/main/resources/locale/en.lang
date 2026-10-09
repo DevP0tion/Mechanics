@@ -32,8 +32,7 @@ tankcontrollertip=Cannot be placed in a wall shared by two tanks.
 tankvalvetip=Stops working while it receives a wire signal.
 tankinteriortip=Cannot be placed inside a recognized tank.
 glassblocktip=Inside a recognized tank, only glass blocks can be placed.
-// Pump placement rejection (N17-1) and wire rule (N11-3), in the item descriptions (N11-6).
-pumpsourcestip=Cannot be placed where it would connect sources holding different fluids.
+// Pump wire rule (N11-3), in the item descriptions (N11-6); the sources rule (N17-1) is gone with N36-8.
 pumpwiretip=Stops working while it receives a wire signal.
 // Wrench controls (12-8, 13-4, 13-5; wording N33-17, N33-22), the mode key (N30-5) and the tooltip preview (N30-1, N30-2).
 // [input=...] is drawn as the bound key.
@@ -88,4 +87,4 @@ mechanicswrenchoutofrange=Cannot change: too far away.
 mechanicswrenchnotloaded=Cannot change: that tile is not loaded or is outside the world.
 mechanicswrenchnothingtolink=Nothing here to link.
 mechanicswrenchnovertical=Nothing here to link above and below.
-mechanicswrenchsourcefluid=Cannot link: the tank holds another fluid than the pump's other sources.
+mechanicswrenchpumpside=Cannot change: that side of the pump cannot be connected.

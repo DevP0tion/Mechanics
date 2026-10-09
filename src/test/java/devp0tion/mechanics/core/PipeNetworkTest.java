@@ -119,7 +119,7 @@ final class PipeNetworkTest {
         // Two pumps push toward a valve between them; each starts its own network (N18-2).
         PipeGrid grid = grid();
         Pump left = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.LAVA);
-        Pump right = Fluids.fueledPump(grid, 4, 0, PumpTier.FIRE, FluidType.LAVA);
+        Pump right = Fluids.fueledPump(grid, 4, 0, PumpTier.FIRE, FluidType.LAVA, Direction.WEST);
         Fluids.baseLine(grid, 1, 3, 0, MineralTier.COPPER);
         grid.placeValve(2, 1, Fluids.valve(1000));
         Fluids.push(grid, left, right);
@@ -135,7 +135,7 @@ final class PipeNetworkTest {
     public static void testDifferentFluidsNeverJoin() {
         PipeGrid grid = grid();
         Pump water = Fluids.fueledPump(grid, 0, 0, PumpTier.ADVANCED_FIRE, FluidType.FRESHWATER);
-        Pump lava = Fluids.fueledPump(grid, 4, 0, PumpTier.ADVANCED_FIRE, FluidType.LAVA);
+        Pump lava = Fluids.fueledPump(grid, 4, 0, PumpTier.ADVANCED_FIRE, FluidType.LAVA, Direction.WEST);
         Fluids.baseLine(grid, 1, 3, 0, MineralTier.COPPER);
         grid.placeValve(2, 1, Fluids.valve(1000));
         for (int i = 0; i < 60; i++) {

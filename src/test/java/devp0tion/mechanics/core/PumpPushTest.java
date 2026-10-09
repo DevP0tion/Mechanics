@@ -226,8 +226,8 @@ final class PumpPushTest {
     public static void testPumpsOnOnePathShareTheCap() {
         // Two fire pumps push into the same copper (10) path: together at most 10 per cycle (N18-1).
         PipeGrid grid = new PipeGrid(Fluids.TIERS);
-        Pump a = Fluids.fueledPump(grid, 1, 0, PumpTier.FIRE, FluidType.LAVA);
-        Pump b = Fluids.fueledPump(grid, 1, 2, PumpTier.FIRE, FluidType.LAVA);
+        Pump a = Fluids.fueledPump(grid, 1, 0, PumpTier.FIRE, FluidType.LAVA, Direction.SOUTH);
+        Pump b = Fluids.fueledPump(grid, 1, 2, PumpTier.FIRE, FluidType.LAVA, Direction.NORTH);
         Fluids.baseLine(grid, 1, 3, 1, MineralTier.COPPER);
         Fluids.fill(grid, 1, 3, 1, PipeLayer.BASE, FluidType.LAVA);
         TankValve valve = Fluids.valve(10000);
@@ -241,8 +241,8 @@ final class PumpPushTest {
 
     public static void testPumpsAddUpUnderTheCap() {
         PipeGrid grid = new PipeGrid(Fluids.uniform(80));
-        Pump a = Fluids.fueledPump(grid, 1, 0, PumpTier.FIRE, FluidType.LAVA);
-        Pump b = Fluids.fueledPump(grid, 1, 2, PumpTier.FIRE, FluidType.LAVA);
+        Pump a = Fluids.fueledPump(grid, 1, 0, PumpTier.FIRE, FluidType.LAVA, Direction.SOUTH);
+        Pump b = Fluids.fueledPump(grid, 1, 2, PumpTier.FIRE, FluidType.LAVA, Direction.NORTH);
         Fluids.baseLine(grid, 1, 3, 1, MineralTier.COPPER);
         Fluids.fill(grid, 1, 3, 1, PipeLayer.BASE, FluidType.LAVA);
         TankValve valve = Fluids.valve(10000);
@@ -258,7 +258,7 @@ final class PumpPushTest {
         Fluids.fill(grid, 0, 5, 0, PipeLayer.BASE, FluidType.FRESHWATER);
         Pump[] pumps = new Pump[5];
         for (int i = 0; i < 5; i++) {
-            pumps[i] = Fluids.fueledPump(grid, i, -1, PumpTier.FIRE, FluidType.FRESHWATER);
+            pumps[i] = Fluids.fueledPump(grid, i, -1, PumpTier.FIRE, FluidType.FRESHWATER, Direction.SOUTH);
         }
         TankValve valve = Fluids.valve(100000);
         grid.placeValve(6, 0, valve);
@@ -268,22 +268,20 @@ final class PumpPushTest {
         Check.equal(160, valve.getTank().getAmount(), "again 80 the next cycle");
     }
 
-    public static void testSpeedDoesNotDependOnTheNumberOfSources() {
+    public static void testGroundPumpWithAValveBehindItHasOneSource() {
+        // N36-6, N36-20: a ground pump never uses the valve behind it as well; its speed is its tier's.
         PipeGrid grid = new PipeGrid(Fluids.uniform(80));
         TankStorage tank = Fluids.tank(1000);
         tank.insert(FluidType.FRESHWATER, 500);
-        grid.placeValve(0, 1, Fluids.valveOf(tank));
-        Pump pump = new Pump(PumpTier.FIRE);
-        pump.setTileSource(LiquidTileSource.infinite(FluidType.FRESHWATER));
-        pump.setFuelSupply(new Fluids.Logs(10));
-        grid.placePump(0, 0, pump);
-        Check.equal(2, pump.getSources().size(), "tile and tank");
+        grid.placeValve(-1, 0, Fluids.valveOf(tank));
+        Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
+        Check.equal(1, pump.getSources().size(), "the tile only");
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         Fluids.fill(grid, 1, 1, 0, PipeLayer.BASE, FluidType.FRESHWATER);
         TankValve target = Fluids.valve(1000);
         grid.placeValve(2, 0, target);
-        Check.equal(20, Fluids.cycle(pump).getMoved(), "still 20 per cycle (N18-1)");
-        Check.equal(500, tank.getAmount(), "pulled from the first source (the tile, N19-1)");
+        Check.equal(20, Fluids.cycle(pump).getMoved(), "20 per cycle (N18-1)");
+        Check.equal(500, tank.getAmount(), "the valve behind a ground pump is not linked");
     }
 
     // ---------- pipe breaks (N12-4, N12-5, N14-1) ----------
@@ -498,11 +496,14 @@ final class PumpPushTest {
     }
 
     public static void testUndergroundPipeNextToPumpIsNoDestination() {
+        // An underground pipe in front of the pump, leading to a valve over the next underground pipe.
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
-        grid.placePipe(1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
-        grid.placeValve(1, 0, Fluids.valve(100));
-        Check.equal(Status.NO_DESTINATION, Fluids.cycle(pump).getStatus(), "9-9");
+        Fluids.line(grid, 1, 2, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
+        grid.placeValve(2, 0, Fluids.valve(100));
+        PumpResult result = Fluids.cycle(pump);
+        Check.equal(Status.NO_DESTINATION, result.getStatus(), "9-9");
+        Check.equal(PumpResult.Detail.DESTINATION_MISSING, result.getDetail(), "nothing in front it links");
     }
 
     // ---------- tier restrictions (12-1, 12-5, 12-6, N17-5) ----------
@@ -538,10 +539,9 @@ final class PumpPushTest {
         TankStorage sourceTank = Fluids.tank(100);
         sourceTank.insert(FluidType.SLIME, 50);
         grid.placeValve(-1, 0, Fluids.valveOf(sourceTank));
-        Pump pump = new Pump(PumpTier.FIRE);
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
         Fluids.Logs logs = new Fluids.Logs(5);
         pump.setFuelSupply(logs);
-        grid.placePump(0, 0, pump);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placeValve(2, 0, Fluids.valve(100));
         Check.equal(Status.FLUID_NOT_ALLOWED, Fluids.cycle(pump).getStatus(), "fire pump cannot move slime (12-6)");
@@ -555,14 +555,13 @@ final class PumpPushTest {
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankStorage sourceTank = Fluids.tank(100);
         sourceTank.insert(FluidType.LAVA, 25);
-        grid.placeValve(0, 1, Fluids.valveOf(sourceTank));
-        Pump pump = new Pump(PumpTier.FIRE);
+        grid.placeValve(-1, 0, Fluids.valveOf(sourceTank));
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
         pump.setFuelSupply(new Fluids.Logs(5));
-        grid.placePump(0, 0, pump);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         TankValve target = Fluids.valve(100);
         grid.placeValve(2, 0, target);
-        // The source tank's own valve is also linked to the pipe: it must not be a destination.
+        // The source tank's own valve is also linked to the pipe: it must not be a destination (N36-51).
         grid.placeValve(1, 1, Fluids.valveOf(sourceTank));
 
         PumpResult first = Fluids.cycle(pump);
@@ -599,22 +598,22 @@ final class PumpPushTest {
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankStorage source = Fluids.tank(100);
         source.insert(FluidType.FRESHWATER, 100);
-        grid.placeValve(0, 1, Fluids.valveOf(source));
-        Pump pump = new Pump(PumpTier.FIRE);
+        grid.placeValve(-1, 0, Fluids.valveOf(source));
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
         pump.setFuelSupply(new Fluids.Logs(5));
-        grid.placePump(0, 0, pump);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
         grid.placeValve(2, 0, Fluids.valve(1000));
         Check.equal(20, Fluids.cycle(pump).getMoved(), "pulling from the tank");
         source.release();
         Check.equal(Status.NO_SOURCE, Fluids.cycle(pump).getStatus(), "the removed tank gives nothing");
         Check.equal(80, source.getAmount(), "untouched");
-        Check.equal(1, pump.getSourceSlots().size(), "the valve stays connected: only its tank is gone (N19-1)");
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.WEST), "the valve stays linked: only its tank is gone");
     }
 
     public static void testPumpWithoutSource() {
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = new Pump(PumpTier.FIRE);
+        pump.setDirection(Direction.EAST);
         pump.setFuelSupply(new Fluids.Logs(5));
         grid.placePump(0, 0, pump);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);

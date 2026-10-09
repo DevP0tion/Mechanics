@@ -8,10 +8,11 @@ package devp0tion.mechanics.core;
  *     controller (5-9). Without a recognized tank it accepts nothing.</li>
  *     <li>Normally on: by default it accepts incoming fluid (N7-3). While it receives a wire
  *     signal it is off and accepts nothing (N11-3, {@link #applyWireSignal}).</li>
- *     <li>A pump linked directly to a valve pulls from its tank (11-1 ②, 11-5, N16-3); that is one
- *     of the pump's sources, not a destination. A valve switched off by a wire signal blocks that
- *     too: a linked pump does not pull from the tank through it while it is off (N27-4,
- *     {@link PipeGrid#getSourceValves}).</li>
+ *     <li>A valve pump linked to a valve behind it pulls from its tank (11-1 ②, N36-3); that is the
+ *     pump's source, not a destination ({@link PipeGrid#isPumpValveLinked}). A valve in front of a
+ *     pump is a destination without pipes (N36-4); a valve on a pump's other sides is not linked
+ *     (N36-5, N36-20). A valve switched off by a wire signal blocks pulling too: the pump does not
+ *     pull from the tank through it while it is off (N27-4).</li>
  *     <li>Link flags ({@link LinkFlags}): one per side (basic pipes and pumps next to it) and the
  *     vertical one (the underground pipe on its tile, 9-9, 13-5). Toggled by the wrench and kept
  *     when the other side is removed (N16-4).</li>
@@ -20,8 +21,8 @@ package devp0tion.mechanics.core;
  *     it counts as a plain wall for both (N33-1, {@link #isPlainWall}): no tank, and no link to it
  *     counts while it is one ({@link #linksSide}, {@link #linksVertical}): it is neither a
  *     destination nor a source. Its link flags stay as they are, so it links again as before when
- *     the sharing ends; the pumps next to it keep it in their sources where it is and skip it
- *     meanwhile, as for a valve switched off by a wire signal (N35-1, N27-4). Set through
+ *     the sharing ends; a valve pump in front of it has no source meanwhile and pulls from it again
+ *     then, as for a valve switched off by a wire signal (N35-1, N36-3, N27-4). Set through
  *     {@link PipeGrid#setValvePlainWall} once the valve is in a grid, which handles the links that
  *     appear or disappear.</li>
  * </ul>

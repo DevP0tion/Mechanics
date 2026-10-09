@@ -6,8 +6,9 @@ import java.util.List;
 
 /**
  * Links: auto-connect (9-4), layers (9-3, 9-9, 11-5), the wrench (12-8, 13-4, 13-5, N16-3), cut
- * flags that stay (N16-4), the vertical link only by wrench (N16-4), placement never refused for
- * fluids (N13-2) and the faces two fluids block (N13-2).
+ * flags that stay (N16-4), the vertical link only by wrench (N16-4), a pump's front and back (N36-1,
+ * N36-3, N36-17, N36-26), placement never refused for fluids (N13-2) and the faces two fluids block
+ * (N13-2).
  */
 final class PipeLinkTest {
 
@@ -84,14 +85,16 @@ final class PipeLinkTest {
         Check.equal(2, grid.getLinkedValves(pipe).size(), "both adjacent valves (2-3)");
     }
 
-    public static void testPumpPushesOnlyIntoAdjacentBasicPipes() {
+    public static void testPumpPushesOnlyIntoTheBasicPipeInFront() {
         PipeGrid grid = grid();
         Pump pump = Fluids.pump(grid, 0, 0, PumpTier.MANUAL, FluidType.FRESHWATER);
         grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
-        grid.placePipe(-1, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
+        grid.placePipe(0, 1, PipeLayer.BASE, MineralTier.COPPER);
+        grid.placePipe(-1, 0, PipeLayer.BASE, MineralTier.COPPER);
+        grid.placePipe(0, -1, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         grid.placePipe(0, 0, PipeLayer.UNDERGROUND, MineralTier.COPPER);
         Check.equal(Collections.singletonList(base(grid, 1, 0)), grid.getPumpEntries(pump),
-                "underground pipes never link to pumps (9-9)");
+                "the front only (N36-1, N36-2); underground pipes never link to pumps (9-9)");
     }
 
     public static void testBaseLayerHoldsOneObject() {
@@ -103,7 +106,7 @@ final class PipeLinkTest {
         Check.equal(PipeGrid.Check.OCCUPIED, grid.checkPipePlacement(0, 0, PipeLayer.UNDERGROUND), "pipe there");
         Check.throwsException(IllegalStateException.class,
                 () -> grid.placePipe(0, 0, PipeLayer.BASE, MineralTier.COPPER));
-        Check.equal(PipeGrid.Check.OCCUPIED, grid.checkPumpPlacement(0, 0, null));
+        Check.equal(PipeGrid.Check.OCCUPIED, grid.checkPumpPlacement(0, 0));
     }
 
     // ---------- fluids never block placement or links (N13-2) ----------
@@ -235,64 +238,58 @@ final class PipeLinkTest {
     public static void testPumpPlacedNextToAValveConnectsIt() {
         PipeGrid grid = grid();
         TankValve valve = Fluids.valve(100);
-        grid.placeValve(0, 1, valve);
-        Pump pump = new Pump(PumpTier.FIRE);
-        grid.placePump(0, 0, pump);
-        Check.equal(Collections.singletonList(valve), grid.getSourceValves(pump), "attached directly (11-5)");
+        grid.placeValve(-1, 0, valve);
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.WEST), "attached directly behind it (11-5, N36-3)");
+        Check.equal(java.util.Collections.<FluidSource>singletonList(valve.getTank()), pump.getSources());
         Check.equal(0, grid.getPumpEntries(pump).size(), "not a pipe");
     }
 
-    public static void testValvePlacedLaterNextToAPumpStartsCut() {
+    public static void testValvePlacedLaterNextToAPumpIsLinkedAtOnce() {
+        // N36-17, N36-18, N36-22: no cut start any more, in front or behind.
         PipeGrid grid = grid();
-        Pump pump = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
-        TankValve valve = Fluids.valve(100);
-        grid.placeValve(1, 0, valve);
-        Check.isFalse(valve.isSideOpen(Direction.WEST), "cut toward the pump (N13-3, N16-3)");
-        Check.isFalse(grid.isPumpValveLinked(pump, Direction.EAST), "not linked");
-        Check.equal(Collections.singletonList(Pump.SourceSlot.TILE), pump.getSourceSlots(), "the pump keeps its source");
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
+        TankValve front = Fluids.valve(100);
+        TankValve behind = Fluids.valve(100);
+        grid.placeValve(1, 0, front);
+        grid.placeValve(-1, 0, behind);
+        Check.isTrue(front.isSideOpen(Direction.WEST), "open toward the pump");
+        Check.isTrue(behind.isSideOpen(Direction.EAST), "open toward the pump");
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.WEST), "the valve behind: its source (N36-17)");
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.EAST), "the valve in front is no source");
+        Check.equal(0, grid.getPathDistance(pump, front, FluidType.FRESHWATER), "a destination without pipes (N36-18)");
     }
 
-    public static void testWrenchLinksAValveOfTheSameFluidOrEmpty() {
+    public static void testWrenchLinksTheValveBehindWhateverItHolds() {
+        // N36-26: linking the valve behind a valve pump refuses nothing for its fluid.
         PipeGrid grid = grid();
-        Pump pump = Fluids.pump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
-        TankValve same = Fluids.valve(100);
-        same.getTank().insert(FluidType.FRESHWATER, 10);
-        TankValve empty = Fluids.valve(100);
-        grid.placeValve(1, 0, same);
-        grid.placeValve(0, 1, empty);
-        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST), "same fluid");
-        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 1, PipeGrid.Part.VALVE, Direction.NORTH), "empty, from the valve");
-        Check.equal(java.util.Arrays.asList(Pump.SourceSlot.TILE, Pump.SourceSlot.valve(Direction.EAST),
-                Pump.SourceSlot.valve(Direction.SOUTH)), pump.getSourceSlots(), "appended in link order (N19-1)");
-        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST), "cut again");
-        Check.equal(java.util.Arrays.asList(Pump.SourceSlot.TILE, Pump.SourceSlot.valve(Direction.SOUTH)),
-                pump.getSourceSlots(), "the cut valve is no source");
-    }
-
-    public static void testWrenchRefusesAValveOfAnotherFluid() {
-        PipeGrid grid = grid();
-        Pump pump = Fluids.pump(grid, 0, 0, PumpTier.ADVANCED_FIRE, FluidType.FRESHWATER);
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.ADVANCED_FIRE, Direction.EAST);
         TankValve lava = Fluids.valve(100);
         lava.getTank().insert(FluidType.LAVA, 10);
-        grid.placeValve(1, 0, lava);
-        Check.equal(PipeGrid.Check.DIFFERENT_SOURCE_FLUID, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST),
-                "N16-3");
-        Check.isFalse(grid.isPumpValveLinked(pump, Direction.EAST), "nothing changed");
-        Check.isFalse(pump.isSideOpen(Direction.EAST) && lava.isSideOpen(Direction.WEST), "flags unchanged");
+        lava.setLinks(LinkFlags.withSide(LinkFlags.ALL_OPEN, Direction.EAST, false));
+        grid.placeValve(-1, 0, lava);
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.WEST), "cut on the valve's side");
+        Check.equal(PipeGrid.Check.OK, grid.checkToggleSide(-1, 0, PipeGrid.Part.VALVE, Direction.EAST));
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(-1, 0, PipeGrid.Part.VALVE, Direction.EAST), "from the valve");
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.WEST), "linked");
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.WEST), "cut again");
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.WEST), "the cut valve is no source");
+        Check.equal(0, pump.getSources().size());
     }
 
     public static void testRemovedValveIsNoSourceButAnUnloadedOneStays() {
         PipeGrid grid = grid();
-        grid.placeValve(1, 0, Fluids.valve(100));
-        grid.placeValve(-1, 0, Fluids.valve(100));
-        Pump pump = new Pump(PumpTier.FIRE);
-        grid.placePump(0, 0, pump);
-        Check.equal(2, pump.getSourceSlots().size(), "both valves (east, west)");
-        grid.unloadValve(1, 0);
-        Check.equal(2, pump.getSourceSlots().size(), "unloaded: still connected");
+        TankValve valve = Fluids.valve(100);
+        grid.placeValve(-1, 0, valve);
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
+        Check.equal(1, pump.getSources().size(), "the valve behind it");
+        grid.unloadValve(-1, 0);
+        Check.equal(0, pump.getSources().size(), "unloaded: no source meanwhile (N36-58)");
+        grid.loadValve(-1, 0, valve);
+        Check.equal(1, pump.getSources().size(), "loaded again: its source again");
         grid.removeValve(-1, 0);
-        Check.equal(Collections.singletonList(Pump.SourceSlot.valve(Direction.EAST)), pump.getSourceSlots(),
-                "removed: gone");
+        Check.equal(0, pump.getSources().size(), "removed: gone");
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.WEST), "removed: not linked");
     }
 
 

@@ -1,6 +1,5 @@
 package devp0tion.mechanics.pipe;
 
-import devp0tion.mechanics.objects.PumpObject;
 import devp0tion.mechanics.objects.TankControllerObject;
 import devp0tion.mechanics.tank.TankInteriorPlacement;
 import necesse.engine.network.gameNetworkData.GNDItemMap;
@@ -27,8 +26,8 @@ import java.util.Set;
  * <p>The vanilla placement flow lets the client place an object (and use up the item) as soon as
  * its own placement check passes; when the server's check then fails, nothing tells the client
  * (the attack handler just skips the place), so the client keeps a ghost object and a wrong item
- * count. Whenever one of this mod's rules makes the server refuse (the tank rules, the pump's
- * sources, the wrench), the client is sent the real state of the cells: the floor tile, the
+ * count. Whenever one of this mod's rules makes the server refuse (the tank rules, the wrench;
+ * the pump's sources rule is gone with N36-8), the client is sent the real state of the cells: the floor tile, the
  * objects of every layer, the object entity (link flags, tank views), the underground pipe state,
  * and the item slot is marked dirty so the server resends it.
  */
@@ -37,8 +36,7 @@ public final class PlacementCorrection {
     /** The canPlace errors of this mod's rules. */
     private static final Set<String> OWN_ERRORS = new HashSet<>(Arrays.asList(
             TankInteriorPlacement.ERROR,
-            TankControllerObject.SHARED_WALL_ERROR,
-            PumpObject.MIXED_SOURCES_ERROR));
+            TankControllerObject.SHARED_WALL_ERROR));
 
     private PlacementCorrection() {
     }
