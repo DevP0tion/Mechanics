@@ -147,10 +147,19 @@ public class Pump extends LiquidStorage {
      * (N36-20).
      */
     public boolean accepts(Direction side, PipeGrid.Part neighbour) {
-        if (side == front()) {
+        return accepts(direction, form, side, neighbour);
+    }
+
+    /**
+     * {@link #accepts(Direction, PipeGrid.Part)} for a pump with output side {@code front} and form
+     * {@code form}: what clients draw from the object's rotation and the synced form, where no core
+     * pump is set up (N36-37).
+     */
+    public static boolean accepts(Direction front, PumpForm form, Direction side, PipeGrid.Part neighbour) {
+        if (side == front) {
             return neighbour == PipeGrid.Part.BASIC_PIPE || neighbour == PipeGrid.Part.VALVE;
         }
-        return side == back() && form == PumpForm.VALVE && neighbour == PipeGrid.Part.VALVE;
+        return side == front.opposite() && form == PumpForm.VALVE && neighbour == PipeGrid.Part.VALVE;
     }
 
     // ------------------------------------------------------------------ sources

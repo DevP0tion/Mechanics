@@ -37,6 +37,8 @@ public final class CoreTestRunner {
             PumpBaselineTest.class,
             PumpFrontTest.class,
             PumpFormTest.class,
+            PumpSidesTest.class,
+            PumpSpritesTest.class,
             TileBucketsTest.class,
             NewEngineTest.class
     };
