@@ -11,9 +11,10 @@ import java.util.Map;
 import java.util.Random;
 
 /**
- * Pump sources: placement by fluid (N17-1), pull order (N19-1), a source that fills with another
- * fluid later (N17-3, N20-3), valves placed later (N13-3, N16-3), stale saved sources of cut links
- * (N16-3), and the liquid tile source (N19-3, N17-5, N20-7), also at a level's edge and reused within
+ * Pump sources: one source by the pump's form (N36-6), the source of the other form not linked
+ * (N36-20), a ground pump on land (N36-15, N36-21, N36-28), the valve behind a valve pump placed
+ * later, cut, unloaded, switched off or of another fluid (N36-17, N36-23, N36-58, N27-4, N36-24,
+ * N36-53), and the liquid tile source (N19-3, N17-5, N20-7), also at a level's edge and reused within
  * a cycle.
  */
 final class PumpSourceTest {
@@ -29,83 +30,159 @@ final class PumpSourceTest {
         return valve;
     }
 
-    // ---------- placement (N17-1) ----------
+    // ---------- one source by form (N36-6, N36-20) ----------
 
-    public static void testSourcesOfOneFluidOrEmptyMayBeConnected() {
-        Check.isTrue(Pump.canConnectSources(Arrays.<FluidType>asList()), "none");
-        Check.isTrue(Pump.canConnectSources(Arrays.asList(FluidType.LAVA, null, FluidType.LAVA)), "same or empty");
-        Check.isFalse(Pump.canConnectSources(Arrays.asList(FluidType.LAVA, FluidType.SEAWATER)), "mixed");
-        Check.isFalse(Pump.canConnectSources(Arrays.asList(FluidType.SEAWATER, FluidType.FRESHWATER)),
-                "seawater and freshwater differ (12-2)");
+    /** Pipe (x + 1, y) and a large valve (x + 2, y): the destination east of a pump at (x, y). */
+    private static TankValve eastDestination(PipeGrid grid, int x, int y) {
+        grid.placePipe(x + 1, y, PipeLayer.BASE, MineralTier.COPPER);
+        TankValve target = Fluids.valve(100000);
+        grid.placeValve(x + 2, y, target);
+        return target;
     }
 
-    public static void testPlacementIsRejectedOnlyWhenFluidsWouldMix() {
+    public static void testGroundPumpPullsFromTheTileOnly() {
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
-        grid.placeValve(1, 0, valveWith(FluidType.LAVA, 10));
-        grid.placeValve(-1, 0, valveWith(null, 0));
-        Check.equal(PipeGrid.Check.OK, grid.checkPumpPlacement(0, 0, null), "lava tank and empty tank");
-        Check.equal(PipeGrid.Check.OK, grid.checkPumpPlacement(0, 0, FluidType.LAVA), "on lava: same fluid");
-        Check.equal(PipeGrid.Check.DIFFERENT_SOURCE_FLUID, grid.checkPumpPlacement(0, 0, FluidType.SEAWATER),
-                "on seawater next to a lava tank (N17-1)");
-        grid.toggleSide(1, 0, PipeGrid.Part.VALVE, Direction.WEST);
-        Check.equal(PipeGrid.Check.OK, grid.checkPumpPlacement(0, 0, FluidType.SEAWATER),
-                "the lava valve's side is cut: it would not connect");
+        TankValve behind = valveWith(FluidType.FRESHWATER, 500);
+        grid.placeValve(-1, 0, behind);
+        Pump pump = Fluids.fueledPump(grid, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
+        TankValve target = eastDestination(grid, 0, 0);
+        Check.equal(PumpForm.GROUND, pump.getForm());
+        Check.equal(Direction.WEST, pump.back());
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.WEST), "a valve behind a ground pump is not linked (N36-20)");
+        Check.equal(Collections.singletonList(pump.getTileSource()), pump.getSources(), "the tile only (N36-6)");
+        for (int i = 0; i < 3; i++) {
+            Check.equal(Status.PUMPED, Fluids.cycle(pump).getStatus(), "cycle " + i);
+        }
+        Check.equal(500, behind.getTank().getAmount(), "nothing pulled from the valve behind it");
+        Check.isTrue(target.getTank().getAmount() > 0, "the tile's water arrived");
     }
 
-    // ---------- pull order (N19-1) and later fluids (N17-3) ----------
-
-    public static void testFirstConnectedSourceFirstThenTheNext() {
-        PipeGrid grid = new PipeGrid(Fluids.uniform(40));
-        TankValve first = valveWith(FluidType.FRESHWATER, 30);
-        TankValve second = valveWith(FluidType.FRESHWATER, 100);
-        grid.placeValve(0, -1, first);
-        grid.placeValve(-1, 0, second);
+    public static void testValvePumpIgnoresTheTileUnderIt() {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Pump pump = new Pump(PumpTier.FIRE);
+        pump.setDirection(Direction.EAST);
+        pump.setForm(PumpForm.VALVE);
         pump.setFuelSupply(new Fluids.Logs(10));
+        pump.setTileSource(LiquidTileSource.infinite(FluidType.FRESHWATER));
         grid.placePump(0, 0, pump);
-        Check.equal(Arrays.asList(Pump.SourceSlot.valve(Direction.NORTH), Pump.SourceSlot.valve(Direction.WEST)),
-                pump.getSourceSlots(), "connected together: north before west");
-        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
-        Fluids.fill(grid, 1, 1, 0, PipeLayer.BASE, FluidType.FRESHWATER);
-        grid.placeValve(2, 0, Fluids.valve(1000));
-        Fluids.cycle(pump);
-        Check.equal(10, first.getTank().getAmount(), "the first source gives first");
-        Check.equal(100, second.getTank().getAmount(), "untouched");
-        Fluids.cycle(pump);
-        Check.equal(0, first.getTank().getAmount(), "emptied");
-        Check.equal(90, second.getTank().getAmount(), "then the next one (N19-1)");
+        eastDestination(grid, 0, 0);
+        Check.equal(0, pump.getSources().size(), "the liquid under a valve pump is not linked (N36-20)");
+        PumpResult none = Fluids.cycle(pump);
+        Check.equal(Status.NO_SOURCE, none.getStatus(), "no valve behind it: no source (N36-16)");
+        Check.equal(PumpResult.Detail.SOURCE_MISSING, none.getDetail());
+
+        TankValve behind = valveWith(FluidType.FRESHWATER, 500);
+        grid.placeValve(-1, 0, behind);
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.WEST), "the valve behind it, linked at once (N36-17)");
+        Check.equal(Collections.<FluidSource>singletonList(behind.getTank()), pump.getSources(), "its one source (N36-3)");
+        Check.equal(Status.PUMPED, Fluids.cycle(pump).getStatus());
+        Check.equal(480, behind.getTank().getAmount(), "pulled from the tank");
     }
 
-    public static void testEmptySourceFilledWithAnotherFluidStaysConnected() {
+    public static void testGroundPumpOnLandGetsASourceWhenTheTileTurnsLiquid() {
+        // N36-15, N36-21, N36-28: a ground pump placed on land has no source until its tile is liquid,
+        // and again after it used the tile up, until the tile is liquid again.
+        Fluids.Liquids land = new Fluids.Liquids(
+                "...",
+                "...",
+                "...");
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
-        TankValve water = valveWith(FluidType.FRESHWATER, 40);
-        TankValve empty = valveWith(null, 0);
-        grid.placeValve(0, -1, water);
-        grid.placeValve(-1, 0, empty);
-        Pump pump = new Pump(PumpTier.ADVANCED_FIRE);
+        LiquidTileSource tile = new LiquidTileSource(land, 1, 1);
+        tile.judgeArea();
+        Pump pump = new Pump(PumpTier.FIRE);
+        pump.setDirection(Direction.EAST);
         pump.setFuelSupply(new Fluids.Logs(10));
-        grid.placePump(0, 0, pump);
-        Check.equal(2, pump.getSourceSlots().size(), "water and empty connect (N17-1)");
-        Fluids.baseLine(grid, 1, 3, 0, MineralTier.COPPER);
-        grid.placeValve(4, 0, Fluids.valve(1000));
+        pump.setTileSource(tile);
+        grid.placePump(1, 1, pump);
+        eastDestination(grid, 1, 1);
+        PumpResult dry = Fluids.cycle(pump);
+        Check.equal(Status.NO_SOURCE, dry.getStatus(), "placed on land (N36-15)");
+        Check.equal(PumpResult.Detail.SOURCE_MISSING, dry.getDetail(), "no liquid under it");
 
-        Fluids.cycle(pump);
-        Fluids.cycle(pump);
-        Check.equal(FluidType.FRESHWATER, grid.getPipe(2, 0, PipeLayer.BASE).getFluid(), "water pushed");
-        Check.equal(0, water.getTank().getAmount(), "the water source is empty");
-        empty.getTank().insert(FluidType.LAVA, 500);
-        Check.equal(2, pump.getSourceSlots().size(), "still connected (N17-3)");
-        PumpResult lava = Fluids.cycle(pump);
-        Check.equal(Status.NO_SOURCE, lava.getStatus(),
-                "the output cell holds water: the lava source is dormant (N20-3, N20-5)");
-        Check.equal(500, empty.getTank().getAmount(), "nothing pulled from it");
-        grid.removePipe(1, 0, PipeLayer.BASE);
-        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
-        grid.placeValve(1, 1, Fluids.valve(1000));
-        PumpResult again = Fluids.cycle(pump);
-        Check.equal(Status.PUMPED, again.getStatus(), "an empty pipe takes the lava");
-        Check.equal(FluidType.LAVA, again.getFluid());
-        Check.equal(FluidType.FRESHWATER, grid.getPipe(2, 0, PipeLayer.BASE).getFluid(), "the water pipe beyond is untouched");
+        land.set(1, 1, 'f');
+        PumpResult wet = Fluids.cycle(pump);
+        Check.equal(Status.PUMPED, wet.getStatus(), "the tile is liquid now (N36-21)");
+        Check.equal(10, wet.getMoved(), "one finite tile");
+        Check.equal(Status.NO_SOURCE, Fluids.cycle(pump).getStatus(), "used up (N19-3)");
+        land.set(1, 1, 'f');
+        Check.equal(Status.PUMPED, Fluids.cycle(pump).getStatus(), "liquid again: a source again (N36-28)");
+    }
+
+    // ---------- the valve behind a valve pump (N36-3) ----------
+
+    public static void testUnloadedBackValveIsNoSourceUntilItLoads() {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        TankValve behind = valveWith(FluidType.FRESHWATER, 500);
+        grid.placeValve(-1, 0, behind);
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
+        pump.setFuelSupply(new Fluids.Logs(10));
+        eastDestination(grid, 0, 0);
+        Check.equal(Status.PUMPED, Fluids.cycle(pump).getStatus());
+        grid.unloadValve(-1, 0);
+        PumpResult unloaded = Fluids.cycle(pump);
+        Check.equal(Status.NO_SOURCE, unloaded.getStatus(), "its region is not loaded: no source (N36-58)");
+        Check.equal(PumpResult.Detail.SOURCE_MISSING, unloaded.getDetail());
+        Check.equal(480, behind.getTank().getAmount());
+        grid.loadValve(-1, 0, behind);
+        Check.equal(Status.PUMPED, Fluids.cycle(pump).getStatus(), "loaded again: pulled from in place");
+        Check.equal(460, behind.getTank().getAmount());
+    }
+
+    public static void testWireOffBackValveIsNoSource() {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        TankValve behind = valveWith(FluidType.FRESHWATER, 500);
+        grid.placeValve(-1, 0, behind);
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
+        pump.setFuelSupply(new Fluids.Logs(10));
+        eastDestination(grid, 0, 0);
+        behind.setEnabled(false);
+        PumpResult off = Fluids.cycle(pump);
+        Check.equal(Status.NO_SOURCE, off.getStatus(), "switched off by a wire signal (N27-4)");
+        Check.equal(PumpResult.Detail.SOURCE_OFF, off.getDetail());
+        Check.equal(500, behind.getTank().getAmount());
+        behind.setEnabled(true);
+        Check.equal(Status.PUMPED, Fluids.cycle(pump).getStatus());
+    }
+
+    public static void testBackValvePlacedLaterIsASourceAtOnceUnlessCut() {
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
+        pump.setFuelSupply(new Fluids.Logs(10));
+        eastDestination(grid, 0, 0);
+        TankValve later = valveWith(FluidType.FRESHWATER, 500);
+        grid.placeValve(-1, 0, later);
+        Check.isTrue(later.isSideOpen(Direction.EAST), "no cut start (N36-17, N36-22)");
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.WEST), "a source at once");
+        Check.equal(Status.PUMPED, Fluids.cycle(pump).getStatus());
+        Check.equal(480, later.getTank().getAmount());
+
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.WEST), "cut by the wrench");
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.WEST), "cut");
+        grid.removeValve(-1, 0);
+        TankValve again = valveWith(FluidType.FRESHWATER, 500);
+        grid.placeValve(-1, 0, again);
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.WEST), "the pump's side stays cut (N16-4, N36-23)");
+        Check.equal(Status.NO_SOURCE, Fluids.cycle(pump).getStatus());
+        Check.equal(500, again.getTank().getAmount());
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.WEST), "linked again");
+        Check.equal(Status.PUMPED, Fluids.cycle(pump).getStatus());
+    }
+
+    public static void testBackValveOfAnotherFluidIsDormant() {
+        // N36-24, N36-53: the output cell holds water; the lava tank behind the pump stays linked and
+        // nothing is pulled from it.
+        PipeGrid grid = new PipeGrid(Fluids.uniform(20));
+        TankValve lava = valveWith(FluidType.LAVA, 500);
+        grid.placeValve(-1, 0, lava);
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.ADVANCED_FIRE, Direction.EAST);
+        pump.setFuelSupply(new Fluids.Logs(10));
+        eastDestination(grid, 0, 0);
+        Fluids.fill(grid, 1, 1, 0, PipeLayer.BASE, FluidType.FRESHWATER);
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.WEST), "linked, not refused (N36-24)");
+        PumpResult dormant = Fluids.cycle(pump);
+        Check.equal(Status.NO_SOURCE, dormant.getStatus(), "the baseline is the output cell's water (N20-5)");
+        Check.equal(PumpResult.Detail.SOURCE_OTHER_FLUID, dormant.getDetail());
+        Check.equal(500, lava.getTank().getAmount(), "nothing pulled (N20-3)");
     }
 
     // ---------- the liquid tile source (N19-3) ----------
@@ -287,6 +364,7 @@ final class PumpSourceTest {
         LiquidTileSource tile = new LiquidTileSource(lake, 2, 2);
         tile.judgeArea();
         pump.setTileSource(tile);
+        pump.setDirection(Direction.SOUTH);
         grid.placePump(2, 2, pump);
         grid.placePipe(2, 3, PipeLayer.BASE, MineralTier.COPPER);
         grid.placeValve(2, 4, Fluids.valve(1000));
@@ -330,6 +408,7 @@ final class PumpSourceTest {
         Check.equal(Boolean.FALSE, tile.getJudgment(), "not a uniform 5x5 (N19-3)");
         Check.equal(Integer.MAX_VALUE, tile.getAvailable(FluidType.CRUDE_OIL), "inexhaustible anyway (N27-5)");
         Pump pump = new Pump(PumpTier.ADVANCED_FIRE);
+        pump.setDirection(Direction.EAST);
         pump.setTileSource(tile);
         pump.setFuelSupply(new Fluids.Logs(1000));
         grid.placePump(2, 2, pump);
@@ -365,9 +444,10 @@ final class PumpSourceTest {
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         Fluids.Liquids pond = new Fluids.Liquids("fff");
         Pump pump = new Pump(PumpTier.MANUAL);
+        pump.setDirection(Direction.SOUTH);
         pump.setTileSource(new LiquidTileSource(pond, 0, 0));
         grid.placePump(0, 0, pump);
-        Check.equal(java.util.Collections.singletonList(Pump.SourceSlot.TILE), pump.getSourceSlots());
+        Check.equal(Collections.singletonList(pump.getTileSource()), pump.getSources(), "a ground pump: its tile (N36-6)");
         grid.placePipe(0, 1, PipeLayer.BASE, MineralTier.COPPER);
         grid.placeValve(0, 2, Fluids.valve(1000));
         grid.tick();
@@ -383,56 +463,56 @@ final class PumpSourceTest {
     }
 
 
-    // ---------- stale saved sources (N16-3, N19-1) ----------
+    // ---------- cut links to the valve behind (N16-4) ----------
 
-    /** A valve whose side toward the pump (south of the valve) is cut. */
+    /** A valve whose side toward a pump east of it (its east side) is cut. */
     private static TankValve cutValveWith(FluidType fluid, int amount) {
         TankValve valve = valveWith(fluid, amount);
-        valve.setLinks(LinkFlags.withSide(LinkFlags.ALL_OPEN, Direction.SOUTH, false));
+        valve.setLinks(LinkFlags.withSide(LinkFlags.ALL_OPEN, Direction.EAST, false));
         return valve;
     }
 
-    public static void testStaleSlotOfACutValveGivesNothing() {
+    /** A loaded valve pump facing east with saved link flags. */
+    private static Pump loadedValvePump(PipeGrid grid, int links) {
+        Pump pump = new Pump(PumpTier.FIRE);
+        pump.setDirection(Direction.EAST);
+        pump.setForm(PumpForm.VALVE);
+        pump.setFuelSupply(new Fluids.Logs(10));
+        pump.setLinks(links);
+        grid.loadPump(0, 0, pump);
+        return pump;
+    }
+
+    public static void testCutBackValveGivesNothing() {
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
         TankValve valve = cutValveWith(FluidType.FRESHWATER, 100);
-        grid.loadValve(0, -1, valve);
-        Pump pump = new Pump(PumpTier.FIRE);
-        pump.setFuelSupply(new Fluids.Logs(10));
-        // A saved source list that still names the valve although the link is cut.
-        pump.setSourceSlots(Collections.singletonList(Pump.SourceSlot.valve(Direction.NORTH)));
-        grid.loadPump(0, 0, pump);
-        grid.placePipe(1, 0, PipeLayer.BASE, MineralTier.COPPER);
-        grid.placeValve(2, 0, Fluids.valve(1000));
-        Check.isFalse(grid.isPumpValveLinked(pump, Direction.NORTH), "cut");
-        Check.equal(0, pump.getSources().size(), "a cut valve is no source (N16-3)");
-        Check.equal(0, grid.getSourceValves(pump).size());
-        Check.equal(Status.NO_SOURCE, Fluids.cycle(pump).getStatus());
+        grid.loadValve(-1, 0, valve);
+        Pump pump = loadedValvePump(grid, LinkFlags.ALL_OPEN);
+        eastDestination(grid, 0, 0);
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.WEST), "cut");
+        Check.equal(0, pump.getSources().size(), "a cut valve is no source (N16-4)");
+        PumpResult result = Fluids.cycle(pump);
+        Check.equal(Status.NO_SOURCE, result.getStatus());
+        Check.equal(PumpResult.Detail.SOURCE_MISSING, result.getDetail());
         Check.equal(100, valve.getTank().getAmount(), "nothing pulled through the cut link");
     }
 
-    public static void testRelinkedValveBecomesTheLastSource() {
+    public static void testWrenchLinksTheBackValveAgain() {
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
-        grid.loadValve(0, -1, cutValveWith(FluidType.FRESHWATER, 100));
-        Pump pump = new Pump(PumpTier.FIRE);
-        pump.setTileSource(LiquidTileSource.infinite(FluidType.FRESHWATER));
-        pump.setSourceSlots(Arrays.asList(Pump.SourceSlot.valve(Direction.NORTH), Pump.SourceSlot.TILE));
-        grid.loadPump(0, 0, pump);
-        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH));
-        Check.isTrue(grid.isPumpValveLinked(pump, Direction.NORTH), "linked again");
-        Check.equal(Arrays.asList(Pump.SourceSlot.TILE, Pump.SourceSlot.valve(Direction.NORTH)), pump.getSourceSlots(),
-                "linked now: the last source, not where the stale entry was (N19-1)");
+        TankValve valve = cutValveWith(FluidType.FRESHWATER, 100);
+        grid.loadValve(-1, 0, valve);
+        Pump pump = loadedValvePump(grid, LinkFlags.ALL_OPEN);
+        Check.equal(PipeGrid.Check.OK, grid.toggleSide(0, 0, PipeGrid.Part.PUMP, Direction.WEST));
+        Check.isTrue(grid.isPumpValveLinked(pump, Direction.WEST), "linked again");
+        Check.equal(Collections.<FluidSource>singletonList(valve.getTank()), pump.getSources());
     }
 
-    public static void testLoadDropsSlotsBehindTheCutSidesOfThePump() {
+    public static void testPumpsOwnCutBackSideIsNoSource() {
         PipeGrid grid = new PipeGrid(Fluids.uniform(20));
-        grid.loadValve(0, -1, valveWith(FluidType.FRESHWATER, 100));
-        grid.loadValve(0, 1, valveWith(FluidType.FRESHWATER, 100));
-        Pump pump = new Pump(PumpTier.FIRE);
-        pump.setLinks(LinkFlags.withSide(LinkFlags.ALL_OPEN, Direction.NORTH, false));
-        pump.setSourceSlots(Arrays.asList(Pump.SourceSlot.valve(Direction.NORTH), Pump.SourceSlot.valve(Direction.SOUTH)));
-        grid.loadPump(0, 0, pump);
-        Check.equal(Collections.singletonList(Pump.SourceSlot.valve(Direction.SOUTH)), pump.getSourceSlots(),
-                "the slot behind the pump's own cut side is dropped");
+        grid.loadValve(-1, 0, valveWith(FluidType.FRESHWATER, 100));
+        Pump pump = loadedValvePump(grid, LinkFlags.withSide(LinkFlags.ALL_OPEN, Direction.WEST, false));
+        Check.isFalse(grid.isPumpValveLinked(pump, Direction.WEST), "the pump's own side is cut");
+        Check.equal(0, pump.getSources().size());
     }
 
     // ---------- the liquid tile source at a level's edge and within a cycle ----------
@@ -492,6 +572,7 @@ final class PumpSourceTest {
         CountingLiquids lookup = new CountingLiquids(strip);
         PipeGrid grid = new PipeGrid(Fluids.uniform(100));
         Pump pump = new Pump(PumpTier.ADVANCED_FIRE);
+        pump.setDirection(Direction.SOUTH);
         pump.setFuelSupply(new Fluids.Logs(10));
         pump.setTileSource(new LiquidTileSource(lookup, 0, 1));
         grid.placePump(0, 1, pump);

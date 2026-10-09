@@ -108,10 +108,29 @@ final class Fluids {
         return grid.loadPipe(x, y, layer, node.getTier(), node.getLinks(), fluid, amount, node.isLoaded());
     }
 
-    /** A pump placed at the tile, standing on an infinite liquid tile of {@code fluid}. */
+    /**
+     * A ground pump placed at the tile facing east (its output, N36-1: most layouts have the pipe at
+     * x + 1), standing on an infinite liquid tile of {@code fluid}.
+     */
     static Pump pump(PipeGrid grid, int x, int y, PumpTier tier, FluidType fluid) {
+        return pump(grid, x, y, tier, fluid, Direction.EAST);
+    }
+
+    /** A ground pump placed at the tile facing {@code facing}, on an infinite liquid tile of {@code fluid}. */
+    static Pump pump(PipeGrid grid, int x, int y, PumpTier tier, FluidType fluid, Direction facing) {
         Pump pump = new Pump(tier);
+        pump.setDirection(facing);
+        pump.setForm(PumpForm.GROUND);
         pump.setTileSource(LiquidTileSource.infinite(fluid));
+        grid.placePump(x, y, pump);
+        return pump;
+    }
+
+    /** A valve pump (N36-3) placed at the tile facing {@code facing}: it pulls from the valve behind it. */
+    static Pump valvePump(PipeGrid grid, int x, int y, PumpTier tier, Direction facing) {
+        Pump pump = new Pump(tier);
+        pump.setDirection(facing);
+        pump.setForm(PumpForm.VALVE);
         grid.placePump(x, y, pump);
         return pump;
     }
@@ -179,9 +198,14 @@ final class Fluids {
         }
     }
 
-    /** A log-fueled pump with plenty of logs. */
+    /** A log-fueled ground pump facing east with plenty of logs. */
     static Pump fueledPump(PipeGrid grid, int x, int y, PumpTier tier, FluidType fluid) {
-        Pump pump = pump(grid, x, y, tier, fluid);
+        return fueledPump(grid, x, y, tier, fluid, Direction.EAST);
+    }
+
+    /** A log-fueled ground pump facing {@code facing} with plenty of logs. */
+    static Pump fueledPump(PipeGrid grid, int x, int y, PumpTier tier, FluidType fluid, Direction facing) {
+        Pump pump = pump(grid, x, y, tier, fluid, facing);
         pump.setFuelSupply(new Logs(1000));
         return pump;
     }

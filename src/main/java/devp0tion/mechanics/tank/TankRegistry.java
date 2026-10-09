@@ -160,7 +160,7 @@ public final class TankRegistry {
      * shared by two recognized tanks. The candidates are the live controllers whose kept tank
      * (N13-3) has the tile in its border; a valve is in the border of a tank only within
      * {@link TankStructure#REACH} of its controller. Both sides: clients read the synced kept tanks
-     * and recognition, so placement checks that need the tank's fluid (N17-1) agree with the server.
+     * and recognition, so placement checks that need the tank agree with the server.
      *
      * <p>N33-13: a tank whose controller is not loaded (dormant, N21-2, N22-7) is not in the
      * registry, so it is not seen here: it does not make the wall shared, and the valve in a wall it
