@@ -8,12 +8,14 @@ Necesse용 유체 물류 모드입니다. 펌프가 액체 타일이나 탱크 �
 
 ## 내용
 
-- **유체**: 해수·담수(같은 물 타일을 위치로 구분), 용암, 슬라임 액체, 우즈, 정령의 물, 유사, 원유(모드 전용). 버킷 1개(액체 타일 1칸) = 10입니다.
-- **파이프**: 기본 파이프와 지하 파이프. 바닐라 주괴 11종으로 만드는 광물 티어 11종이고, 광물 티어가 운송량과 운송 가능 유체를 정합니다. 지하 파이프는 벽·오브젝트·액체 타일·탱크 내부 아래로 지나갑니다.
-- **펌프**: 수동 펌프(클릭), 화력 펌프와 고급 화력 펌프(통나무 연료). 펌프 아래의 액체 타일이나 직접 붙인 탱크 밸브의 탱크에서 끌어옵니다.
-- **멀티블럭 탱크**: 광물 벽·탱크 밸브·탱크 컨트롤러 1개로 된 직사각형 테두리와 1×1 ~ 5×5 내부(전부 유리 블럭이거나 완전히 빔)로 이루어집니다. 탱크 하나에는 한 유체만 담깁니다.
-- **공학 렌치**: 파이프 회수, 방향별 연결 또는 끊기, 파이프의 유체와 연결된 방향을 보여주는 툴팁.
-- 모든 부품은 공학 작업대에서 만들고, 공학 작업대는 작업대에서 만듭니다.
+- **유체**: 옮기고 담는 액체 — 바닐라 액체 타일의 액체와 모드 전용 원유. 규칙: [유체 규칙](docs/fluid-logistics/domain-rules.md#유체-규칙-사용자-정의-규칙-빈틈-해소), 목록: [수치표 4](docs/fluid-logistics/numbers.md#4-유체-12-1-12-2-12-4-12-5-n17-5)
+- **파이프**: 유체를 옮김 — 기본 파이프와 지하 파이프. 규칙: [유체 규칙](docs/fluid-logistics/domain-rules.md#유체-규칙-사용자-정의-규칙-빈틈-해소)·[지하 파이프 레이어 규칙](docs/fluid-logistics/domain-rules.md#지하-파이프-레이어-규칙-사용자-정의-규칙-빈틈-해소), 수치: [수치표 2](docs/fluid-logistics/numbers.md#2-파이프-광물-티어-9-2-9-10-9-11)
+- **펌프**: 유체를 끌어옴 — 수동 펌프, 화력 펌프, 고급 화력 펌프. 규칙: [펌프 규칙](docs/fluid-logistics/domain-rules.md#펌프-규칙-사용자-정의-규칙-빈틈-해소), 수치: [수치표 3](docs/fluid-logistics/numbers.md#3-펌프-11-3-11-4-11-7-11-8-12-1)
+- **멀티블럭 탱크**: 유체를 담아둠 — 광물 벽·탱크 밸브·탱크 컨트롤러·유리 블럭으로 짓는 조립형 탱크. 규칙: [멀티블럭 탱크 구조 규칙](docs/fluid-logistics/domain-rules.md#멀티블럭-탱크-구조-규칙-사용자-정의-규칙-빈틈-해소), 수치: [수치표 1](docs/fluid-logistics/numbers.md#1-멀티블럭-탱크-용량-8-1-8-4-8-7)
+- **공학 렌치**: 파이프 회수, 연결·끊기, 툴팁. 규칙: [플레이어 피드백 규칙](docs/fluid-logistics/domain-rules.md#플레이어-피드백-규칙-사용자-정의-규칙-빈틈-해소)
+- **공학 작업대**: 모드 요소를 모두 제작. 재료: [수치표 5](docs/fluid-logistics/numbers.md#5-재료-레시피-8-2-9-11-11-4-13-1-13-2-13-3)
+
+요소의 정의는 [decisions.md](docs/fluid-logistics/decisions.md) 요소 목록에 있습니다. 설계 문서에는 아직 구현하지 않은 결정도 들어 있습니다 (구현 상태는 numbers.md 결정 줄의 '구현됨').
 
 버전별 내용, 수치, 알려진 제한은 [GitHub 릴리스](https://github.com/DevP0tion/Mechanics/releases)의 릴리스 노트(원본: [`.github/release-notes/`](.github/release-notes/))에 있습니다.
 
@@ -31,8 +33,7 @@ Necesse용 유체 물류 모드입니다. 펌프가 액체 타일이나 탱크 �
 
 필요한 것:
 
-- JDK 21
-- Gradle 8.14.3 (CI와 같은 버전). 저장소의 `gradlew`는 Gradle 9.6.1을 받아 쓰는데, 이 빌드가 Gradle 9에서 되는지는 확인하지 않았습니다.
+- JDK와 Gradle: [docs/steam-workshop.md](docs/steam-workshop.md#준비) 2절 '준비'의 버전 (CI와 같은 버전).
 - Necesse 1.3.3: Steam 게임 설치 폴더(`Necesse.jar`가 있음) 또는 전용 서버 패키지 폴더(`Server.jar`가 있음)
 
 ```sh
@@ -47,9 +48,9 @@ gradle -PgameDir="<Necesse 설치 폴더>" clean buildModJar check
 ## 문서
 
 - [docs/fluid-logistics/session.md](docs/fluid-logistics/session.md): 1차 설계 세션의 기획서 (역할, 범위, 고정 결정, 기록 위치).
-- [docs/fluid-logistics/domain-rules.md](docs/fluid-logistics/domain-rules.md): 도메인 규칙. Necesse 1.3.3 서버판 디컴파일로 확인한 엔진 제약과, 세션 중 정한 탱크·지하 파이프·유체 규칙.
+- [docs/fluid-logistics/domain-rules.md](docs/fluid-logistics/domain-rules.md): 도메인 규칙. Necesse 1.3.3 서버판 디컴파일로 확인한 엔진 제약과, 세션 중 정한 탱크·지하 파이프·유체·펌프·플레이어 피드백 규칙 — 현재 규칙의 정본.
 - [docs/fluid-logistics/decisions.md](docs/fluid-logistics/decisions.md): 1차 설계 세션의 결정 기록 (요소 목록, 결정 목록, 미결 목록).
-- [docs/fluid-logistics/numbers.md](docs/fluid-logistics/numbers.md): 수치 설계 세션(2차) 기록 (기획서, 수치표, N 번호 결정 목록, 미결 목록, 참고 바닐라 수치).
+- [docs/fluid-logistics/numbers.md](docs/fluid-logistics/numbers.md): 수치 설계 세션(2차) 기록 (기획서, 수치표, N 번호 결정 목록, 조언자 결정, 미결 목록, 참고 바닐라 수치).
 - [docs/steam-workshop.md](docs/steam-workshop.md): 스팀 창작마당 업로드 설정 (첫 업로드, `WORKSHOP_ITEM_ID`, Steam 시크릿, CI 업로드).
 
 ## 확인 목록 (게임 안 확인 필요)
@@ -69,10 +70,7 @@ gradle -PgameDir="<Necesse 설치 폴더>" clean buildModJar check
 
 **새 그리기** (N34 유리 블럭·채운 정도의 띠, 일반 벽인 밸브의 모습 — 실제 클라이언트에서 확인하지 않음)
 
-- [ ] 인식된 탱크의 유리 블럭이 벽 윗면 높이(타일보다 16 px 위)의 유리 천장으로 그려지는지 봅니다. 이웃한 유리 블럭이 한 장의 판으로 이어지고 테두리는 판의 바깥 가장자리에만 있는지, 첫 내부 줄의 테두리가 북쪽 벽의 위 가장자리에 닿는지, 아래의 유체가 비쳐 보이는지 봅니다.
-- [ ] 탱크를 채우며 북쪽 벽 안쪽 면의 띠가 채운 비율만큼 올라오는지(가득 차면 북쪽 벽 앞면 전체), 바닥 유체처럼 물결 셰이더로 움직이는지, 원유는 단색 띠인지 봅니다. 양이 0인 탱크와 구조가 깨져 비활성인 탱크에는 띠가 없는지 봅니다.
-- [ ] 짓는 중인 탱크의 내부나 탱크 밖에 놓은 유리 블럭이 바닐라 벽 모양의 비쳐 보이는 유리 벽으로 그려지는지 봅니다. 벽·바위·다른 유리 블럭·탱크 부품 쪽으로는 이어지고 가구·문·파이프 쪽으로는 이어지지 않는지, 빛과 플레이어·커서가 뒤에 있을 때 흐려지는 것이 바닐라 벽과 같은지 봅니다.
-- [ ] 탱크의 북쪽 벽 앞면 위에 커서를 두면 첫 내부 줄의 유리 블럭이 가리켜지는지(마우스 오버 영역이 그린 위치를 따름) 봅니다. 탱크 툴팁은 커서가 있는 타일 기준이라 내부 칸 위에서 나오고 북쪽 벽 앞면 위에서는 나오지 않는지 봅니다.
+- 유리 천장·유리 벽·채운 정도의 띠·마우스 오버 영역: 아래 [코드의 TODO(game) 전체](#코드의-todogame-전체)의 '유리 블럭'·'탱크의 유체와 채운 정도의 띠' 항목.
 - [ ] 유리 블럭을 들고 인식된 탱크의 내부와 그 밖을 가리키면, 설치 미리보기가 각각 유리 천장과 유리 벽 모습인지 봅니다. 아이템 아이콘은 그대로인지 봅니다.
 - [ ] 공학 렌치로 공유 벽의 밸브(일반 벽)를 가리켜도 툴팁이 없는지 봅니다.
 
@@ -83,20 +81,20 @@ gradle -PgameDir="<Necesse 설치 폴더>" clean buildModJar check
 
 ### 코드의 TODO(game) 전체
 
-코드의 `TODO(game)` 주석 8곳과 [numbers.md](docs/fluid-logistics/numbers.md) 미결 목록의 note '구현 N34 반영'(①~④)을 옮긴 것입니다. 같은 확인을 가리키는 주석은 한 항목으로 합치고 출처를 모두 적었습니다.
+코드의 `TODO(game)` 주석 8곳을 옮긴 것이고, 게임 안에서 확인할 항목은 이 목록이 정본입니다. 같은 확인을 가리키는 주석은 한 항목으로 합치고 출처를 모두 적었습니다.
 
 **유리 블럭**
 
-- [ ] 유리 천장: 올린 판과 북쪽 벽의 위 가장자리에 닿는 테두리, 이어진 판의 이음매, 천장의 빛(판은 자기 칸 위로 32 px까지 그리지만 자기 칸의 빛을 씀)이 자연스러운지.
-  출처: `src/main/java/devp0tion/mechanics/objects/GlassBlockObject.java` (`GlassBlockObject` 클래스 주석), numbers.md ①
+- [ ] 유리 천장: 인식된 탱크의 유리 블럭이 벽 윗면 높이(타일보다 16 px 위)의 판으로 그려지고, 이웃한 판이 한 장으로 이어져 테두리가 판의 바깥 가장자리에만 있는지. 올린 판과 북쪽 벽의 위 가장자리에 닿는 테두리, 이어진 판의 이음매, 천장의 빛(판은 자기 칸 위로 32 px까지 그리지만 자기 칸의 빛을 씀)이 자연스러운지.
+  출처: `src/main/java/devp0tion/mechanics/objects/GlassBlockObject.java` (`GlassBlockObject` 클래스 주석)
 - [ ] 유리 천장 판 아래로 물결 셰이더의 바닥 유체와 채운 정도의 띠가 제대로 비쳐 보이는지.
-  출처: `GlassBlockObject.java` (`GlassBlockObject` 클래스 주석, 'the pane over the shader fluid and the band'), `src/main/java/devp0tion/mechanics/client/TankFluidRendering.java` (`TankFluidRendering` 클래스 주석, 'the glass ceiling on top'), numbers.md ①
+  출처: `GlassBlockObject.java` (`GlassBlockObject` 클래스 주석, 'the pane over the shader fluid and the band'), `src/main/java/devp0tion/mechanics/client/TankFluidRendering.java` (`TankFluidRendering` 클래스 주석, 'the glass ceiling on top')
 - [ ] 대각선으로만 이웃한 천장 유리(계단 모양 배치)에서 두 판의 테두리가 모서리끼리 만나는 모습(시트에 그 모서리 조각은 없음). 탱크용 바닥타일(아직 없음) 위에서만 생기는 배치라, 지금은 만들 수 없을 수 있습니다.
-  출처: `src/main/java/devp0tion/mechanics/core/GlassBlockSprites.java` (`GlassBlockSprites` 클래스 주석, 천장 조각 고르기), numbers.md ①
-- [ ] 유리 벽: 바닐라 벽·바위·가구 옆의 모습, 투명도, 빛, 흐려지기. 위아래로 쌓인 두 유리 벽 사이의 줄이 아래 유리 블럭의 빛과 정렬로 그려져도 어색하지 않은지.
-  출처: `GlassBlockObject.java` (`GlassBlockObject` 클래스 주석), numbers.md ②
-- [ ] 마우스 오버 영역: 유리 벽은 타일과 그 위 16 px, 유리 천장은 올린 판(테두리가 있으면 테두리까지)을 따르는지.
-  출처: `GlassBlockObject.java` (`GlassBlockObject` 클래스 주석, 'the hover areas'), numbers.md ④
+  출처: `src/main/java/devp0tion/mechanics/core/GlassBlockSprites.java` (`GlassBlockSprites` 클래스 주석, 천장 조각 고르기)
+- [ ] 유리 벽: 짓는 중인 탱크의 내부나 탱크 밖에 놓은 유리 블럭이 바닐라 벽 모양의 비쳐 보이는 유리 벽으로 그려지는지. 벽·바위·다른 유리 블럭·탱크 부품 쪽으로는 이어지고 가구·문·파이프 쪽으로는 이어지지 않는지. 바닐라 벽·바위·가구 옆의 모습, 투명도, 빛, 흐려지기(플레이어·커서가 뒤에 있을 때 바닐라 벽과 같은지). 위아래로 쌓인 두 유리 벽 사이의 줄이 아래 유리 블럭의 빛과 정렬로 그려져도 어색하지 않은지.
+  출처: `GlassBlockObject.java` (`GlassBlockObject` 클래스 주석)
+- [ ] 마우스 오버 영역: 유리 벽은 타일과 그 위 16 px, 유리 천장은 올린 판(테두리가 있으면 테두리까지)을 따르는지 — 탱크의 북쪽 벽 앞면 위에 커서를 두면 첫 내부 줄의 유리 블럭이 가리켜지는지. 탱크 툴팁은 커서가 있는 타일 기준이라 내부 칸 위에서 나오고 북쪽 벽 앞면 위에서는 나오지 않는지.
+  출처: `GlassBlockObject.java` (`GlassBlockObject` 클래스 주석, 'the hover areas')
 
 **탱크의 유체와 채운 정도의 띠**
 
@@ -104,10 +102,10 @@ gradle -PgameDir="<Necesse 설치 폴더>" clean buildModJar check
   출처: `TankFluidRendering.java` (`TankFluidRendering` 클래스 주석)
 - [ ] 탱크 바닥 유체가 바닐라 액체 타일의 깊은 물 모습으로 보이는지(`FLUID_HEIGHT` = `LiquidManager.minDepth`).
   출처: `TankFluidRendering.java` (`FLUID_HEIGHT` 필드 주석, `TankFluidRendering` 클래스 주석의 'the deep look')
-- [ ] 채운 정도의 띠: 타일 단계 밖에서 켠 물결 셰이더가 제대로 도는지, 띠 높이로 자른 물 스프라이트가 어색하지 않은지.
-  출처: `TankFluidRendering.java` (`TankFluidRendering` 클래스 주석), numbers.md ③
+- [ ] 채운 정도의 띠: 탱크를 채우며 북쪽 벽 안쪽 면의 띠가 채운 비율만큼 올라오는지(가득 차면 북쪽 벽 앞면 전체), 원유는 단색 띠인지, 양이 0인 탱크와 구조가 깨져 비활성인 탱크에는 띠가 없는지. 타일 단계 밖에서 켠 물결 셰이더가 제대로 도는지, 띠 높이로 자른 물 스프라이트가 어색하지 않은지.
+  출처: `TankFluidRendering.java` (`TankFluidRendering` 클래스 주석)
 - [ ] 채운 정도의 띠의 색과 빛: 셰이더가 정점 색에 곱한 빛을 써서 띠가 첫 내부 칸의 빛만큼 어두워지는지(어두운 곳에서 바닥 유체와 같은 밝기인지), 북쪽 벽 앞면 위에서 셰이더의 투명도가 어떻게 보이는지.
-  출처: `TankFluidRendering.java` (`addFillBand` 메서드 주석, `TankFluidRendering` 클래스 주석의 'its colour and light'), numbers.md ③
+  출처: `TankFluidRendering.java` (`addFillBand` 메서드 주석, `TankFluidRendering` 클래스 주석의 'its colour and light')
 
 **파이프**
 
