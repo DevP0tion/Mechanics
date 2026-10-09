@@ -34,6 +34,11 @@ tankinteriortip=Cannot be placed inside a recognized tank.
 glassblocktip=Inside a recognized tank, only glass blocks can be placed.
 // Pump wire rule (N11-3), in the item descriptions (N11-6); the sources rule (N17-1) is gone with N36-8.
 pumpwiretip=Stops working while it receives a wire signal.
+// Pump form (N36-6) and how to switch it (N36-11, N36-65), in the item descriptions (N36-42, N36-54).
+// TODO(confirm): draft wording, decided later with the pump texts (N36-48).
+pumpformvalvetip=Form: valve — pulls from the tank valve behind it
+pumpformgroundtip=Form: ground — pulls from the liquid tile under it
+pumpformswitchtip=Right click in an inventory slot: switch the form
 // Wrench controls (12-8, 13-4, 13-5; wording N33-17, N33-22), the mode key (N30-5) and the tooltip preview (N30-1, N30-2).
 // [input=...] is drawn as the bound key.
 mechanicswrenchtip=Left click: pick up a pipe. Right click on the edge area of a tile: cut or link that side. Right click on the middle area of a tile: cut or link the pipes above and below. [input=mechanicswrenchmode]: switch between basic and underground mode (underground mode picks up and links the underground pipe first). Shows underground pipes, and for the tile it points at, the pipes' fluid and links and why a right click there would be refused.
@@ -62,6 +67,9 @@ mechanicswrenchmode=Engineering Wrench: switch mode
 mechanicswrenchmodetip=Switches the held Engineering Wrench between basic and underground mode. The pipette does nothing while the wrench is held.
 // The log-fuelled pumps' interaction hint while the held logs can go into the fuel slot (N31-12).
 mechanicsaddfueltip=Add fuel
+// The pumps' right click hint in an own inventory slot (N36-65), drawn after the right mouse button.
+// TODO(confirm): draft wording (N36-48).
+mechanicspumpformtip=Switch form
 
 [misc]
 // The notice at the moment the wrench's mode switches (N30-5).

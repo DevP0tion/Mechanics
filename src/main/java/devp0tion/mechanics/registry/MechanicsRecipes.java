@@ -1,9 +1,11 @@
 package devp0tion.mechanics.registry;
 
 import devp0tion.mechanics.core.MineralTier;
+import devp0tion.mechanics.core.PumpForm;
 import devp0tion.mechanics.items.MechanicsWrenchItem;
 import devp0tion.mechanics.objects.BasicPipeObject;
 import devp0tion.mechanics.objects.MineralWallObject;
+import devp0tion.mechanics.objects.PumpObjectItem;
 import devp0tion.mechanics.objects.TankValveObjectItem;
 import devp0tion.mechanics.objects.UndergroundPipeObject;
 import necesse.engine.network.gameNetworkData.GNDItemMap;
@@ -116,6 +118,9 @@ public final class MechanicsRecipes {
             ));
         }
 
+        // Pumps: crafted as valve pumps (N36-14). The recipe's item data goes to the crafted item and
+        // to the crafting window's display item alike (vanilla Recipe), so the window shows the valve form.
+
         // Manual pump: any log 20, any stone 20 (N2-2, N3-1, N8-3).
         Recipes.registerModRecipe(new Recipe(
                 MechanicsObjects.MANUAL_PUMP,
@@ -124,7 +129,9 @@ public final class MechanicsRecipes {
                 new Ingredient[]{
                         new Ingredient("anylog", 20),
                         new Ingredient(ANY_STONE, 20)
-                }
+                },
+                false,
+                PumpObjectItem.formData(PumpForm.VALVE)
         ));
 
         // Fire pump: copper bar 10, iron bar 10 (N9-3).
@@ -135,10 +142,13 @@ public final class MechanicsRecipes {
                 new Ingredient[]{
                         new Ingredient("copperbar", 10),
                         new Ingredient("ironbar", 10)
-                }
+                },
+                false,
+                PumpObjectItem.formData(PumpForm.VALVE)
         ));
 
-        // Advanced fire pump: fire pump 1, demonic bar 10, iron bar 10 (N9-3).
+        // Advanced fire pump: fire pump 1, demonic bar 10, iron bar 10 (N9-3). The fire pump of
+        // either form (N36-66): vanilla ingredients match the item only.
         Recipes.registerModRecipe(new Recipe(
                 MechanicsObjects.ADVANCED_FIRE_PUMP,
                 1,
@@ -147,7 +157,9 @@ public final class MechanicsRecipes {
                         new Ingredient(MechanicsObjects.FIRE_PUMP, 1),
                         new Ingredient("demonicbar", 10),
                         new Ingredient("ironbar", 10)
-                }
+                },
+                false,
+                PumpObjectItem.formData(PumpForm.VALVE)
         ));
 
         // Wrench: iron bar 10 -> 1 (N9-4).

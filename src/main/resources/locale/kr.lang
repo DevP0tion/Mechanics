@@ -29,6 +29,11 @@ tankinteriortip=인식된 탱크의 내부에는 설치할 수 없습니다.
 glassblocktip=인식된 탱크의 내부에는 유리 블럭만 설치할 수 있습니다.
 // Pump wire rule (N11-3), in the item descriptions (N11-6); the sources rule (N17-1) is gone with N36-8
 pumpwiretip=와이어 신호를 받으면 작동을 멈춥니다.
+// Pump form (N36-6) and how to switch it (N36-11, N36-65), in the item descriptions (N36-42, N36-54).
+// TODO(confirm): draft wording, decided later with the pump texts (N36-48).
+pumpformvalvetip=형태: 밸브형 — 뒤의 탱크 밸브에서 끌어옴
+pumpformgroundtip=형태: 땅형 — 아래 액체 타일에서 끌어옴
+pumpformswitchtip=인벤토리 슬롯 우클릭: 형태 바꾸기
 // Wrench controls (12-8, 13-4, 13-5; wording N33-17, N33-22), the mode key (N30-5) and the tooltip preview (N30-1, N30-2).
 // [input=...] is drawn as the bound key.
 mechanicswrenchtip=좌클릭: 파이프 회수. 타일 가장자리 영역 우클릭: 그 방향 연결 또는 끊기. 타일 가운데 영역 우클릭: 같은 칸의 기본·지하 연결 또는 끊기. [input=mechanicswrenchmode]: 기본 모드와 지하 모드 전환(지하 모드에서는 회수와 방향 연결이 지하 파이프 먼저). 들고 있으면 지하 파이프가 보이고, 가리킨 칸의 파이프 유체·연결과 우클릭이 거부될 이유가 표시됩니다.
@@ -57,6 +62,9 @@ mechanicswrenchmode=공학 렌치 모드 전환
 mechanicswrenchmodetip=들고 있는 공학 렌치를 기본 모드와 지하 모드로 전환합니다. 공학 렌치를 들고 있는 동안에는 피펫이 작동하지 않습니다.
 // The log-fuelled pumps' interaction hint while the held logs can go into the fuel slot (N31-12).
 mechanicsaddfueltip=연료 넣기
+// The pumps' right click hint in an own inventory slot (N36-65), drawn after the right mouse button.
+// TODO(confirm): draft wording (N36-48).
+mechanicspumpformtip=형태 바꾸기
 
 [misc]
 // The notice at the moment the wrench's mode switches (N30-5).

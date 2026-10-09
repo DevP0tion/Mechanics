@@ -3,6 +3,7 @@ package devp0tion.mechanics.objects;
 import devp0tion.mechanics.client.PipeRendering;
 import devp0tion.mechanics.core.LinkFlags;
 import devp0tion.mechanics.core.Pump;
+import devp0tion.mechanics.core.PumpForm;
 import devp0tion.mechanics.core.PumpTier;
 import devp0tion.mechanics.pipe.PumpObjectEntity;
 import devp0tion.mechanics.tank.TankInteriorPlacement;
@@ -21,6 +22,9 @@ import necesse.gfx.gameTooltips.ListGameTooltips;
 import necesse.inventory.InventoryItem;
 import necesse.inventory.PlayerInventorySlot;
 import necesse.inventory.container.object.OEInventoryContainer;
+import necesse.inventory.item.Item;
+import necesse.inventory.lootTable.LootTable;
+import necesse.inventory.lootTable.lootItem.LootItem;
 import necesse.level.gameObject.GameObject;
 import necesse.level.maps.Level;
 import necesse.level.maps.light.GameLight;
@@ -38,7 +42,9 @@ import java.util.List;
  *     <li>Its output side is the direction the player faced when placing it, the object's rotation
  *     (N36-1, N36-10). Its form (N36-6) says where it pulls from: a ground pump from the liquid tile
  *     under it, a valve pump from the tank valve behind it (11-1, N36-3); may be placed on liquid,
- *     also the deep sea (11-9).</li>
+ *     also the deep sea (11-9). The form is the item's data, switched in the inventory
+ *     ({@link PumpObjectItem}, N36-11); picking the pump up drops an item of its form
+ *     ({@link #getLootTable}), so form and direction change only by placing it again (N36-7, N36-12).</li>
  *     <li>Placement is rejected inside a recognized tank (N16-1); the item description says so
  *     (N11-6). No source, or a source of another fluid, refuses nothing (N36-15, N36-16, N36-53,
  *     replacing N17-1, N36-8). Placing the same pump over a placed one with another rotation does
@@ -53,8 +59,8 @@ import java.util.List;
  *     <li>Pushes only into the basic pipe in front of it, or into the tank of the valve in front of it
  *     (9-3, 9-9, N36-1, N36-4). Cut links to valves are drawn on the pump (N16-4).</li>
  * </ul>
- * Texture {@code objects/<stringID>.png}: one 32x64 sprite like the tank parts; item icon
- * {@code items/<stringID>.png} (drawn by {@code tools/textures/draw_pipes_pumps.py}).
+ * Texture {@code objects/<stringID>.png}: one 32x64 sprite like the tank parts; item icons per form
+ * {@code items/<stringID>.png} (valve) and {@code items/<stringID>ground.png} (ground, N36-39).
  * A full-tile block like the tank parts: it blocks movement (N31-1) and is mined with any pickaxe,
  * tier 0, the engine default (N31-2).
  */
@@ -94,8 +100,24 @@ public class PumpObject extends GameObject {
     }
 
     @Override
+    public Item generateNewObjectItem() {
+        return new PumpObjectItem(this);
+    }
+
+    @Override
     public ObjectEntity getNewObjectEntity(Level level, int x, int y) {
         return new PumpObjectEntity(level, x, y, tier);
+    }
+
+    /** The picked-up pump keeps its form (N36-7, N36-12): placed again, it gets a new direction. */
+    @Override
+    public LootTable getLootTable(Level level, int layerID, int tileX, int tileY) {
+        PumpObjectEntity pump = getCurrentObjectEntity(level, tileX, tileY, PumpObjectEntity.class);
+        if (pump == null) {
+            return super.getLootTable(level, layerID, tileX, tileY);
+        }
+        return new LootTable(new LootItem(getStringID(), PumpObjectItem.formData(pump.getForm()))
+                .preventLootMultiplier());
     }
 
     // ------------------------------------------------------------------ interaction
@@ -214,6 +236,10 @@ public class PumpObject extends GameObject {
     @Override
     public ListGameTooltips getItemTooltips(InventoryItem item, PlayerMob perspective) {
         ListGameTooltips tooltips = super.getItemTooltips(item, perspective);
+        // The form and how to switch it (N36-42, N36-54); no direction line.
+        boolean valve = PumpObjectItem.getForm(item) == PumpForm.VALVE;
+        tooltips.add(Localization.translate("itemtooltip", valve ? "pumpformvalvetip" : "pumpformgroundtip"), 400);
+        tooltips.add(Localization.translate("itemtooltip", "pumpformswitchtip"), 400);
         // Placement rejection rule (N11-6): not inside a recognized tank (N16-1); the sources rule
         // (N17-1) is gone with N36-8. The wire rule for tier 2 and up (N11-3).
         tooltips.add(TankInteriorPlacement.rejectedTooltip(), 400);
