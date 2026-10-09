@@ -1,17 +1,12 @@
 package devp0tion.mechanics.objects;
 
 import devp0tion.mechanics.client.PipeRendering;
-import devp0tion.mechanics.core.Direction;
-import devp0tion.mechanics.core.FluidType;
 import devp0tion.mechanics.core.LinkFlags;
 import devp0tion.mechanics.core.Pump;
+import devp0tion.mechanics.core.PumpForm;
 import devp0tion.mechanics.core.PumpTier;
-import devp0tion.mechanics.pipe.LevelLiquidTileLookup;
 import devp0tion.mechanics.pipe.PumpObjectEntity;
-import devp0tion.mechanics.tank.TankControllerObjectEntity;
 import devp0tion.mechanics.tank.TankInteriorPlacement;
-import devp0tion.mechanics.tank.TankRegistry;
-import devp0tion.mechanics.tank.TankValveObjectEntity;
 import necesse.engine.gameLoop.tickManager.TickManager;
 import necesse.engine.localization.Localization;
 import necesse.engine.registries.ContainerRegistry;
@@ -27,13 +22,15 @@ import necesse.gfx.gameTooltips.ListGameTooltips;
 import necesse.inventory.InventoryItem;
 import necesse.inventory.PlayerInventorySlot;
 import necesse.inventory.container.object.OEInventoryContainer;
+import necesse.inventory.item.Item;
+import necesse.inventory.lootTable.LootTable;
+import necesse.inventory.lootTable.lootItem.LootItem;
 import necesse.level.gameObject.GameObject;
 import necesse.level.maps.Level;
 import necesse.level.maps.light.GameLight;
 
 import java.awt.Color;
 import java.awt.Rectangle;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -42,10 +39,16 @@ import java.util.List;
  * {@link Pump}.
  *
  * <ul>
- *     <li>Pulls from the liquid tile under it and from tank valves linked to its sides (11-1,
- *     N16-3); may be placed on liquid, also the deep sea (11-9).</li>
- *     <li>Placement is rejected when the sources it would connect hold different fluids (N17-1),
- *     and inside a recognized tank (N16-1); the item description says so (N11-6).</li>
+ *     <li>Its output side is the direction the player faced when placing it, the object's rotation
+ *     (N36-1, N36-10). Its form (N36-6) says where it pulls from: a ground pump from the liquid tile
+ *     under it, a valve pump from the tank valve behind it (11-1, N36-3); may be placed on liquid,
+ *     also the deep sea (11-9). The form is the item's data, switched in the inventory
+ *     ({@link PumpObjectItem}, N36-11); picking the pump up drops an item of its form
+ *     ({@link #getLootTable}), so form and direction change only by placing it again (N36-7, N36-12).</li>
+ *     <li>Placement is rejected inside a recognized tank (N16-1); the item description says so
+ *     (N11-6). No source, or a source of another fluid, refuses nothing (N36-15, N36-16, N36-53,
+ *     replacing N17-1, N36-8). Placing the same pump over a placed one with another rotation does
+ *     not replace it: it is picked up first (N36-12, N36-33; not in the description, N36-43).</li>
  *     <li>The manual pump pumps once per click (interact, 11-3). The log-fuelled pumps take logs
  *     both ways (N31-4): right clicked while the player holds logs that can go into their fuel
  *     slot, they take as many of them as fit from the held stack; otherwise, also while holding
@@ -53,11 +56,11 @@ import java.util.List;
  *     their fuel slot window (N31-11). The interaction hint reads "연료 넣기" / "Add fuel" while
  *     the held logs can go in, else the vanilla "Open" (N31-12). They are switched off by a wire
  *     signal (11-3, N11-3, in the item description).</li>
- *     <li>Pushes only into adjacent basic pipes (9-3, 9-9). Cut links to valves are drawn on the
- *     pump (N16-4).</li>
+ *     <li>Pushes only into the basic pipe in front of it, or into the tank of the valve in front of it
+ *     (9-3, 9-9, N36-1, N36-4). Cut links to valves are drawn on the pump (N16-4).</li>
  * </ul>
- * Texture {@code objects/<stringID>.png}: one 32x64 sprite like the tank parts; item icon
- * {@code items/<stringID>.png} (drawn by {@code tools/textures/draw_pipes_pumps.py}).
+ * Texture {@code objects/<stringID>.png}: one 32x64 sprite like the tank parts; item icons per form
+ * {@code items/<stringID>.png} (valve) and {@code items/<stringID>ground.png} (ground, N36-39).
  * A full-tile block like the tank parts: it blocks movement (N31-1) and is mined with any pickaxe,
  * tier 0, the engine default (N31-2).
  */
@@ -65,9 +68,6 @@ public class PumpObject extends GameObject {
 
     /** The interaction hint while held logs can go into the fuel slot, {@code [controls]} (N31-12). */
     public static final String ADD_FUEL_TIP = "mechanicsaddfueltip";
-
-    /** canPlace error when the sources would hold different fluids (N17-1). */
-    public static final String MIXED_SOURCES_ERROR = "pumpmixedsources";
 
     private final PumpTier tier;
     private final String textureName;
@@ -84,6 +84,8 @@ public class PumpObject extends GameObject {
         canPlaceOnLiquid = true;
         canPlaceOnShore = true;
         showsWire = tier.isWireControllable();
+        // N36-33: no vanilla replacement of a placed pump by the same pump with another rotation (N36-12).
+        replaceRotations = false;
     }
 
     public PumpTier getTier() {
@@ -98,44 +100,24 @@ public class PumpObject extends GameObject {
     }
 
     @Override
+    public Item generateNewObjectItem() {
+        return new PumpObjectItem(this);
+    }
+
+    @Override
     public ObjectEntity getNewObjectEntity(Level level, int x, int y) {
         return new PumpObjectEntity(level, x, y, tier);
     }
 
-    // ------------------------------------------------------------------ placement (N17-1)
-
+    /** The picked-up pump keeps its form (N36-7, N36-12): placed again, it gets a new direction. */
     @Override
-    public String canPlace(Level level, int layerID, int x, int y, int rotation, boolean byPlayer, boolean ignoreOtherLayers) {
-        String error = super.canPlace(level, layerID, x, y, rotation, byPlayer, ignoreOtherLayers);
-        if (error != null) {
-            return error;
+    public LootTable getLootTable(Level level, int layerID, int tileX, int tileY) {
+        PumpObjectEntity pump = getCurrentObjectEntity(level, tileX, tileY, PumpObjectEntity.class);
+        if (pump == null) {
+            return super.getLootTable(level, layerID, tileX, tileY);
         }
-        return Pump.canConnectSources(sourceFluidsIfPlaced(level, x, y)) ? null : MIXED_SOURCES_ERROR;
-    }
-
-    /**
-     * The fluids of the sources a pump placed at the tile would connect: the liquid tile under it
-     * and the tanks of the valves next to it whose side toward it is not cut. A valve that is a plain
-     * wall (N33-1) works for no tank: it holds nothing here, so the pump may be placed whatever it
-     * held, and it connects as a source skipped while it is a plain wall (N35-1). Both
-     * sides read the same synced state (valve flags, the controllers' kept tanks, recognition and
-     * fluid view); the server's answer is final and a rejected client prediction is corrected
-     * ({@code PlacementCorrection}).
-     */
-    public static List<FluidType> sourceFluidsIfPlaced(Level level, int x, int y) {
-        List<FluidType> fluids = new ArrayList<>();
-        if (level.regionManager.isTileLoaded(x, y)) {
-            fluids.add(LevelLiquidTileLookup.fluidAt(level, x, y));
-        }
-        for (Direction d : Direction.values()) {
-            TankValveObjectEntity valve = level.entityManager.getObjectEntity(x + d.dx, y + d.dy, TankValveObjectEntity.class);
-            if (valve == null || !LinkFlags.isSideOpen(valve.getLinks(), d.opposite())) {
-                continue;
-            }
-            TankControllerObjectEntity controller = TankRegistry.valveRole(level, x + d.dx, y + d.dy).getTank();
-            fluids.add(controller == null ? null : controller.getFluid());
-        }
-        return fluids;
+        return new LootTable(new LootItem(getStringID(), PumpObjectItem.formData(pump.getForm()))
+                .preventLootMultiplier());
     }
 
     // ------------------------------------------------------------------ interaction
@@ -254,9 +236,12 @@ public class PumpObject extends GameObject {
     @Override
     public ListGameTooltips getItemTooltips(InventoryItem item, PlayerMob perspective) {
         ListGameTooltips tooltips = super.getItemTooltips(item, perspective);
-        // Placement rejection rules (N11-6): sources of different fluids (N17-1); not inside a
-        // recognized tank (N16-1). The wire rule for tier 2 and up (N11-3).
-        tooltips.add(Localization.translate("itemtooltip", "pumpsourcestip"), 400);
+        // The form and how to switch it (N36-42, N36-54); no direction line.
+        boolean valve = PumpObjectItem.getForm(item) == PumpForm.VALVE;
+        tooltips.add(Localization.translate("itemtooltip", valve ? "pumpformvalvetip" : "pumpformgroundtip"), 400);
+        tooltips.add(Localization.translate("itemtooltip", "pumpformswitchtip"), 400);
+        // Placement rejection rule (N11-6): not inside a recognized tank (N16-1); the sources rule
+        // (N17-1) is gone with N36-8. The wire rule for tier 2 and up (N11-3).
         tooltips.add(TankInteriorPlacement.rejectedTooltip(), 400);
         if (tier.isWireControllable()) {
             tooltips.add(Localization.translate("itemtooltip", "pumpwiretip"), 400);

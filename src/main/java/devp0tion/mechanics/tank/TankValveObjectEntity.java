@@ -41,15 +41,15 @@ import java.util.Objects;
  *     with it as a wall. Like a wall it shows
  *     nothing about it (decided, as the wrench's N33-15): the valve has no hover tooltip of its own,
  *     and the wrench shows none on it.</li>
- *     <li>In the level's pipe grid (server): a new valve's link toward a pump already next to it
- *     starts cut (N13-3, N16-3); its link flags (sides and the underground pipe on its tile) are
+ *     <li>In the level's pipe grid (server): a new valve next to a pump is linked to it at once
+ *     (N36-17, N36-18, replacing the cut start of N13-3 and N16-3, N36-22); its link flags (sides and the underground pipe on its tile) are
  *     saved and synced to clients, which draw cut faces (N16-4). Its tank is looked up every tick
  *     by the pipe system's systems. While its region loads, the engine's fresh entity registers
  *     nothing: the saved entity replaces it, or the region's loaded event registers it (A1, as basic
  *     pipes and pumps). When its region unloads, or the engine only replaces this entity with
  *     another one of the same valve (region loading, placement, {@link PipeSystem#isReplacedEntity}),
- *     it leaves the grid but the pumps next to it keep it as a source; only a removed valve stops
- *     being one.</li>
+ *     it leaves the grid: the valve pump in front of it has no source until it is back (N36-58), and
+ *     only a removed valve stops being its source for good.</li>
  * </ul>
  * TODO(design): automatic output from the valve is TODO (N7-3).
  */

@@ -61,10 +61,10 @@ final class WrenchInfoTextTest {
     public static void testTheRefusalReasonComesLastAsAWarning() {
         WrenchInfoText.PipeSection pipe = new WrenchInfoText.PipeSection("철 파이프", true, null, 0, 0);
         List<WrenchInfoText.Line> lines = WrenchInfoText.build(Collections.singletonList(pipe),
-                WrenchRefusal.DIFFERENT_SOURCE_FLUID, KR::ui);
+                WrenchRefusal.PUMP_SIDE, KR::ui);
         WrenchInfoText.Line last = lines.get(lines.size() - 1);
         Check.isTrue(last.warning, "warning");
-        Check.equal(KR.ui("mechanicswrenchsourcefluid"), last.text, "N16-3 reason (N30-1)");
+        Check.equal(KR.ui("mechanicswrenchpumpside"), last.text, "N36-61 reason (N30-1)");
         for (int i = 0; i < lines.size() - 1; i++) {
             Check.isFalse(lines.get(i).warning, "only the reason is a warning");
         }

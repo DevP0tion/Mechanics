@@ -1,7 +1,5 @@
 package devp0tion.mechanics.core;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -15,28 +13,32 @@ import java.util.Set;
  * one cycle's amount. It only pulls what its destinations can take, so the storage is normally
  * empty between cycles.
  *
- * <h2>Sources (11-1, N16-3, N17-1~N17-3, N19-1, N19-3, N20-3~N20-5)</h2>
- * The pump keeps its connected sources in the order they were connected ({@link #getSourceSlots()}):
- * the liquid tile under it ({@link LiquidTileSource}, registered when it is placed on liquid) and the
- * tanks of tank valves linked to its sides. It pulls from the first one that is not empty and moves
- * on to the next when that one is empty (N19-1). The connected sources hold the same fluid or are
- * empty when they are connected ({@link #canConnectSources}); a source that was empty when connected
- * and fills with another fluid later stays connected (N17-3).
- * <p>The pump pulls only the baseline fluid and sums only the sources holding it (N17-2, N20-3). The
- * baseline is the fluid in the pipe cell the pump pushes into, its output cell
- * ({@link PipeGrid#getOutputFluids}), read per cell and never from the network (N20-5). When the
- * output cells are empty, the pump takes the sources in pull order (N19-1) and the first fluid that
- * enters becomes the baseline. A source holding another fluid, or a fluid the pump's tier cannot move
- * (12-6, N20-4), is dormant: it stays connected, nothing is pulled from it, and it never stops the
- * pump, which pulls from the sources it can use.
- * A valve placed next to a pump later starts with its link cut, so the pump keeps its sources
- * (N13-3, N16-3); the wrench links and cuts valves ({@link PipeGrid#toggleSide}). A valve switched
- * off by a wire signal is no source while it is off: nothing is pulled through it (N27-4).
- * A valve that is a plain wall (N33-1) is handled the same way (N35-1, replacing N33-16, N33-21 and
- * N33-23): its slot keeps its place in the pull order and nothing is pulled through it while it is
- * a plain wall ({@link PipeGrid#isPumpValveLinked}); when it is a valve again it is pulled from in
- * that place, dormant like any other source while its tank holds another fluid than the baseline
- * (N17-3, N20-3).
+ * <h2>Output and form (N36)</h2>
+ * A pump has an output side, its front ({@link #front}: the engine's placement rotation, N36-10),
+ * and a form ({@link PumpForm}, chosen with the item, N36-6, N36-11), both kept until it is picked up
+ * (N36-7, N36-12; a cheat that turns a placed pump is followed, N36-36). It links only on its front
+ * and, as a valve pump, on its back ({@link #accepts}): it pushes only into the basic pipe in front
+ * of it (N36-1) or, without pipes, into the tank of the valve in front of it (N36-4); its other sides
+ * link to nothing, like a wall (N36-2, N36-5, N36-20).
+ *
+ * <h2>Its source (11-1, N36-3, N36-6, N36-15, N36-16, N36-20, N19-3, N20-3~N20-5)</h2>
+ * One source at most, by its form (N36-6; the several sources of N16-3 and N17-1 are replaced, N36-8):
+ * a ground pump pulls from the liquid tile under it ({@link LiquidTileSource}; on land it gives nothing
+ * until the tile is liquid, N36-15, N36-21, N36-28), a valve pump from the tank of the valve linked
+ * behind it ({@link PipeGrid#isPumpValveLinked}, N36-3; none without such a valve, N36-16, or while
+ * the valve's region is not loaded, N36-58). The source of the other form is not linked, like a wall
+ * (N36-20). A pump is placed wherever the base layer is free: no source, or a source of another fluid,
+ * refuses nothing (N36-15, N36-16, N36-53).
+ * <p>The pump pulls only the baseline fluid (N20-3). The baseline is the fluid in the basic pipe in
+ * front of it, its output cell ({@link PipeGrid#getOutputFluids}), read per cell and never from the
+ * network (N20-5); with an empty output cell, a valve in front or nothing there, it is the source's
+ * fluid (N36-46, N36-53). A source holding another fluid, or a fluid the pump's tier cannot move
+ * (12-6, N20-4), is dormant: it stays linked and nothing is pulled from it (N20-3; N36-19, N36-24 and
+ * N36-26 as N36-53 sums them up).
+ * A valve placed behind a valve pump later is its source at once (N36-17, replacing the cut start of
+ * N16-3, N36-22), unless the pump's flag toward it was cut (N16-4, N36-23). A valve switched off by a
+ * wire signal is no source while it is off: nothing is pulled through it (N27-4). A valve that is a
+ * plain wall (N33-1) is no source while it is one and the source again once it is a valve (N35-1).
  *
  * <h2>One cycle</h2>
  * <ol>
@@ -54,7 +56,6 @@ import java.util.Set;
  * next tick (N28-21); the log-fueled pumps run one every 20 ticks, on the engine's global push tick
  * (N6-1, N6-3, N28-16; {@link #advanceTimers}); a cycle that cannot run is tried again at the next
  * one. The pipe engine's systems drive every pump ({@link PipeGrid#runTick}, N22-5).
- * A pump's speed does not depend on how many sources it has (N18-1).
  *
  * <p>Wire (11-3, N11-3): from tier 2 up a wire signal switches the pump off; the game maps the
  * signal to {@link #setEnabled}.
@@ -69,47 +70,10 @@ public class Pump extends LiquidStorage {
         boolean consumeLog();
     }
 
-    /** One connected source: the liquid tile under the pump, or the valve on one side. */
-    public static final class SourceSlot {
-        /** The liquid tile under the pump (11-1 ①). */
-        public static final SourceSlot TILE = new SourceSlot(null);
-        private static final SourceSlot[] SIDES = {
-                new SourceSlot(Direction.NORTH), new SourceSlot(Direction.EAST),
-                new SourceSlot(Direction.SOUTH), new SourceSlot(Direction.WEST)};
-
-        /** The side of the valve, or {@code null} for the tile. */
-        public final Direction direction;
-
-        private SourceSlot(Direction direction) {
-            this.direction = direction;
-        }
-
-        /** The valve on the given side (11-1 ②). */
-        public static SourceSlot valve(Direction direction) {
-            return SIDES[direction.ordinal()];
-        }
-
-        /** For saving: -1 for the tile, else the direction ordinal. */
-        public int code() {
-            return direction == null ? -1 : direction.ordinal();
-        }
-
-        /** The slot of a saved code, or {@code null} for an unknown code. */
-        public static SourceSlot fromCode(int code) {
-            if (code == -1) {
-                return TILE;
-            }
-            return code >= 0 && code < SIDES.length ? SIDES[code] : null;
-        }
-
-        @Override
-        public String toString() {
-            return direction == null ? "TILE" : direction.toString();
-        }
-    }
-
     private final PumpTier tier;
-    private final List<SourceSlot> sourceSlots = new ArrayList<>();
+    /** The output side (N36-1): the engine's placement rotation (N36-10). */
+    private Direction direction = Direction.NORTH;
+    private PumpForm form = PumpForm.GROUND;
     private FluidSource tileSource;
     private FuelSupply fuel;
     private boolean enabled = true;
@@ -137,144 +101,104 @@ public class Pump extends LiquidStorage {
         return tier;
     }
 
-    // ------------------------------------------------------------------ sources
+    // ------------------------------------------------------------------ direction and form (N36)
 
-    /**
-     * Placement check (N17-1, replacing N11-4): a pump may be placed when every source that would be
-     * connected holds the same fluid or is empty, however many there are. Rejected when different
-     * fluids would mix.
-     *
-     * @param sourceFluids the fluids of the sources the pump would connect ({@code null} = empty)
-     */
-    public static boolean canConnectSources(Collection<FluidType> sourceFluids) {
-        FluidType seen = null;
-        for (FluidType fluid : sourceFluids) {
-            if (fluid == null) {
-                continue;
-            }
-            if (seen != null && seen != fluid) {
-                return false;
-            }
-            seen = fluid;
-        }
-        return true;
+    /** The output side (N36-1): the side it pushes out of, the engine's placement rotation (N36-10). */
+    public Direction getDirection() {
+        return direction;
     }
 
-    /** The liquid tile source (registered by the game when the pump is placed on liquid), or {@code null}. */
+    /**
+     * Sets the output side before the pump is added to a grid (the game reads it from the object's
+     * rotation); a placed pump turns through {@link PipeGrid#setPumpDirection} (N36-36).
+     */
+    public void setDirection(Direction direction) {
+        this.direction = Objects.requireNonNull(direction, "direction");
+    }
+
+    /** The form (N36-6): where it pulls from. */
+    public PumpForm getForm() {
+        return form;
+    }
+
+    /**
+     * Sets the form before the pump is added to a grid (the game reads it from the item it was
+     * placed with, N36-11); a placed pump changes it through {@link PipeGrid#setPumpForm}.
+     */
+    public void setForm(PumpForm form) {
+        this.form = Objects.requireNonNull(form, "form");
+    }
+
+    /** The side it pushes out of (N36-1). */
+    public Direction front() {
+        return direction;
+    }
+
+    /** The side opposite its output: a valve pump pulls from the valve there (N36-3). */
+    public Direction back() {
+        return direction.opposite();
+    }
+
+    /**
+     * Whether the pump links to a part of kind {@code neighbour} on its side {@code side}: in front a
+     * basic pipe, its output cell (N36-1), or a tank valve, a destination without pipes (N36-4);
+     * behind, for a valve pump only, a tank valve, its source (N36-3). Nothing else, like a wall: a
+     * basic pipe on any other side (N36-2), a valve on either side (N36-5) or behind a ground pump
+     * (N36-20).
+     */
+    public boolean accepts(Direction side, PipeGrid.Part neighbour) {
+        if (side == front()) {
+            return neighbour == PipeGrid.Part.BASIC_PIPE || neighbour == PipeGrid.Part.VALVE;
+        }
+        return side == back() && form == PumpForm.VALVE && neighbour == PipeGrid.Part.VALVE;
+    }
+
+    // ------------------------------------------------------------------ sources
+
+    /** The liquid tile source (the game gives every ground pump one, N36-21), or {@code null}. */
     public FluidSource getTileSource() {
         return tileSource;
     }
 
-    /** Sets the object behind the {@link SourceSlot#TILE} slot (the game's {@link LiquidTileSource}). */
+    /** Sets the liquid tile under the pump (the game's {@link LiquidTileSource}); a valve pump ignores it (N36-20). */
     public void setTileSource(FluidSource tileSource) {
         this.tileSource = tileSource;
     }
 
-    /** The connected sources, first connected first (N19-1). */
-    public List<SourceSlot> getSourceSlots() {
-        return Collections.unmodifiableList(sourceSlots);
-    }
-
-    /** Restores the saved source order (before the pump is added to a grid). */
-    public void setSourceSlots(Collection<SourceSlot> slots) {
-        sourceSlots.clear();
-        for (SourceSlot slot : slots) {
-            if (slot != null && !sourceSlots.contains(slot)) {
-                sourceSlots.add(slot);
-            }
-        }
-    }
-
-    /** Appends a source (connected now: last in the pull order, also when a stale entry was left). */
-    void addSourceSlot(SourceSlot slot) {
-        sourceSlots.remove(slot);
-        sourceSlots.add(slot);
-    }
-
-    /** Drops the valve slots behind its own cut sides: a cut link is no source (N16-3). */
-    void dropCutSourceSlots() {
-        for (int i = sourceSlots.size() - 1; i >= 0; i--) {
-            Direction direction = sourceSlots.get(i).direction;
-            if (direction != null && !isSideOpen(direction)) {
-                sourceSlots.remove(i);
-            }
-        }
-    }
-
-    void removeSourceSlot(SourceSlot slot) {
-        sourceSlots.remove(slot);
-    }
-
     /**
-     * The connected sources in pull order (N19-1): the liquid tile source and the tanks of the
-     * linked valves. A valve without a recognized tank gives nothing.
+     * The pump's source, at most one (N36-6): a ground pump's liquid tile, or the tank of the valve
+     * linked behind a valve pump while that valve is on (N36-3, N27-4). A valve without a recognized
+     * tank gives nothing.
      */
     public List<FluidSource> getSources() {
-        List<FluidSource> result = new ArrayList<>();
-        for (SourceSlot slot : sourceSlots) {
-            FluidSource source = resolve(slot);
-            if (source != null) {
-                result.add(source);
-            }
+        if (form == PumpForm.GROUND) {
+            return tileSource == null ? Collections.<FluidSource>emptyList() : Collections.singletonList(tileSource);
         }
-        return result;
-    }
-
-    private FluidSource resolve(SourceSlot slot) {
-        if (slot.direction == null) {
-            return tileSource;
-        }
-        TankValve valve = linkedValve(slot);
-        if (valve == null || !valve.isEnabled()) {
-            // A valve switched off by a wire signal blocks pulling too: no source while it is off,
-            // like a dormant tank (N27-4).
-            return null;
-        }
-        return valve.getTank();
+        TankValve valve = backValve();
+        // A valve switched off by a wire signal blocks pulling too: no source while it is off (N27-4).
+        TankStorage tank = valve == null || !valve.isEnabled() ? null : valve.getTank();
+        return tank == null ? Collections.<FluidSource>emptyList() : Collections.<FluidSource>singletonList(tank);
     }
 
     /**
-     * The valve behind a valve slot while it is linked, or {@code null}: no valve there now (its
-     * region is unloaded), a stale saved slot of a cut link, or a valve that is a plain wall (N33-1,
-     * skipped in its place, N35-1); a valve is a source only while it is linked (N16-3).
+     * The valve linked behind a valve pump (N36-3), or {@code null}: none there, its region not loaded
+     * (N36-58), its link cut (N16-4, N36-23), a plain wall (N33-1, N35-1), or a ground pump (N36-20).
      */
-    private TankValve linkedValve(SourceSlot slot) {
-        if (slot.direction == null || host == null || !host.isPumpValveLinked(this, slot.direction)) {
+    private TankValve backValve() {
+        if (form != PumpForm.VALVE || host == null || !host.isPumpValveLinked(this, back())) {
             return null;
         }
-        return host.getValve(x + slot.direction.dx, y + slot.direction.dy);
+        return host.getValve(x + back().dx, y + back().dy);
     }
 
     /**
-     * The tanks of the valves linked to the pump: never destinations of its own push. A valve
-     * switched off by a wire signal (no source while it is off, N27-4) still counts here, so the
-     * pump does not push into the tank it is linked to for pulling.
+     * The tank of the valve linked behind a valve pump: never a destination of its own push (N36-51).
+     * A valve switched off by a wire signal (no source while it is off, N27-4) still counts here.
      */
     List<TankStorage> getSourceTanks() {
-        List<TankStorage> result = new ArrayList<>();
-        for (SourceSlot slot : sourceSlots) {
-            TankValve valve = linkedValve(slot);
-            TankStorage tank = valve == null ? null : valve.getTank();
-            if (tank != null) {
-                result.add(tank);
-            }
-        }
-        return result;
-    }
-
-    /** The fluids stored in the connected sources (for the N16-3 and N17-1 checks); empty ones left out. */
-    List<FluidType> getSourceFluids(SourceSlot except) {
-        List<FluidType> result = new ArrayList<>();
-        for (SourceSlot slot : sourceSlots) {
-            if (slot == except) {
-                continue;
-            }
-            FluidType fluid = storedFluidOf(resolve(slot));
-            if (fluid != null) {
-                result.add(fluid);
-            }
-        }
-        return result;
+        TankValve valve = backValve();
+        TankStorage tank = valve == null ? null : valve.getTank();
+        return tank == null ? Collections.<TankStorage>emptyList() : Collections.singletonList(tank);
     }
 
     /** The fluid a source holds, also while it gives nothing (an inactive tank). */
@@ -294,36 +218,26 @@ public class Pump extends LiquidStorage {
 
     /**
      * The fluid of the cycle: what is left in the pump, else the baseline (N20-5): the fluid in the
-     * output cells, or, while they are empty, the first source in pull order (N19-1) that is not
-     * empty and holds a fluid the tier can move (N20-4). Sources of any other fluid are dormant
-     * (N20-3). {@code null} when no source can give anything.
-     * <ul>
-     *     <li>Fluid left in the pump goes first (N27-3): when it has nowhere to go, the pump stays
-     *     stopped ({@link PumpResult.Status#NO_DESTINATION}) until a place for it appears.</li>
-     *     <li>Output cells holding different fluids (N27-2): the fluid the pump last pushed stays the
-     *     baseline while at least one output cell holds it; when none does any more (or the pump
-     *     never pushed), the pump chooses as with empty output cells. The fluid only enters the
-     *     output cells that are empty or hold it.</li>
-     * </ul>
+     * output cell, or, while it is empty or the pump has none (a valve in front, or nothing), the
+     * source's fluid when it is not empty and the tier can move it (N20-4, N36-46, N36-53). A source of
+     * any other fluid is dormant (N20-3). {@code null} when the source can give nothing.
+     * Fluid left in the pump goes first (N27-3): when it has nowhere to go, the pump stays stopped
+     * ({@link PumpResult.Status#NO_DESTINATION}) until a place for it appears.
      */
     FluidType cycleFluid() {
         if (getFluid() != null) {
             return getFluid();
         }
         Set<FluidType> outputs = host.getOutputFluids(this);
-        if (outputs.size() == 1) {
+        if (!outputs.isEmpty()) {
             return outputs.iterator().next();
         }
-        if (outputs.size() > 1 && lastPushedFluid != null && outputs.contains(lastPushedFluid)) {
-            return lastPushedFluid;
-        }
-        // Empty output cells: the first fluid that enters becomes the baseline (N20-5); output
-        // cells of different fluids none of which the pump last pushed: the same choice (N27-2).
-        return firstMovableSourceFluid();
+        // No output cell, or an empty one: the first fluid that enters becomes the baseline (N20-5).
+        return movableSourceFluid();
     }
 
-    /** The fluid of the first non-empty source the tier can move, in pull order (N19-1, N20-4). */
-    private FluidType firstMovableSourceFluid() {
+    /** The fluid of the source when it is not empty and the tier can move it (N20-4), else {@code null}. */
+    private FluidType movableSourceFluid() {
         for (FluidSource source : getSources()) {
             FluidType fluid = source.getSourceFluid();
             if (fluid != null && tier.canPump(fluid) && source.getAvailable(fluid) > 0) {
@@ -355,7 +269,7 @@ public class Pump extends LiquidStorage {
         return total;
     }
 
-    /** Pulls up to {@code want} of {@code fluid}, first source first (N19-1). */
+    /** Pulls up to {@code want} of {@code fluid} from the source. */
     private void pull(FluidType fluid, int want) {
         for (FluidSource source : getSources()) {
             if (want <= 0) {
@@ -518,8 +432,10 @@ public class Pump extends LiquidStorage {
         if (host == null) {
             throw new IllegalStateException("Pump is not placed in a grid");
         }
-        // The liquid tile source searches its tiles once per cycle (N19-3, technical).
-        LiquidTileSource tiles = tileSource instanceof LiquidTileSource ? (LiquidTileSource) tileSource : null;
+        // The liquid tile source searches its tiles once per cycle (N19-3, technical); a valve pump
+        // does not use it (N36-20).
+        LiquidTileSource tiles = form == PumpForm.GROUND && tileSource instanceof LiquidTileSource
+                ? (LiquidTileSource) tileSource : null;
         if (tiles != null) {
             tiles.beginCycle();
         }
@@ -535,8 +451,8 @@ public class Pump extends LiquidStorage {
     private PumpResult runCycleSteps() {
         FluidType fluid = cycleFluid();
         if (fluid == null) {
-            // Nothing to pull: every source is empty, or holds a fluid the tier cannot move (N20-4).
-            return anySourceHasFluid() ? PumpResult.FLUID_NOT_ALLOWED : PumpResult.NO_SOURCE;
+            // Nothing to pull: the source is missing or empty, or holds a fluid the tier cannot move (N20-4).
+            return anySourceHasFluid() ? PumpResult.FLUID_NOT_ALLOWED : PumpResult.noSource(sourceDetail(null));
         }
         if (!tier.canPump(fluid)) {
             // The output cells hold a fluid the tier cannot move: every source is dormant (N20-4, N20-5).
@@ -545,10 +461,10 @@ public class Pump extends LiquidStorage {
         PushPlan plan = host.planPush(this, fluid);
         long acceptable = plan.simulate(getCapacity());
         if (acceptable == 0) {
-            return PumpResult.NO_DESTINATION;
+            return PumpResult.noDestination(host.destinationDetail(this, fluid));
         }
         if (available(fluid) == 0) {
-            return PumpResult.NO_SOURCE;
+            return PumpResult.noSource(sourceDetail(fluid));
         }
         if (tier.usesLogFuel() && burnTicksLeft == 0) {
             // A new log is lit only when the pump can run (N7-4, N18-4).
@@ -567,9 +483,44 @@ public class Pump extends LiquidStorage {
         return result;
     }
 
+    /**
+     * Why the source gives nothing (N36-44): {@code baseline} is the cycle's fluid, or {@code null}
+     * when none could be chosen. A ground pump without a liquid tile under it, or a valve pump without
+     * a linked valve behind it (or one whose tank is not recognized), has none (N36-15, N36-16,
+     * N36-58); a valve switched off by a wire signal is off (N27-4); a source of another fluid than
+     * the baseline is dormant (N20-3, N36-53); else it is empty.
+     */
+    private PumpResult.Detail sourceDetail(FluidType baseline) {
+        FluidType held;
+        if (form == PumpForm.GROUND) {
+            held = storedFluidOf(tileSource);
+            if (held == null) {
+                return PumpResult.Detail.SOURCE_MISSING;
+            }
+        } else {
+            TankValve valve = backValve();
+            if (valve == null) {
+                return PumpResult.Detail.SOURCE_MISSING;
+            }
+            if (!valve.isEnabled()) {
+                return PumpResult.Detail.SOURCE_OFF;
+            }
+            TankStorage tank = valve.getTank();
+            if (tank == null || !tank.isActive()) {
+                return PumpResult.Detail.SOURCE_MISSING;
+            }
+            held = tank.getFluid();
+            if (held == null) {
+                return PumpResult.Detail.SOURCE_EMPTY;
+            }
+        }
+        return baseline != null && held != baseline ? PumpResult.Detail.SOURCE_OTHER_FLUID
+                : PumpResult.Detail.SOURCE_EMPTY;
+    }
+
     @Override
     public String toString() {
-        return "Pump[" + tier + " " + x + "," + y + ", sources " + sourceSlots + ", " + super.toString() + "]";
+        return "Pump[" + tier + " " + x + "," + y + " " + direction + " " + form + ", " + super.toString() + "]";
     }
 
 }
