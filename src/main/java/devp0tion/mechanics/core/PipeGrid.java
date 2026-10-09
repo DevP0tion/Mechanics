@@ -203,7 +203,8 @@ public final class PipeGrid implements PumpHost {
         NOT_LOADED,
         /**
          * The wrench on a pump's side that cannot be linked (N36-9, N36-25): nothing changed, like a
-         * wall; no reason is shown (N36-45). Values are only ever appended: the game sends the ordinal.
+         * wall; no reason is shown (N36-45). The game sends the ordinal as a byte, so client and server
+         * run the same mod build: the engine compares the mods' versions when a client joins.
          */
         PUMP_SIDE_CLOSED,
         /**
@@ -1258,7 +1259,9 @@ public final class PipeGrid implements PumpHost {
      * refusal): a source of another fluid is dormant (N20-3, N36-53), a destination of another fluid
      * takes nothing (N36-56).
      * When the tile or the neighbour's tile is not loaded, nothing changes ({@link Check#NOT_LOADED}):
-     * the game loads the neighbour's region before it uses the wrench toward it.
+     * the game loads the neighbour's region before it uses the wrench toward it. A pump's side that is
+     * closed whatever is next to it ({@link #isPumpSideClosedRegardless}) is answered before the
+     * neighbour's tile is looked at, so the game asks it before it loads that region.
      * N36-9, N36-25, N36-55: on a side of a pump that cannot be linked ({@link Pump#accepts}) nothing
      * changes, like a wall: on the pump's tile, its two sides and a ground pump's back whatever is
      * there, and its front or a valve pump's back toward a part it does not link
@@ -1273,7 +1276,13 @@ public final class PipeGrid implements PumpHost {
     public Check toggleSide(int x, int y, Part part, Direction direction) {
         int nx = x + direction.dx;
         int ny = y + direction.dy;
-        if (!isTileLoaded(x, y) || !isTileLoaded(nx, ny)) {
+        if (!isTileLoaded(x, y)) {
+            return Check.NOT_LOADED;
+        }
+        if (isPumpSideClosedRegardless(x, y, part, direction)) {
+            return Check.PUMP_SIDE_CLOSED;
+        }
+        if (!isTileLoaded(nx, ny)) {
             return Check.NOT_LOADED;
         }
         End own = end(x, y, part, direction);
@@ -1323,10 +1332,10 @@ public final class PipeGrid implements PumpHost {
         int nx = x + direction.dx;
         int ny = y + direction.dy;
         if (part == Part.PUMP) {
-            Pump pump = pumps.get(key(x, y));
-            if (direction != pump.front() && !(direction == pump.back() && pump.getForm() == PumpForm.VALVE)) {
+            if (isPumpSideClosedRegardless(x, y, part, direction)) {
                 return Check.PUMP_SIDE_CLOSED;
             }
+            Pump pump = pumps.get(key(x, y));
             // The neighbour as the toggle would see it: a valve that is a plain wall is none (N33-15).
             long key = key(nx, ny);
             TankValve valve = valves.get(key);
@@ -1341,6 +1350,23 @@ public final class PipeGrid implements PumpHost {
             }
         }
         return null;
+    }
+
+    /**
+     * Whether the wrench toward this side of the pump on the tile is refused whatever is next to it
+     * (N36-9, N36-25): its two sides and a ground pump's back ({@link Check#PUMP_SIDE_CLOSED}). Read
+     * only, and it needs only the pump's own tile, so the game answers it before it loads the
+     * neighbour's region or calls that region not loaded. The front and a valve pump's back depend on
+     * the neighbour, so they are not answered here ({@code false}), nor is a part that is no pump or a
+     * tile without a loaded pump.
+     */
+    public boolean isPumpSideClosedRegardless(int x, int y, Part part, Direction direction) {
+        if (part != Part.PUMP || !isTileLoaded(x, y)) {
+            return false;
+        }
+        Pump pump = pumps.get(key(x, y));
+        return pump != null && direction != pump.front()
+                && !(direction == pump.back() && pump.getForm() == PumpForm.VALVE);
     }
 
     /**
@@ -1394,7 +1420,13 @@ public final class PipeGrid implements PumpHost {
     public Check checkToggleSide(int x, int y, Part part, Direction direction) {
         int nx = x + direction.dx;
         int ny = y + direction.dy;
-        if (!isTileLoaded(x, y) || !isTileLoaded(nx, ny)) {
+        if (!isTileLoaded(x, y)) {
+            return Check.NOT_LOADED;
+        }
+        if (isPumpSideClosedRegardless(x, y, part, direction)) {
+            return Check.PUMP_SIDE_CLOSED;
+        }
+        if (!isTileLoaded(nx, ny)) {
             return Check.NOT_LOADED;
         }
         End own = end(x, y, part, direction);

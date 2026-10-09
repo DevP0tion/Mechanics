@@ -189,6 +189,44 @@ public final class WrenchCheckTest {
         Check.equal(PipeGrid.Check.OK, ground.checkToggleSide(0, 0, PipeGrid.Part.PUMP, Direction.EAST), "its front");
     }
 
+    public static void testAPumpsClosedSidesNeedNoNeighbour() {
+        // N36-9, N36-25, N36-45: a side closed whatever is next to it is refused before the
+        // neighbour's tile is looked at, so the game neither loads that region for it nor calls it not
+        // loaded (PipeSystem.toggleSide, PacketWrenchPreviewRequest). Only the pump's tile is loaded.
+        PipeGrid grid = grid();
+        Pump pump = Fluids.valvePump(grid, 0, 0, PumpTier.FIRE, Direction.EAST);
+        grid.setTileLoadedLookup((x, y) -> x == 0 && y == 0);
+        for (Direction side : new Direction[]{Direction.NORTH, Direction.SOUTH}) {
+            Check.isTrue(grid.isPumpSideClosedRegardless(0, 0, PipeGrid.Part.PUMP, side), "a side: " + side);
+            checkClosed(grid, 0, 0, PipeGrid.Part.PUMP, side, PipeGrid.Check.PUMP_SIDE_CLOSED,
+                    "a side toward an unloaded tile: " + side);
+        }
+        // The front and a valve pump's back depend on the neighbour: not loaded, nothing changes.
+        for (Direction linked : new Direction[]{Direction.EAST, Direction.WEST}) {
+            Check.isFalse(grid.isPumpSideClosedRegardless(0, 0, PipeGrid.Part.PUMP, linked), "linkable: " + linked);
+            checkClosed(grid, 0, 0, PipeGrid.Part.PUMP, linked, PipeGrid.Check.NOT_LOADED,
+                    "a linkable side toward an unloaded tile: " + linked);
+        }
+        Check.isTrue(pump.isSideOpen(Direction.EAST) && pump.isSideOpen(Direction.WEST), "own flags unchanged");
+
+        // A ground pump's back is closed whatever is there (N36-20).
+        PipeGrid ground = grid();
+        Fluids.pump(ground, 0, 0, PumpTier.FIRE, FluidType.FRESHWATER);
+        ground.setTileLoadedLookup((x, y) -> x == 0 && y == 0);
+        Check.isTrue(ground.isPumpSideClosedRegardless(0, 0, PipeGrid.Part.PUMP, Direction.WEST), "a ground pump's back");
+        checkClosed(ground, 0, 0, PipeGrid.Part.PUMP, Direction.WEST, PipeGrid.Check.PUMP_SIDE_CLOSED,
+                "a ground pump's back toward an unloaded tile");
+        Check.isFalse(ground.isPumpSideClosedRegardless(0, 0, PipeGrid.Part.PUMP, Direction.EAST), "its front");
+
+        // Only a loaded pump's own tile answers it.
+        Check.isFalse(grid.isPumpSideClosedRegardless(0, 0, PipeGrid.Part.BASIC_PIPE, Direction.NORTH), "not a pump part");
+        Check.isFalse(grid.isPumpSideClosedRegardless(4, 4, PipeGrid.Part.PUMP, Direction.NORTH), "no pump there");
+        grid.setTileLoadedLookup((x, y) -> false);
+        Check.isFalse(grid.isPumpSideClosedRegardless(0, 0, PipeGrid.Part.PUMP, Direction.NORTH), "its tile not loaded");
+        Check.equal(PipeGrid.Check.NOT_LOADED, grid.checkToggleSide(0, 0, PipeGrid.Part.PUMP, Direction.NORTH),
+                "its tile not loaded");
+    }
+
     public static void testAPumpsClosedSidesFromTheNeighbour() {
         // N36-55: from a pipe or a valve next to the pump, toward a side of it that cannot be linked.
         PipeGrid grid = grid();

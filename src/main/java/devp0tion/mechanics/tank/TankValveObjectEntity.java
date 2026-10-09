@@ -138,8 +138,9 @@ public class TankValveObjectEntity extends ObjectEntity {
         }
         if (system != null && registered && system.getGrid().getValve(tileX, tileY) == valve) {
             if (unloading || PipeSystem.isReplacedEntity(this, objectID)) {
-                // Pumps next to it keep it as a source while its region is unloaded, and when the
-                // engine only replaces this entity with another one of the same valve.
+                // Its region unloads, or the engine only replaces this entity with another one of the
+                // same valve: the valve pump in front of it has no source while it is out and pulls
+                // from it again once it is back (N36-58).
                 system.getGrid().unloadValve(tileX, tileY);
             } else {
                 system.getGrid().removeValve(tileX, tileY);

@@ -13,6 +13,17 @@ final class ModLocaleTest {
     private ModLocaleTest() {
     }
 
+    /**
+     * The pump texts use ASCII separators only (N36-71): the em dash, the en dash and the middle dot
+     * are not in the English font atlas and are drawn as '?' (review of N36 step C), and vanilla's
+     * Korean file never uses them either.
+     */
+    private static void checkPumpSeparators(String text, String name) {
+        for (char c : new char[]{'\u2014', '\u2013', '\u00B7'}) {
+            Check.isFalse(text.indexOf(c) >= 0, name + ": no U+" + String.format("%04X", (int) c) + " in " + text);
+        }
+    }
+
     public static void testAddFuelHint() {
         Check.equal("연료 넣기", LangFile.load("kr").get("controls", "mechanicsaddfueltip"), "N31-12");
         Check.equal("Add fuel", LangFile.load("en").get("controls", "mechanicsaddfueltip"), "N31-12");
@@ -35,13 +46,18 @@ final class ModLocaleTest {
 
     public static void testPumpFormTexts() {
         // N36-42, N36-54: the form line and how to switch it in the item description, the right
-        // click hint in the inventory (N36-65); drafts (N36-48), so only their presence.
+        // click hint in the inventory (N36-65); wording settled (N36-48, N36-71): their presence and
+        // their separators.
         for (String lang : new String[]{"kr", "en"}) {
             LangFile file = LangFile.load(lang);
             for (String key : new String[]{"pumpformvalvetip", "pumpformgroundtip", "pumpformswitchtip"}) {
-                Check.isTrue(file.get("itemtooltip", key) != null, lang + " [itemtooltip] " + key);
+                String text = file.get("itemtooltip", key);
+                Check.isTrue(text != null, lang + " [itemtooltip] " + key);
+                checkPumpSeparators(text, lang + " [itemtooltip] " + key);
             }
-            Check.isTrue(file.get("controls", "mechanicspumpformtip") != null, lang + " [controls] mechanicspumpformtip");
+            String hint = file.get("controls", "mechanicspumpformtip");
+            Check.isTrue(hint != null, lang + " [controls] mechanicspumpformtip");
+            checkPumpSeparators(hint, lang + " [controls] mechanicspumpformtip");
             // Kept beside the form line (N36-54).
             Check.isTrue(file.get("itemtooltip", "pumpwiretip") != null, lang + " pumpwiretip");
             Check.isTrue(file.get("itemtooltip", "tankinteriortip") != null, lang + " tankinteriortip");
@@ -49,14 +65,14 @@ final class ModLocaleTest {
     }
 
     public static void testPumpStatusTexts() {
-        // N36-44, N36-56, N36-57, N36-67: every line of the pump window and tooltip; drafts (N36-48),
-        // so their presence and their placeholders only.
+        // N36-44, N36-56, N36-57, N36-67: every line of the pump window and tooltip; wording settled
+        // (N36-48, N36-71): their presence, their separators and their placeholders.
         for (String lang : new String[]{"kr", "en"}) {
             LangFile file = LangFile.load(lang);
             for (String key : PumpStatusText.keys()) {
                 String text = file.ui(key);
                 Check.isFalse(text.isEmpty(), lang + " [ui] " + key);
-                Check.isFalse(text.contains("\u2014"), lang + " [ui] " + key + ": no em dash");
+                checkPumpSeparators(text, lang + " [ui] " + key);
             }
             String output = file.ui(PumpStatusText.OUTPUT);
             Check.isTrue(output.contains("<direction>") && output.contains("<form>"), lang + " output line: " + output);

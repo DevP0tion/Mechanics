@@ -30,9 +30,9 @@ glassblocktip=인식된 탱크의 내부에는 유리 블럭만 설치할 수 �
 // Pump wire rule (N11-3), in the item descriptions (N11-6); the sources rule (N17-1) is gone with N36-8
 pumpwiretip=와이어 신호를 받으면 작동을 멈춥니다.
 // Pump form (N36-6) and how to switch it (N36-11, N36-65), in the item descriptions (N36-42, N36-54).
-// TODO(confirm): draft wording, decided later with the pump texts (N36-48).
-pumpformvalvetip=형태: 밸브형 — 뒤의 탱크 밸브에서 끌어옴
-pumpformgroundtip=형태: 땅형 — 아래 액체 타일에서 끌어옴
+// Wording settled with the pump texts (N36-48, N36-71).
+pumpformvalvetip=형태: 밸브형 - 뒤의 탱크 밸브에서 끌어옴
+pumpformgroundtip=형태: 땅형 - 아래 액체 타일에서 끌어옴
 pumpformswitchtip=인벤토리 슬롯 우클릭: 형태 바꾸기
 // Wrench controls (12-8, 13-4, 13-5; wording N33-17, N33-22), the mode key (N30-5) and the tooltip preview (N30-1, N30-2).
 // [input=...] is drawn as the bound key.
@@ -63,7 +63,7 @@ mechanicswrenchmodetip=들고 있는 공학 렌치를 기본 모드와 지하 �
 // The log-fuelled pumps' interaction hint while the held logs can go into the fuel slot (N31-12).
 mechanicsaddfueltip=연료 넣기
 // The pumps' right click hint in an own inventory slot (N36-65), drawn after the right mouse button.
-// TODO(confirm): draft wording (N36-48).
+// Wording settled (N36-48, N36-71).
 mechanicspumpformtip=형태 바꾸기
 
 [misc]
@@ -95,8 +95,8 @@ mechanicswrenchpumpside=펌프의 연결될 수 없는 쪽이라 바꿀 수 없�
 // (N36-57, N36-60; PumpStatusText). Line 1: <direction> is the output direction's name, <form> the form's name.
 // Line 2: what the last cycle did, "넣을 곳 없음(이유)" when there is nowhere to push (N36-56), "대기 중" until the
 // first cycle (N36-67); <fluid> is the fluid's name.
-// TODO(confirm): draft wording (N36-48).
-mechanicspumpoutput=출력 방향: <direction> · 형태: <form>
+// Wording settled (N36-48, N36-71).
+mechanicspumpoutput=출력 방향: <direction>, 형태: <form>
 mechanicspumpdirnorth=북
 mechanicspumpdireast=동
 mechanicspumpdirsouth=남
@@ -107,13 +107,13 @@ mechanicspumpwaiting=대기 중
 mechanicspumppumping=작동 중(<fluid>)
 mechanicspumpwireoff=와이어로 꺼짐
 mechanicspumpnosourceground=공급원 없음(아래에 액체 없음)
-mechanicspumpnosourcevalve=공급원 없음(뒤에 연결된 탱크 밸브 없음)
+mechanicspumpnosourcevalve=공급원 없음(뒤에 연결된 탱크 없음)
 mechanicspumpsourceoff=뒤 탱크 밸브가 와이어로 꺼짐
 mechanicspumpsourceempty=공급원 비어 있음
-mechanicspumpsourceotherfluid=공급원이 다른 유체라 비활성
-mechanicspumpfluidnotallowed=이 펌프로는 옮길 수 없는 유체
+mechanicspumpsourceotherfluid=공급원이 다른 유체로 차서 비활성
+mechanicspumpfluidnotallowed=펌프 티어가 다룰 수 없는 유체
 mechanicspumpnodestination=넣을 곳 없음(앞으로 이어진 탱크 없음)
-mechanicspumpdestinationfull=넣을 곳 없음(가득 참)
-mechanicspumpdestinationotherfluid=넣을 곳 없음(앞의 유체가 다름)
+mechanicspumpdestinationfull=넣을 곳 없음(남은 자리 없음)
+mechanicspumpdestinationotherfluid=넣을 곳 없음(앞에 다른 유체)
 mechanicspumpdestinationoff=넣을 곳 없음(앞 탱크 밸브가 와이어로 꺼짐)
 mechanicspumpnofuel=연료 없음

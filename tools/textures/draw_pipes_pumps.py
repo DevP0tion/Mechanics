@@ -1106,6 +1106,7 @@ def sheets_enlarged(sheets, scale=8):
 def check_ports(sheets):
     """The output port meets the tile edge where a pipe arm ends: outline at tile columns/rows 11 and
     20, interior between; nothing else touches the other edges except the valve type's back plate."""
+    assert DIRS == ("N", "E", "S", "W") and FORMS == ("valve", "ground")  # devp0tion.mechanics.core.PumpSprites column/row
     for kind, sheet in sheets.items():
         for row, form in enumerate(FORMS):
             for col, d in enumerate(DIRS):

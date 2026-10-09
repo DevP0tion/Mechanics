@@ -18,7 +18,7 @@ import java.util.function.Function;
  *     A ground pump and a valve pump say different things when they have no source.</li>
  * </ol>
  * The state is not saved: a new pump, a loaded one and a manual pump not clicked yet read "대기 중"
- * until their first cycle (N36-67). The wording is a draft (N36-48).
+ * until their first cycle (N36-67). The wording is settled (N36-48, N36-71).
  */
 public final class PumpStatusText {
 

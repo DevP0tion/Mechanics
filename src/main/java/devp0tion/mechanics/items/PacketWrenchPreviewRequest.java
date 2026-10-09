@@ -75,11 +75,16 @@ public class PacketWrenchPreviewRequest extends Packet {
     }
 
     /**
-     * What the side click would return ({@link PipeSystem#toggleSide}): when the neighbour's region
-     * is not loaded the click loads it first, so only a region that was never generated can be
-     * told (refused); otherwise the result cannot be known without loading it and none is given.
+     * What the side click would return ({@link PipeSystem#toggleSide}): a pump's side that is closed
+     * whatever is next to it is told first, as the click refuses it before it loads anything
+     * ({@link PipeGrid#isPumpSideClosedRegardless}). When the neighbour's region is not loaded the
+     * click loads it first, so only a region that was never generated can be told (refused);
+     * otherwise the result cannot be known without loading it and none is given.
      */
     private PipeGrid.Check checkSide(Level level, PipeGrid grid, PipeGrid.Part part, Direction d) {
+        if (grid.isPumpSideClosedRegardless(tileX, tileY, part, d)) {
+            return PipeGrid.Check.PUMP_SIDE_CLOSED;
+        }
         int x = tileX + d.dx;
         int y = tileY + d.dy;
         if (level.isTileWithinBounds(x, y) && !level.regionManager.isTileLoaded(x, y)) {

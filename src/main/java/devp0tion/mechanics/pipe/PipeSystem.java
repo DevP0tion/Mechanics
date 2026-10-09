@@ -167,8 +167,9 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
      * does that when a region loads (a fresh entity for every object, then the saved one replaces it:
      * {@code ObjectRegionLayer.loadSaveData}, {@code TileEntityList.addHidden}) and when an object is
      * placed (two entities in a row). When the object itself is removed, the tile holds another one
-     * by then. A replaced part leaves the engine as an unloaded one does: pumps keep their valve
-     * sources (N19-1), with no network rebuild.
+     * by then. A replaced part leaves the engine as an unloaded one does, with no network rebuild: a
+     * valve behind a valve pump is no source while it is out and the pump pulls from it again once it
+     * is back (N36-58).
      */
     public static boolean isReplacedEntity(ObjectEntity entity, int objectID) {
         return objectID >= 0 && entity.getLevel() != null
@@ -191,9 +192,13 @@ public class PipeSystem extends LevelData implements RegionLevelDataComponent, R
      * so its region is loaded first, as the level's object setter does: a part there would otherwise
      * not be in the engine, and its region file would undo the change when it loads. The region is
      * only loaded, never generated: when it was never generated (or does not load), nothing changes
-     * ({@link PipeGrid.Check#NOT_LOADED}).
+     * ({@link PipeGrid.Check#NOT_LOADED}). A pump's side that is closed whatever is next to it is
+     * refused first, with no region loaded ({@link PipeGrid#isPumpSideClosedRegardless}).
      */
     public PipeGrid.Check toggleSide(int tileX, int tileY, PipeGrid.Part part, Direction direction) {
+        if (grid.isPumpSideClosedRegardless(tileX, tileY, part, direction)) {
+            return PipeGrid.Check.PUMP_SIDE_CLOSED;
+        }
         int x = tileX + direction.dx;
         int y = tileY + direction.dy;
         if (level.isTileWithinBounds(x, y) && !level.regionManager.isTileLoaded(x, y)) {

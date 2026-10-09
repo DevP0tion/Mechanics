@@ -476,12 +476,24 @@ public class PumpObjectEntity extends InventoryObjectEntity {
     @Override
     public void applyContentPacket(PacketReader reader) {
         super.applyContentPacket(reader);
-        links = LinkFlags.sanitize(reader.getNextByteUnsigned());
-        // Clients only: the server's form is in the grid (setForm).
-        form = valueAt(PumpForm.values(), reader.getNextByteUnsigned(), PumpForm.GROUND);
-        status = valueAt(PumpResult.Status.values(), reader.getNextByteUnsigned(), PumpResult.Status.WAITING);
-        detail = valueAt(PumpResult.Detail.values(), reader.getNextByteUnsigned(), PumpResult.Detail.NONE);
-        stateFluid = valueAt(FluidType.values(), reader.getNextByte(), null);
+        int packetLinks = LinkFlags.sanitize(reader.getNextByteUnsigned());
+        PumpForm packetForm = valueAt(PumpForm.values(), reader.getNextByteUnsigned(), PumpForm.GROUND);
+        PumpResult.Status packetStatus = valueAt(PumpResult.Status.values(), reader.getNextByteUnsigned(),
+                PumpResult.Status.WAITING);
+        PumpResult.Detail packetDetail = valueAt(PumpResult.Detail.values(), reader.getNextByteUnsigned(),
+                PumpResult.Detail.NONE);
+        FluidType packetFluid = valueAt(FluidType.values(), reader.getNextByte(), null);
+        if (isServer()) {
+            // An admin's content packet (PacketObjectEntity.processServer): the grid owns the flags and
+            // the form (setForm; a placed pump's form changes only when it is placed again, N36-7,
+            // N36-12) and the cycles own the state, so the server keeps its own.
+            return;
+        }
+        links = packetLinks;
+        form = packetForm;
+        status = packetStatus;
+        detail = packetDetail;
+        stateFluid = packetFluid;
     }
 
     /** The value at a synced ordinal, or {@code fallback} for one out of range. */
